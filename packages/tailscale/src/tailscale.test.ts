@@ -140,7 +140,7 @@ describe("tailscale", () => {
     const layer = Layer.mergeAll(spawnerLayer, TestClock.layer());
 
     return Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         readTailscaleStatus.pipe(Effect.result, Effect.provide(layer)),
       );
       yield* Effect.yieldNow;
