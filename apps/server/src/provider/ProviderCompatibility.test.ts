@@ -1,16 +1,10 @@
-import { afterEach, describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
-import {
-  clearProviderCompatibilityCacheForTests,
-  createProviderCompatibilityAdvisory,
-  DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL,
-  enrichProviderSnapshotWithCompatibilityAdvisory,
-  GITHUB_PROVIDER_COMPATIBILITY_MAP_URL,
-  type ProviderCompatibilityDocument,
-} from "./providerCompatibility.ts";
+import * as ProviderCompatibility from "./ProviderCompatibility.ts";
 
 const codexDriver = ProviderDriverKind.make("codex");
 const claudeDriver = ProviderDriverKind.make("claudeAgent");
@@ -49,13 +43,18 @@ function jsonHttpClient(
   });
 }
 
-afterEach(() => {
-  clearProviderCompatibilityCacheForTests();
-});
+const provideCompatibility = (
+  responseForUrl: (url: string) => { readonly payload: unknown; readonly status?: number },
+) =>
+  Effect.provide(
+    ProviderCompatibility.layer.pipe(
+      Layer.provide(Layer.succeed(HttpClient.HttpClient, jsonHttpClient(responseForUrl))),
+    ),
+  );
 
 describe("provider compatibility", () => {
   it("selects policies by T3 Code version range", () => {
-    const document: ProviderCompatibilityDocument = {
+    const document: ProviderCompatibility.ProviderCompatibilityDocument = {
       version: 1,
       policies: [
         {
@@ -76,7 +75,7 @@ describe("provider compatibility", () => {
     };
 
     expect(
-      createProviderCompatibilityAdvisory({
+      ProviderCompatibility.createProviderCompatibilityAdvisory({
         driver: codexDriver,
         currentVersion: "0.130.0",
         document,
@@ -89,7 +88,7 @@ describe("provider compatibility", () => {
   });
 
   it("classifies the initial hosted compatibility policies for T3 Code 0.0.24+", () => {
-    const document: ProviderCompatibilityDocument = {
+    const document: ProviderCompatibility.ProviderCompatibilityDocument = {
       version: 1,
       policies: [
         {
@@ -133,7 +132,7 @@ describe("provider compatibility", () => {
     };
 
     const classify = (driver: ProviderDriverKind, currentVersion: string) =>
-      createProviderCompatibilityAdvisory({
+      ProviderCompatibility.createProviderCompatibilityAdvisory({
         driver,
         currentVersion,
         document,
@@ -151,7 +150,7 @@ describe("provider compatibility", () => {
   });
 
   it("matches T3 Code nightly versions against their base release policy", () => {
-    const document: ProviderCompatibilityDocument = {
+    const document: ProviderCompatibility.ProviderCompatibilityDocument = {
       version: 1,
       policies: [
         {
@@ -165,7 +164,7 @@ describe("provider compatibility", () => {
     };
 
     expect(
-      createProviderCompatibilityAdvisory({
+      ProviderCompatibility.createProviderCompatibilityAdvisory({
         driver: codexDriver,
         currentVersion: "0.129.0",
         document,
@@ -189,12 +188,9 @@ describe("provider compatibility", () => {
     };
 
     return Effect.gen(function* () {
-      const enriched = yield* enrichProviderSnapshotWithCompatibilityAdvisory(baseProvider).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          jsonHttpClient(() => ({ payload: remoteDocument })),
-        ),
-      );
+      const enriched = yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(
+        baseProvider,
+      ).pipe(provideCompatibility(() => ({ payload: remoteDocument })));
 
       expect(enriched.status).toBe("error");
       expect(enriched.compatibilityAdvisory).toMatchObject({
@@ -202,6 +198,34 @@ describe("provider compatibility", () => {
         recommendedVersion: "0.129.0",
       });
     });
+  });
+
+  it.effect("caches remote compatibility documents within the service layer", () => {
+    const remoteDocument = {
+      version: 1,
+      policies: [
+        {
+          t3CodeRange: ">=0.0.0",
+          driver: "codex",
+          recommendedRange: "<0.130.0",
+          recommendedVersion: "0.129.0",
+          ranges: [{ status: "broken", range: ">=0.130.0" }],
+        },
+      ],
+    };
+    const requestedUrls: string[] = [];
+
+    return Effect.gen(function* () {
+      yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(baseProvider);
+      yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(baseProvider);
+
+      expect(requestedUrls).toEqual([ProviderCompatibility.DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL]);
+    }).pipe(
+      provideCompatibility((url) => {
+        requestedUrls.push(url);
+        return { payload: remoteDocument };
+      }),
+    );
   });
 
   it.effect("falls back from the hosted map to the GitHub raw mirror", () => {
@@ -220,21 +244,20 @@ describe("provider compatibility", () => {
     const requestedUrls: string[] = [];
 
     return Effect.gen(function* () {
-      const enriched = yield* enrichProviderSnapshotWithCompatibilityAdvisory(baseProvider).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          jsonHttpClient((url) => {
-            requestedUrls.push(url);
-            return url === GITHUB_PROVIDER_COMPATIBILITY_MAP_URL
-              ? { payload: remoteDocument }
-              : { payload: {}, status: 404 };
-          }),
-        ),
+      const enriched = yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(
+        baseProvider,
+      ).pipe(
+        provideCompatibility((url) => {
+          requestedUrls.push(url);
+          return url === ProviderCompatibility.GITHUB_PROVIDER_COMPATIBILITY_MAP_URL
+            ? { payload: remoteDocument }
+            : { payload: {}, status: 404 };
+        }),
       );
 
       expect(requestedUrls).toEqual([
-        DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL,
-        GITHUB_PROVIDER_COMPATIBILITY_MAP_URL,
+        ProviderCompatibility.DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL,
+        ProviderCompatibility.GITHUB_PROVIDER_COMPATIBILITY_MAP_URL,
       ]);
       expect(enriched.compatibilityAdvisory).toMatchObject({ status: "broken" });
     });
@@ -258,16 +281,15 @@ describe("provider compatibility", () => {
     return Effect.gen(function* () {
       const previousOverride = process.env.T3_PROVIDER_COMPATIBILITY_MAP_URL;
       process.env.T3_PROVIDER_COMPATIBILITY_MAP_URL = "  ,  ";
-      const enriched = yield* enrichProviderSnapshotWithCompatibilityAdvisory(baseProvider).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          jsonHttpClient((url) => {
-            requestedUrls.push(url);
-            return url === DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL
-              ? { payload: remoteDocument }
-              : { payload: {}, status: 404 };
-          }),
-        ),
+      const enriched = yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(
+        baseProvider,
+      ).pipe(
+        provideCompatibility((url) => {
+          requestedUrls.push(url);
+          return url === ProviderCompatibility.DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL
+            ? { payload: remoteDocument }
+            : { payload: {}, status: 404 };
+        }),
         Effect.ensuring(
           Effect.sync(() => {
             if (previousOverride === undefined) {
@@ -279,7 +301,7 @@ describe("provider compatibility", () => {
         ),
       );
 
-      expect(requestedUrls).toEqual([DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL]);
+      expect(requestedUrls).toEqual([ProviderCompatibility.DEFAULT_PROVIDER_COMPATIBILITY_MAP_URL]);
       expect(enriched.compatibilityAdvisory).toMatchObject({ status: "broken" });
     });
   });
@@ -301,25 +323,22 @@ describe("provider compatibility", () => {
     };
 
     return Effect.gen(function* () {
-      const enriched = yield* enrichProviderSnapshotWithCompatibilityAdvisory({
-        ...baseProvider,
-        status: "error",
-        message: bundledMessage,
-        compatibilityAdvisory: {
-          status: "broken",
-          severity: "error",
-          currentVersion: "0.130.0",
+      const enriched = yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(
+        {
+          ...baseProvider,
+          status: "error",
           message: bundledMessage,
-          recommendedRange: "<0.130.0",
-          recommendedVersion: "0.129.0",
-          ranges: [{ status: "broken", range: ">=0.130.0" }],
+          compatibilityAdvisory: {
+            status: "broken",
+            severity: "error",
+            currentVersion: "0.130.0",
+            message: bundledMessage,
+            recommendedRange: "<0.130.0",
+            recommendedVersion: "0.129.0",
+            ranges: [{ status: "broken", range: ">=0.130.0" }],
+          },
         },
-      }).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          jsonHttpClient(() => ({ payload: remoteDocument })),
-        ),
-      );
+      ).pipe(provideCompatibility(() => ({ payload: remoteDocument })));
 
       expect(enriched.status).toBe("ready");
       expect(enriched.message).toBeUndefined();
@@ -329,15 +348,12 @@ describe("provider compatibility", () => {
 
   it.effect("falls back to the bundled map when the remote compatibility fetch fails", () =>
     Effect.gen(function* () {
-      const enriched = yield* enrichProviderSnapshotWithCompatibilityAdvisory({
-        ...baseProvider,
-        version: "0.128.0",
-      }).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          jsonHttpClient(() => ({ payload: {}, status: 404 })),
-        ),
-      );
+      const enriched = yield* ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory(
+        {
+          ...baseProvider,
+          version: "0.128.0",
+        },
+      ).pipe(provideCompatibility(() => ({ payload: {}, status: 404 })));
 
       expect(enriched.status).toBe("ready");
       expect(enriched.compatibilityAdvisory).toBeUndefined();

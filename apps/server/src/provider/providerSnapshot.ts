@@ -14,7 +14,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
-import { applyBundledProviderCompatibilityAdvisory } from "./providerCompatibility.ts";
+import * as ProviderCompatibility from "./ProviderCompatibility.ts";
 import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
@@ -228,7 +228,7 @@ export function buildServerProvider(input: {
     ...(versionAdvisory ? { versionAdvisory } : {}),
   };
   return input.driver
-    ? applyBundledProviderCompatibilityAdvisory({
+    ? ProviderCompatibility.applyBundledProviderCompatibilityAdvisory({
         snapshot,
         driver: input.driver,
         currentVersion: input.probe.version,

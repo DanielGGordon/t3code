@@ -46,7 +46,7 @@ import {
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
-import { enrichProviderSnapshotWithCompatibilityAdvisory } from "../providerCompatibility.ts";
+import * as ProviderCompatibility from "../ProviderCompatibility.ts";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
@@ -78,6 +78,7 @@ export type OpenCodeDriverEnv =
   | HttpClient.HttpClient
   | OpenCodeRuntime
   | Path.Path
+  | ProviderCompatibility.ProviderCompatibilityService
   | ProviderEventLoggers
   | ServerConfig;
 
@@ -110,6 +111,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
+      const providerCompatibility = yield* ProviderCompatibility.ProviderCompatibilityService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -151,8 +153,12 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(
-            Effect.flatMap(enrichProviderSnapshotWithCompatibilityAdvisory),
+            Effect.flatMap(ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory),
             Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.provideService(
+              ProviderCompatibility.ProviderCompatibilityService,
+              providerCompatibility,
+            ),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,

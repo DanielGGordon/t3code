@@ -46,7 +46,7 @@ import {
   makePackageManagedProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
-import { enrichProviderSnapshotWithCompatibilityAdvisory } from "../providerCompatibility.ts";
+import * as ProviderCompatibility from "../ProviderCompatibility.ts";
 import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
@@ -73,6 +73,7 @@ export type CodexDriverEnv =
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
+  | ProviderCompatibility.ProviderCompatibilityService
   | ProviderEventLoggers
   | ServerConfig;
 
@@ -110,6 +111,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
+      const providerCompatibility = yield* ProviderCompatibility.ProviderCompatibilityService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
@@ -172,8 +174,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(
-            Effect.flatMap(enrichProviderSnapshotWithCompatibilityAdvisory),
+            Effect.flatMap(ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory),
             Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.provideService(
+              ProviderCompatibility.ProviderCompatibilityService,
+              providerCompatibility,
+            ),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,

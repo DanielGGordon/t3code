@@ -41,7 +41,7 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import { enrichProviderSnapshotWithCompatibilityAdvisory } from "../providerCompatibility.ts";
+import * as ProviderCompatibility from "../ProviderCompatibility.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("cursor");
@@ -1235,7 +1235,11 @@ export const enrichCursorSnapshot = (input: {
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   readonly stampIdentity?: (snapshot: ServerProvider) => ServerProvider;
   readonly httpClient: HttpClient.HttpClient;
-}): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
+}): Effect.Effect<
+  void,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | ProviderCompatibility.ProviderCompatibilityService
+> => {
   const { settings, snapshot, publishSnapshot } = input;
   const stampIdentity = input.stampIdentity ?? ((value) => value);
 
@@ -1243,7 +1247,7 @@ export const enrichCursorSnapshot = (input: {
     snapshot,
     input.maintenanceCapabilities,
   ).pipe(
-    Effect.flatMap(enrichProviderSnapshotWithCompatibilityAdvisory),
+    Effect.flatMap(ProviderCompatibility.enrichProviderSnapshotWithCompatibilityAdvisory),
     Effect.provideService(HttpClient.HttpClient, input.httpClient),
     Effect.flatMap((enrichedSnapshot) =>
       publishSnapshot(stampIdentity(enrichedSnapshot)).pipe(Effect.as(enrichedSnapshot)),
