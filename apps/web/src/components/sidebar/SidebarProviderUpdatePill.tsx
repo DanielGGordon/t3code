@@ -1,7 +1,16 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { ServerProvider } from "@t3tools/contracts";
 import { CircleCheckIcon, DownloadIcon, LoaderIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
+  type TransitionEvent,
+} from "react";
 
 import { useServerProviders } from "../../rpc/serverState";
 import {
@@ -37,48 +46,36 @@ function latestProviderCheckedAt(
   );
 }
 
-export function SidebarProviderUpdatePill() {
-  const navigate = useNavigate();
-  const providers = useServerProviders();
-  const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const [renderedView, setRenderedView] = useState<ProviderUpdateSidebarPillView | null>(null);
-  const [pendingView, setPendingView] = useState<ProviderUpdateSidebarPillView | null>(null);
+function useProviderUpdateVisibleAfterIso(
+  providers: ReadonlyArray<Pick<ServerProvider, "checkedAt">>,
+): string | undefined {
+  const visibleAfterIsoRef = useRef<string | undefined>(undefined);
+
+  if (visibleAfterIsoRef.current === undefined) {
+    visibleAfterIsoRef.current = latestProviderCheckedAt(providers);
+  }
+
+  return visibleAfterIsoRef.current;
+}
+
+function useDisplayedProviderUpdatePill(input: {
+  view: ProviderUpdateSidebarPillView | null;
+  setDismissedKeys: Dispatch<SetStateAction<ReadonlySet<string>>>;
+}) {
+  const { view, setDismissedKeys } = input;
+  const [renderedView, setRenderedView] = useState<ProviderUpdateSidebarPillView | null>(view);
   const [exitingKey, setExitingKey] = useState<string | null>(null);
-  const [dismissAfterExitKey, setDismissAfterExitKey] = useState<string | null>(null);
-  const [visibleAfterIso, setVisibleAfterIso] = useState<string | undefined>();
-  const effectiveVisibleAfterIso = visibleAfterIso ?? latestProviderCheckedAt(providers);
-  const view = getProviderUpdateSidebarPillView(providers, {
-    ...(effectiveVisibleAfterIso !== undefined
-      ? { visibleAfterIso: effectiveVisibleAfterIso }
-      : {}),
-    dismissedKeys,
-  });
-
-  useEffect(() => {
-    if (visibleAfterIso === undefined && effectiveVisibleAfterIso !== undefined) {
-      setVisibleAfterIso(effectiveVisibleAfterIso);
-    }
-  }, [effectiveVisibleAfterIso, visibleAfterIso]);
-
-  const openProviderSettings = useCallback(() => {
-    void navigate({ to: "/settings/providers" });
-  }, [navigate]);
-  const displayedView = renderedView ?? view;
-  const dismissAfterVisibleMs = displayedView?.dismissAfterVisibleMs;
-  const viewKey = displayedView?.key ?? null;
-  const showDismissProgress =
-    dismissAfterVisibleMs !== undefined &&
-    displayedView?.tone !== "loading" &&
-    exitingKey !== viewKey;
+  const pendingViewRef = useRef<ProviderUpdateSidebarPillView | null>(null);
+  const dismissAfterExitKeyRef = useRef<string | null>(null);
 
   const startExit = useCallback(
     (key: string, nextView: ProviderUpdateSidebarPillView | null, dismissKey?: string) => {
       if (exitingKey === key) {
         return;
       }
-      setPendingView(nextView);
+      pendingViewRef.current = nextView;
+      dismissAfterExitKeyRef.current = dismissKey ?? null;
       setExitingKey(key);
-      setDismissAfterExitKey(dismissKey ?? null);
     },
     [exitingKey],
   );
@@ -103,6 +100,46 @@ export function SidebarProviderUpdatePill() {
     }
   }, [exitingKey, renderedView, startExit, view]);
 
+  const displayedView = renderedView ?? view;
+  const onTransitionEnd = useCallback(
+    (event: TransitionEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) {
+        return;
+      }
+      if (!displayedView || exitingKey !== displayedView.key) {
+        return;
+      }
+      if (dismissAfterExitKeyRef.current === displayedView.key) {
+        setDismissedKeys((previous) => new Set(previous).add(displayedView.key));
+      }
+      setRenderedView(pendingViewRef.current);
+      pendingViewRef.current = null;
+      dismissAfterExitKeyRef.current = null;
+      setExitingKey(null);
+    },
+    [displayedView, exitingKey, setDismissedKeys],
+  );
+
+  return {
+    displayedView,
+    exitingKey,
+    onTransitionEnd,
+    startExit,
+  };
+}
+
+function useProviderUpdateAutoDismiss(input: {
+  dismissAfterVisibleMs: number | undefined;
+  exitingKey: string | null;
+  startExit: (
+    key: string,
+    nextView: ProviderUpdateSidebarPillView | null,
+    dismissKey?: string,
+  ) => void;
+  viewKey: string | null;
+}) {
+  const { dismissAfterVisibleMs, exitingKey, startExit, viewKey } = input;
+
   useEffect(() => {
     if (!dismissAfterVisibleMs || !viewKey) {
       return;
@@ -116,6 +153,40 @@ export function SidebarProviderUpdatePill() {
 
     return () => window.clearTimeout(timeoutId);
   }, [dismissAfterVisibleMs, exitingKey, startExit, viewKey]);
+}
+
+export function SidebarProviderUpdatePill() {
+  const navigate = useNavigate();
+  const providers = useServerProviders();
+  const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const effectiveVisibleAfterIso = useProviderUpdateVisibleAfterIso(providers);
+  const view = getProviderUpdateSidebarPillView(providers, {
+    ...(effectiveVisibleAfterIso !== undefined
+      ? { visibleAfterIso: effectiveVisibleAfterIso }
+      : {}),
+    dismissedKeys,
+  });
+
+  const openProviderSettings = useCallback(() => {
+    void navigate({ to: "/settings/providers" });
+  }, [navigate]);
+  const { displayedView, exitingKey, onTransitionEnd, startExit } = useDisplayedProviderUpdatePill({
+    view,
+    setDismissedKeys,
+  });
+  const dismissAfterVisibleMs = displayedView?.dismissAfterVisibleMs;
+  const viewKey = displayedView?.key ?? null;
+  const showDismissProgress =
+    dismissAfterVisibleMs !== undefined &&
+    displayedView?.tone !== "loading" &&
+    exitingKey !== viewKey;
+
+  useProviderUpdateAutoDismiss({
+    dismissAfterVisibleMs,
+    exitingKey,
+    startExit,
+    viewKey,
+  });
 
   if (!displayedView) {
     return null;
@@ -130,21 +201,7 @@ export function SidebarProviderUpdatePill() {
           ? "pointer-events-none translate-y-1.5 opacity-0"
           : "translate-y-0 opacity-100"
       }`}
-      onTransitionEnd={(event) => {
-        if (event.target !== event.currentTarget) {
-          return;
-        }
-        if (!displayedView || exitingKey !== displayedView.key) {
-          return;
-        }
-        if (dismissAfterExitKey === displayedView.key) {
-          setDismissedKeys((previous) => new Set(previous).add(displayedView.key));
-        }
-        setRenderedView(pendingView);
-        setPendingView(null);
-        setExitingKey(null);
-        setDismissAfterExitKey(null);
-      }}
+      onTransitionEnd={onTransitionEnd}
     >
       {showDismissProgress ? (
         <div
