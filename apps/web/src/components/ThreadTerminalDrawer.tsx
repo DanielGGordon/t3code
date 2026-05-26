@@ -79,8 +79,13 @@ function useThreadDrawerHeight(threadId: ThreadId, height: number) {
   const drawerHeightRef = useRef(drawerHeight);
   const lastSyncedHeightRef = useRef(clampedSourceHeight);
 
-  drawerHeightRef.current = drawerHeight;
-  lastSyncedHeightRef.current = clampedSourceHeight;
+  useEffect(() => {
+    drawerHeightRef.current = drawerHeight;
+  }, [drawerHeight]);
+
+  useEffect(() => {
+    lastSyncedHeightRef.current = clampedSourceHeight;
+  }, [clampedSourceHeight]);
 
   const setDrawerHeight = useCallback(
     (nextHeight: number) => {
@@ -918,13 +923,8 @@ export default function ThreadTerminalDrawer({
   keybindings,
 }: ThreadTerminalDrawerProps) {
   const [resizeEpoch, setResizeEpoch] = useState(0);
-  const {
-    drawerHeight,
-    drawerHeightRef,
-    lastSyncedHeightRef,
-    setDrawerHeight,
-    clearDrawerHeight,
-  } = useThreadDrawerHeight(threadId, height);
+  const { drawerHeight, drawerHeightRef, lastSyncedHeightRef, setDrawerHeight, clearDrawerHeight } =
+    useThreadDrawerHeight(threadId, height);
   const resizeStateRef = useRef<{
     pointerId: number;
     startY: number;
