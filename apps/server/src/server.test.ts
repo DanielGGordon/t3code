@@ -37,9 +37,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { ManagedRuntime } from "effect";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {

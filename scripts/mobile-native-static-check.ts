@@ -2,12 +2,13 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Console from "effect/Console";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Logger from "effect/Logger";
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import { Command } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -59,8 +60,9 @@ const commandOutputOptions = {
 
 const commandExists = Effect.fn("commandExists")(function* (command: string) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcessPlatform;
   const lookupCommand =
-    process.platform === "win32"
+    hostPlatform === "win32"
       ? ChildProcess.make("where", [command], {
           stdout: "ignore",
           stderr: "ignore",
@@ -89,11 +91,12 @@ const runCommand = Effect.fn("runCommand")(function* (
 ) {
   yield* Console.log(`$ ${[command, ...args].join(" ")}`);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcessPlatform;
   const child = yield* spawner.spawn(
     ChildProcess.make(command, [...args], {
       cwd,
       ...commandOutputOptions,
-      shell: process.platform === "win32",
+      shell: hostPlatform === "win32",
     }),
   );
   const exitCode = Number(yield* child.exitCode);

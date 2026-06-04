@@ -2,7 +2,7 @@ import { assert, it, describe } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import type * as PlatformError from "effect/PlatformError";
 import type * as Scope from "effect/Scope";
 import * as DateTime from "effect/DateTime";

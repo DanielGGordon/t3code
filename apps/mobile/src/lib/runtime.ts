@@ -1,4 +1,4 @@
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { ManagedRuntime } from "effect";
 
 import { remoteHttpClientLayer } from "@t3tools/client-runtime";
 

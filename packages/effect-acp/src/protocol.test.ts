@@ -1,4 +1,4 @@
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as AcpError from "./errors.ts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";

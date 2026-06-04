@@ -17,7 +17,7 @@ import * as DateTime from "effect/DateTime";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { ManagedRuntime } from "effect";
 import { HttpApiTest } from "effect/unstable/httpapi";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 

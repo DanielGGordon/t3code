@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as LogLevel from "effect/LogLevel";
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 

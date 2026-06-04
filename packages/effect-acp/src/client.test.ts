@@ -1,4 +1,4 @@
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";

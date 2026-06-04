@@ -10,7 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
-import * as Path from "effect/Path";
+import { Path } from "effect";
 import * as Ref from "effect/Ref";
 import {
   GitActionProgressEvent,
