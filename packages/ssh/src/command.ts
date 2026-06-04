@@ -1,6 +1,7 @@
 import * as Crypto from "node:crypto";
 
 import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -16,7 +17,7 @@ import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
-export const SSH_COMMAND = process.platform === "win32" ? "ssh.exe" : "ssh";
+export const SSH_COMMAND = "ssh";
 
 const encoder = new TextEncoder();
 
@@ -191,6 +192,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     ...(input.remoteCommandArgs ?? []),
   ];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcessPlatform;
   yield* Effect.logDebug("ssh.command.start", {
     ...sshTargetLogFields(target),
     command: [SSH_COMMAND, ...args],
@@ -199,8 +201,9 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(SSH_COMMAND, args, {
+      ChildProcess.make("ssh", args, {
         env: environment,
+        shell: hostPlatform === "win32",
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,
