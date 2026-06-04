@@ -35,7 +35,10 @@ const CommandLookupEnvConfig = Config.all({
   PATHEXT: Config.string("PATHEXT").pipe(Config.option),
 }).pipe(Config.map(compactEnv));
 
-const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
+const readCommandLookupEnv = CommandLookupEnvConfig.pipe(
+  Effect.orElseSucceed(() => ({})),
+  Effect.map((env) => (Object.keys(env).length > 0 ? env : process.env)),
+);
 
 export interface ProviderMaintenanceCapabilities {
   readonly provider: ProviderDriverKind;

@@ -96,7 +96,10 @@ const CommandLookupEnvConfig = Config.all({
 }).pipe(Config.map(compactEnv));
 
 const readBrowserLaunchEnv = BrowserLaunchEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
-const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
+const readCommandLookupEnv = CommandLookupEnvConfig.pipe(
+  Effect.orElseSucceed(() => ({})),
+  Effect.map((env) => (Object.keys(env).length > 0 ? env : process.env)),
+);
 
 function parseTargetPathAndPosition(target: string): Option.Option<TargetPathAndPosition> {
   const match = TARGET_WITH_POSITION_PATTERN.exec(target);
