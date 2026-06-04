@@ -15,4 +15,11 @@ export const HostProcessArchitecture = Context.Reference<NodeJS.Architecture>(
   },
 );
 
+export const HostProcessEnv = Context.Reference<NodeJS.ProcessEnv>(
+  "@t3tools/shared/hostProcess/HostProcessEnv",
+  {
+    defaultValue: () => process.env,
+  },
+);
+
 export const isHostWindows = Effect.map(HostProcessPlatform, (platform) => platform === "win32");
