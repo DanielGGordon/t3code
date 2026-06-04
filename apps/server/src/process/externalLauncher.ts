@@ -14,7 +14,6 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessEnv, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
-  isCommandAvailable,
   isCommandAvailableForPlatform,
   type PlatformCommandAvailabilityOptions,
 } from "@t3tools/shared/shell";
@@ -347,13 +346,14 @@ export const launchBrowser = Effect.fn("externalLauncher.launchBrowser")(functio
 export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(function* (
   launch: EditorLaunch,
 ): Effect.fn.Return<void, ExternalLauncherError, ChildProcessSpawner.ChildProcessSpawner> {
-  if (!isCommandAvailable(launch.command)) {
+  const platform = yield* HostProcessPlatform;
+  const env = yield* HostProcessEnv;
+
+  if (!isCommandAvailableForPlatform(launch.command, { platform, env })) {
     return yield* new ExternalLauncherError({
       message: `Editor command not found: ${launch.command}`,
     });
   }
-
-  const platform = yield* HostProcessPlatform;
   const isWin32 = platform === "win32";
   yield* launchAndUnref(
     {
