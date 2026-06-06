@@ -367,7 +367,7 @@ export const makeCloudflaredRelayClient = Effect.fn("cloudflared.make")(function
 
   const isInstallLockStale = Effect.fn("cloudflared.isInstallLockStale")(function* (
     lockPath: string,
-  ) {
+  ): Effect.fn.Return<boolean> {
     const lockInfo = yield* fileSystem.stat(lockPath).pipe(Effect.option);
     const lockModifiedAt = Option.flatMap(lockInfo, (info) => info.mtime);
     if (Option.isNone(lockModifiedAt)) return false;
@@ -379,7 +379,7 @@ export const makeCloudflaredRelayClient = Effect.fn("cloudflared.make")(function
 
   const attemptAcquireInstallLock = Effect.fn("cloudflared.attemptAcquireInstallLock")(function* (
     lockPath: string,
-  ) {
+  ): Effect.fn.Return<void, RelayClientInstallLockBusy | PlatformError.PlatformError> {
     const acquired = yield* fileSystem.writeFileString(lockPath, "", { flag: "wx" }).pipe(
       Effect.as(true),
       Effect.catch((error) =>
@@ -398,7 +398,7 @@ export const makeCloudflaredRelayClient = Effect.fn("cloudflared.make")(function
 
   const acquireInstallLock = Effect.fn("cloudflared.acquireInstallLock")(function* (
     lockPath: string,
-  ) {
+  ): Effect.fn.Return<void, RelayClientInstallError | PlatformError.PlatformError> {
     return yield* attemptAcquireInstallLock(lockPath).pipe(
       Effect.retry(retryWhileInstallLockBusy),
       Effect.catchTag("RelayClientInstallLockBusy", () =>
@@ -414,7 +414,7 @@ export const makeCloudflaredRelayClient = Effect.fn("cloudflared.make")(function
 
   const installUnlocked = Effect.fn("cloudflared.installUnlocked")(function* (
     report: (stage: RelayClientInstallProgressStage) => Effect.Effect<void>,
-  ) {
+  ): Effect.fn.Return<AvailableRelayClient, RelayClientInstallError> {
     yield* report("checking");
     const existing = yield* resolve;
     if (existing.status === "available") return existing;
