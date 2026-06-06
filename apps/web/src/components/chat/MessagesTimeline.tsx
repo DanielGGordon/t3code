@@ -1205,9 +1205,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   return (
     <div className="rounded-lg px-1 py-1">
       <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
-        <span
-          className={cn("flex size-5 shrink-0 items-center justify-center", iconClassName)}
-        >
+        <span className={cn("flex size-5 shrink-0 items-center justify-center", iconClassName)}>
           <WorkEntryIconGlyph workEntry={workEntry} />
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
