@@ -12,6 +12,7 @@ import type {
   CommandId,
   ThreadId,
 } from "@t3tools/contracts";
+import { setTimeout as sleep } from "node:timers/promises";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -21,6 +22,11 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import { OrchestratorV2, type OrchestratorV2Error } from "../Orchestrator.ts";
+
+const WAIT_POLL_DELAY_MS = 5;
+const WAIT_ATTEMPTS = 3_000;
+
+const waitPollDelay = Effect.promise(() => sleep(WAIT_POLL_DELAY_MS));
 
 export type OrchestratorV2ScenarioStep =
   | {
@@ -185,7 +191,7 @@ export function runOrchestratorV2Scenario(
 
       const waitForPendingRuntimeRequest = (
         threadId: ThreadId,
-        attemptsRemaining = 1_000,
+        attemptsRemaining = WAIT_ATTEMPTS,
       ): Effect.Effect<
         OrchestrationV2RuntimeRequest,
         OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -203,13 +209,13 @@ export function runOrchestratorV2Scenario(
               step: `respond_to_next_runtime_request:${threadId}`,
             });
           }
-          yield* Effect.yieldNow;
+          yield* waitPollDelay;
           return yield* waitForPendingRuntimeRequest(threadId, attemptsRemaining - 1);
         });
 
       const waitForThreadIdle = (
         threadId: ThreadId,
-        attemptsRemaining = 1_000,
+        attemptsRemaining = WAIT_ATTEMPTS,
       ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -222,14 +228,14 @@ export function runOrchestratorV2Scenario(
               step: `await_thread_idle:${threadId}`,
             });
           }
-          yield* Effect.yieldNow;
+          yield* waitPollDelay;
           return yield* waitForThreadIdle(threadId, attemptsRemaining - 1);
         });
 
       const waitForRunSteerable = (
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
-        attemptsRemaining = 1_000,
+        attemptsRemaining = WAIT_ATTEMPTS,
       ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -249,7 +255,7 @@ export function runOrchestratorV2Scenario(
               step: `await_run_steerable:${runId}`,
             });
           }
-          yield* Effect.yieldNow;
+          yield* waitPollDelay;
           return yield* waitForRunSteerable(threadId, runId, attemptsRemaining - 1);
         });
 
@@ -257,7 +263,7 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         itemType: OrchestrationV2TurnItem["type"],
-        attemptsRemaining = 1_000,
+        attemptsRemaining = WAIT_ATTEMPTS,
       ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -273,7 +279,7 @@ export function runOrchestratorV2Scenario(
               step: `await_run_turn_item:${runId}:${itemType}`,
             });
           }
-          yield* Effect.yieldNow;
+          yield* waitPollDelay;
           return yield* waitForRunTurnItem(threadId, runId, itemType, attemptsRemaining - 1);
         });
 

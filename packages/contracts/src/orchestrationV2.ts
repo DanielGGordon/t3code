@@ -1491,7 +1491,7 @@ export class OrchestrationV2DispatchCommandError extends Schema.TaggedErrorClass
     commandType: Schema.String,
     message: Schema.String,
     detail: Schema.optional(Schema.String),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -1500,7 +1500,7 @@ export class OrchestrationV2GetThreadProjectionError extends Schema.TaggedErrorC
   {
     threadId: ThreadId,
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -1508,7 +1508,7 @@ export class OrchestrationV2GetShellSnapshotError extends Schema.TaggedErrorClas
   "OrchestrationV2GetShellSnapshotError",
   {
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

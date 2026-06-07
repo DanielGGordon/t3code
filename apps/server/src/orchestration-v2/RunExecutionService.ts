@@ -24,6 +24,7 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { IdAllocatorV2, type IdAllocatorV2Shape } from "./IdAllocator.ts";
 import type {
+  ProviderAdapterV2Event,
   ProviderAdapterV2RuntimePolicy,
   ProviderAdapterV2SessionRuntime,
   ProviderAdapterV2TurnMessage,
@@ -38,7 +39,7 @@ export class RunExecutionStartError extends Schema.TaggedErrorClass<RunExecution
   {
     commandId: CommandId,
     runId: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -50,7 +51,7 @@ export class RunExecutionIngestError extends Schema.TaggedErrorClass<RunExecutio
   "RunExecutionIngestError",
   {
     runId: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -92,7 +93,7 @@ export interface RunExecutionServiceV2Shape {
 export class RunExecutionServiceV2 extends Context.Service<
   RunExecutionServiceV2,
   RunExecutionServiceV2Shape
->()("t3/orchestration-v2/RunExecutionService") {}
+>()("t3/orchestration-v2/RunExecutionService/RunExecutionServiceV2") {}
 
 /**
  * IMPLEMENTATIONS
@@ -288,48 +289,53 @@ export const layer: Layer.Layer<
             "completed" | "interrupted" | "failed" | "cancelled"
           > | null>(null);
           const latestProviderThread = yield* Ref.make(input.providerThread);
+          const finalized = yield* Ref.make(false);
+          const finalizeRun = (
+            status: Extract<
+              OrchestrationV2Run["status"],
+              "completed" | "interrupted" | "failed" | "cancelled"
+            >,
+          ) =>
+            Ref.modify(finalized, (alreadyFinalized) => {
+              if (alreadyFinalized) {
+                return [Effect.void, true] as const;
+              }
+              return [
+                Effect.gen(function* () {
+                  const providerThread = yield* Ref.get(latestProviderThread);
+                  yield* writeFinalRunEvents({
+                    run: input.run,
+                    rootNode: input.rootNode,
+                    checkpointScope: input.checkpointScope,
+                    providerThread,
+                    attempt: input.attempt,
+                    status,
+                    runtimePolicy: input.runtimePolicy,
+                  });
+                }),
+                true,
+              ] as const;
+            }).pipe(Effect.flatten);
+          const ingestProviderEvent = (event: ProviderAdapterV2Event) =>
+            Effect.gen(function* () {
+              yield* providerEventIngestor.ingestNormalized({
+                providerSessionId: input.providerSessionId,
+                threadId: input.run.threadId,
+                runId: input.run.id,
+                nodeId: input.rootNode.id,
+                event,
+              });
+              if (event.type === "provider_thread.updated") {
+                yield* Ref.set(latestProviderThread, event.providerThread);
+              }
+              if (event.type === "turn.terminal") {
+                yield* Ref.set(terminalStatus, event.status);
+                yield* finalizeRun(event.status);
+              }
+            });
           const providerEventFiber = yield* input.session.events.pipe(
-            Stream.takeUntil((event) => event.type === "turn.terminal"),
-            Stream.runForEach((event) =>
-              Effect.gen(function* () {
-                yield* providerEventIngestor.ingestNormalized({
-                  providerSessionId: input.providerSessionId,
-                  threadId: input.run.threadId,
-                  runId: input.run.id,
-                  nodeId: input.rootNode.id,
-                  event,
-                });
-                if (event.type === "provider_thread.updated") {
-                  yield* Ref.set(latestProviderThread, event.providerThread);
-                }
-                if (event.type === "turn.terminal") {
-                  yield* Ref.set(terminalStatus, event.status);
-                }
-              }),
-            ),
+            Stream.runForEach(ingestProviderEvent),
             Effect.mapError((cause) => new RunExecutionIngestError({ runId: input.run.id, cause })),
-            Effect.flatMap(() =>
-              Effect.gen(function* () {
-                const status = yield* Ref.get(terminalStatus);
-                if (status === null) {
-                  return;
-                }
-                const providerThread = yield* Ref.get(latestProviderThread);
-                yield* writeFinalRunEvents({
-                  run: input.run,
-                  rootNode: input.rootNode,
-                  checkpointScope: input.checkpointScope,
-                  providerThread,
-                  attempt: input.attempt,
-                  status,
-                  runtimePolicy: input.runtimePolicy,
-                }).pipe(
-                  Effect.mapError(
-                    (cause) => new RunExecutionIngestError({ runId: input.run.id, cause }),
-                  ),
-                );
-              }),
-            ),
             Effect.catchCause((cause) =>
               Ref.get(latestProviderThread).pipe(
                 Effect.flatMap((providerThread) =>

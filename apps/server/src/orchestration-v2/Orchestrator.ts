@@ -52,7 +52,7 @@ export class OrchestratorDispatchError extends Schema.TaggedErrorClass<Orchestra
   {
     commandId: CommandId,
     commandType: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -64,7 +64,7 @@ export class OrchestratorProjectionError extends Schema.TaggedErrorClass<Orchest
   "OrchestratorProjectionError",
   {
     threadId: ThreadId,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -75,7 +75,7 @@ export class OrchestratorProjectionError extends Schema.TaggedErrorClass<Orchest
 export class OrchestratorDomainEventStreamError extends Schema.TaggedErrorClass<OrchestratorDomainEventStreamError>()(
   "OrchestratorDomainEventStreamError",
   {
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -88,7 +88,7 @@ export class OrchestratorProviderAdapterError extends Schema.TaggedErrorClass<Or
   {
     commandId: CommandId,
     provider: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -139,7 +139,7 @@ export interface OrchestratorV2Shape {
 }
 
 export class OrchestratorV2 extends Context.Service<OrchestratorV2, OrchestratorV2Shape>()(
-  "t3/orchestration-v2/Orchestrator",
+  "t3/orchestration-v2/Orchestrator/OrchestratorV2",
 ) {}
 
 function nextRunOrdinal(projection: OrchestrationV2ThreadProjection): number {

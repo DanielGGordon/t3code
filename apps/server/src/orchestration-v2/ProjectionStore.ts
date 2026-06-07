@@ -40,7 +40,7 @@ export class ProjectionStoreApplyEventError extends Schema.TaggedErrorClass<Proj
   "ProjectionStoreApplyEventError",
   {
     eventType: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -51,7 +51,7 @@ export class ProjectionStoreApplyEventError extends Schema.TaggedErrorClass<Proj
 export class ProjectionStoreSetupError extends Schema.TaggedErrorClass<ProjectionStoreSetupError>()(
   "ProjectionStoreSetupError",
   {
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -74,7 +74,7 @@ export class ProjectionStoreReadError extends Schema.TaggedErrorClass<Projection
   "ProjectionStoreReadError",
   {
     threadId: ThreadId,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -104,7 +104,7 @@ export interface ProjectionStoreV2Shape {
 }
 
 export class ProjectionStoreV2 extends Context.Service<ProjectionStoreV2, ProjectionStoreV2Shape>()(
-  "t3/orchestration-v2/ProjectionStore",
+  "t3/orchestration-v2/ProjectionStore/ProjectionStoreV2",
 ) {}
 
 function upsertById<T extends { readonly id: string }>(items: ReadonlyArray<T>, next: T): Array<T> {

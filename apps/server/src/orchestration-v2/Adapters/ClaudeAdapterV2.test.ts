@@ -1,5 +1,4 @@
 import {
-  ClaudeSettings,
   MessageId,
   NodeId,
   ProviderInstanceId,
@@ -12,7 +11,6 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
@@ -23,6 +21,7 @@ import {
   CLAUDE_PROVIDER,
   CLAUDE_READ_ONLY_ALLOWED_TOOLS,
   ClaudeProviderCapabilitiesV2,
+  DEFAULT_CLAUDE_SETTINGS,
   claudeRuntimeQueryPolicyForRuntimePolicy,
   loggedClaudeQueryOptions,
   makeClaudeAdapterV2,
@@ -240,7 +239,7 @@ describe("ClaudeAdapterV2 native fork", () => {
         }> = [];
         const adapter = makeClaudeAdapterV2({
           instanceId: CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: Schema.decodeSync(ClaudeSettings)({}),
+          settings: DEFAULT_CLAUDE_SETTINGS,
           environment: {},
           idAllocator,
           queryRunner: {

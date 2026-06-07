@@ -655,7 +655,7 @@ export interface CodexAppServerClientFactoryShape {
 export class CodexAppServerClientFactory extends Context.Service<
   CodexAppServerClientFactory,
   CodexAppServerClientFactoryShape
->()("t3/orchestration-v2/CodexAppServerClientFactory") {}
+>()("t3/orchestration-v2/Adapters/CodexAdapterV2/CodexAppServerClientFactory") {}
 
 export const makeCodexAppServerClientFactoryCommandLayer = (
   options: CodexClient.CodexAppServerCommandLayerOptions,
@@ -785,10 +785,12 @@ export type CodexAdapterV2DriverEnv =
   | Path.Path
   | ServerConfig;
 
+const DEFAULT_CODEX_SETTINGS = Schema.decodeSync(CodexSettings)({});
+
 export const CodexAdapterV2Driver: ProviderAdapterDriver<CodexSettings, CodexAdapterV2DriverEnv> = {
   driverKind: CODEX_DRIVER_KIND,
   configSchema: CodexSettings,
-  defaultConfig: (): CodexSettings => Schema.decodeSync(CodexSettings)({}),
+  defaultConfig: (): CodexSettings => DEFAULT_CODEX_SETTINGS,
   create: ({ instanceId, environment, enabled, config }) =>
     Effect.gen(function* () {
       const clientFactory = yield* CodexAppServerClientFactory;
@@ -841,7 +843,7 @@ export const layer: Layer.Layer<
 
     return makeCodexAdapterV2({
       instanceId: CODEX_DEFAULT_INSTANCE_ID,
-      settings: Schema.decodeSync(CodexSettings)({}),
+      settings: DEFAULT_CODEX_SETTINGS,
       environment: process.env,
       clientFactory,
       fileSystem,

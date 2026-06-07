@@ -48,7 +48,7 @@ describe("decodeProviderReplayNdjson", () => {
   it.effect("returns a schema-serializable typed parse error", () =>
     Effect.gen(function* () {
       const error = yield* decodeProviderReplayNdjson(`{"type":`).pipe(Effect.flip);
-      const encoded = Schema.encodeUnknownSync(ProviderReplayNdjsonParseError)(error);
+      const encoded = yield* Schema.encodeUnknownEffect(ProviderReplayNdjsonParseError)(error);
 
       assert.equal(error._tag, "ProviderReplayNdjsonLineParseError");
       assert.equal(encoded._tag, "ProviderReplayNdjsonLineParseError");

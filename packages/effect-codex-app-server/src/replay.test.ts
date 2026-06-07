@@ -124,10 +124,12 @@ it.effect("fails pending client requests with a schema-serializable replay misma
       throw new Error("Expected transport error.");
     }
 
-    const replayError = Schema.decodeUnknownSync(CodexReplay.CodexAppServerReplayError)(
+    const replayError = yield* Schema.decodeUnknownEffect(CodexReplay.CodexAppServerReplayError)(
       error.cause,
     );
-    const encoded = Schema.encodeUnknownSync(CodexReplay.CodexAppServerReplayError)(replayError);
+    const encoded = yield* Schema.encodeUnknownEffect(CodexReplay.CodexAppServerReplayError)(
+      replayError,
+    );
 
     assert.equal(encoded._tag, "CodexAppServerReplayFrameMismatchError");
     if (encoded._tag !== "CodexAppServerReplayFrameMismatchError") {

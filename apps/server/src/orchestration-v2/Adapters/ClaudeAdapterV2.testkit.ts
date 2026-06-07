@@ -14,10 +14,10 @@ import {
   type ProviderApprovalDecision,
   type ProviderReplayTranscript,
 } from "@t3tools/contracts";
+import { randomUUID } from "node:crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -59,7 +59,7 @@ export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<C
     provider: Schema.optional(Schema.String),
     protocol: Schema.optional(Schema.String),
     scenario: Schema.optional(Schema.String),
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
@@ -140,7 +140,7 @@ export class ClaudeReplayDriverError extends Schema.TaggedErrorClass<ClaudeRepla
   "ClaudeReplayDriverError",
   {
     scenario: Schema.String,
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
@@ -2034,7 +2034,7 @@ export async function recordClaudeAgentSdkReplayTranscript(input: {
   }
 
   const entries: Array<ProviderReplayEntry> = [];
-  const sessionId = input.sessionId ?? (await Effect.runPromise(Random.nextUUIDv4));
+  const sessionId = input.sessionId ?? randomUUID();
   const queryMode = input.queryMode ?? "streaming";
   const recordingMetadata: Record<string, unknown> = {};
   if (queryMode === "streaming") {

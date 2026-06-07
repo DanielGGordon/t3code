@@ -24,7 +24,7 @@ export class ProviderEventNormalizeError extends Schema.TaggedErrorClass<Provide
     providerSessionId: ProviderSessionId,
     threadId: ThreadId,
     providerEvent: ProviderAdapterV2Event,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -37,7 +37,7 @@ export class ProviderEventPublishError extends Schema.TaggedErrorClass<ProviderE
   {
     providerSessionId: ProviderSessionId,
     eventCount: Schema.Number,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -75,7 +75,7 @@ export interface ProviderEventIngestorV2Shape {
 export class ProviderEventIngestorV2 extends Context.Service<
   ProviderEventIngestorV2,
   ProviderEventIngestorV2Shape
->()("t3/orchestration-v2/ProviderEventIngestor") {}
+>()("t3/orchestration-v2/ProviderEventIngestor/ProviderEventIngestorV2") {}
 
 function compactUndefined<T extends Record<string, unknown>>(record: T): T {
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as T;

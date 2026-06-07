@@ -73,11 +73,11 @@ import {
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
 import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
-import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../src/vcs/VcsDriverRegistry.ts";
 import { VcsStatusBroadcaster } from "../src/vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
 import * as VcsProcess from "../src/vcs/VcsProcess.ts";
+import * as AgentAwarenessRelay from "../src/relay/AgentAwarenessRelay.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
 
@@ -161,7 +161,7 @@ class OrchestrationHarnessRuntimeError extends Schema.TaggedErrorClass<Orchestra
   "OrchestrationHarnessRuntimeError",
   {
     operation: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -311,8 +311,11 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(serverSettingsLayer),
     );
     const gitWorkflowLayer = Layer.mock(GitWorkflowService)({
-      renameBranch: (input: Parameters<GitVcsDriver.GitVcsDriverShape["renameBranch"]>[0]) =>
-        Effect.succeed({ branch: input.newBranch }),
+      renameBranch: (input: {
+        readonly cwd: string;
+        readonly oldBranch: string;
+        readonly newBranch: string;
+      }) => Effect.succeed({ branch: input.newBranch }),
     });
     const textGenerationLayer = Layer.succeed(TextGeneration, {
       generateBranchName: () => Effect.succeed({ branch: "update" }),
@@ -360,6 +363,12 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,
           drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
+          publishThread: () => Effect.void,
+          start: () => Effect.void,
         }),
       ),
     );

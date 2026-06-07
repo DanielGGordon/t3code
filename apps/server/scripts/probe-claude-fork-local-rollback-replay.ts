@@ -6,10 +6,10 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceId, type ProviderReplayEntry } from "@t3tools/contracts";
+import { randomUUID } from "node:crypto";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Random from "effect/Random";
 
 import {
   makeClaudeQueryOptions,
@@ -226,8 +226,7 @@ const pathFragments = [
   [cwdRealPath, `/tmp/claude-replay-${SCENARIO}`],
   [process.env.HOME ?? "", "/home/replay-user"],
 ] as const;
-const sessionId =
-  process.env.T3_CLAUDE_REPLAY_SESSION_ID ?? (await Effect.runPromise(Random.nextUUIDv4));
+const sessionId = process.env.T3_CLAUDE_REPLAY_SESSION_ID ?? randomUUID();
 const entries: Array<ProviderReplayEntry> = [];
 const metadata: Record<string, unknown> = {
   prompts: [SOURCE_PROMPT, FORK_FIRST_PROMPT, FORK_SECOND_PROMPT, FORK_AFTER_ROLLBACK_PROMPT],

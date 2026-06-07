@@ -38,6 +38,7 @@ import {
 
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -46,7 +47,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -254,7 +254,7 @@ export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedErrorClass<Clau
   "ClaudeAgentSdkQueryRunnerError",
   {
     method: Schema.String,
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
@@ -276,7 +276,7 @@ export interface ClaudeAgentSdkQueryRunnerShape {
 export class ClaudeAgentSdkQueryRunner extends Context.Service<
   ClaudeAgentSdkQueryRunner,
   ClaudeAgentSdkQueryRunnerShape
->()("t3/orchestration-v2/ClaudeAgentSdkQueryRunner") {}
+>()("t3/orchestration-v2/Adapters/ClaudeAdapterV2/ClaudeAgentSdkQueryRunner") {}
 
 export interface ClaudeAgentSdkSessionForkInput {
   readonly sessionId: string;
@@ -436,17 +436,20 @@ export function makeClaudeAgentSdkProtocolLogger(input: {
 export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
   ClaudeAgentSdkQueryRunner,
   never,
-  ServerConfig
+  Crypto.Crypto | ServerConfig
 > = Layer.effect(
   ClaudeAgentSdkQueryRunner,
   Effect.gen(function* () {
     const { providerEventLogPath } = yield* ServerConfig;
+    const crypto = yield* Crypto.Crypto;
     const nativeEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "native",
     });
 
     return ClaudeAgentSdkQueryRunner.of({
-      allocateSessionId: Random.nextUUIDv4,
+      allocateSessionId: crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) => queryRunnerError(cause, "crypto.randomUUIDv4")),
+      ),
       open: Effect.fn("ClaudeAgentSdkQueryRunner.open")(function* (
         input: ClaudeAgentSdkQueryOpenInput,
       ) {
@@ -1264,6 +1267,7 @@ function outputFromClaudeToolResult(
     case "mcp_tool_result":
       return toolResult.content;
     case "bash_code_execution_tool_result":
+    case "advisor_tool_result":
     case "code_execution_tool_result":
     case "text_editor_code_execution_tool_result":
     case "tool_search_tool_result":
@@ -1282,6 +1286,7 @@ function isClaudeTypedToolResultErrorContent(content: ClaudeTypedToolResultConte
 
   switch (content.type) {
     case "bash_code_execution_tool_result_error":
+    case "advisor_tool_result_error":
     case "code_execution_tool_result_error":
     case "text_editor_code_execution_tool_result_error":
     case "tool_search_tool_result_error":
@@ -1300,6 +1305,7 @@ function isClaudeToolResultError(toolResult: ClaudeToolResultContentBlock): bool
     case "mcp_tool_result":
       return toolResult.is_error;
     case "bash_code_execution_tool_result":
+    case "advisor_tool_result":
     case "code_execution_tool_result":
     case "text_editor_code_execution_tool_result":
     case "tool_search_tool_result":
@@ -1313,6 +1319,8 @@ function isClaudeToolResultError(toolResult: ClaudeToolResultContentBlock): bool
 
 function toolNameFromClaudeToolResult(toolResult: ClaudeToolResultContentBlock): string {
   switch (toolResult.type) {
+    case "advisor_tool_result":
+      return "advisor";
     case "bash_code_execution_tool_result":
       return "bash_code_execution";
     case "code_execution_tool_result":
@@ -2919,13 +2927,15 @@ export function makeClaudeAdapterV2(
 
 export type ClaudeAdapterV2DriverEnv = ClaudeAgentSdkQueryRunner | IdAllocatorV2 | Path.Path;
 
+export const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+
 export const ClaudeAdapterV2Driver: ProviderAdapterDriver<
   ClaudeSettings,
   ClaudeAdapterV2DriverEnv
 > = {
   driverKind: CLAUDE_DRIVER_KIND,
   configSchema: ClaudeSettings,
-  defaultConfig: (): ClaudeSettings => Schema.decodeSync(ClaudeSettings)({}),
+  defaultConfig: (): ClaudeSettings => DEFAULT_CLAUDE_SETTINGS,
   create: Effect.fn("ClaudeAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<ClaudeSettings>) {
       const { instanceId, environment, enabled, config } = input;
@@ -2962,7 +2972,7 @@ const makeDefaultClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2.layer")(function* 
 
   return makeClaudeAdapterV2({
     instanceId: CLAUDE_DEFAULT_INSTANCE_ID,
-    settings: Schema.decodeSync(ClaudeSettings)({}),
+    settings: DEFAULT_CLAUDE_SETTINGS,
     environment: process.env,
     idAllocator,
     queryRunner,

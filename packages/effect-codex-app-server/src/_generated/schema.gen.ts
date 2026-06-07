@@ -24393,16 +24393,18 @@ export const ServerNotification__ErrorNotification = Schema.Struct({
 });
 
 export type ServerNotification__ItemCompletedNotification = {
-  readonly completedAtMs: number;
+  readonly completedAtMs?: number;
   readonly item: ServerNotification__ThreadItem;
   readonly threadId: string;
   readonly turnId: string;
 };
 export const ServerNotification__ItemCompletedNotification = Schema.Struct({
-  completedAtMs: Schema.Number.annotate({
-    description: "Unix timestamp (in milliseconds) when this item lifecycle completed.",
-    format: "int64",
-  }).check(Schema.isInt()),
+  completedAtMs: Schema.optionalKey(
+    Schema.Number.annotate({
+      description: "Unix timestamp (in milliseconds) when this item lifecycle completed.",
+      format: "int64",
+    }).check(Schema.isInt()),
+  ),
   item: ServerNotification__ThreadItem,
   threadId: Schema.String,
   turnId: Schema.String,
@@ -24410,16 +24412,18 @@ export const ServerNotification__ItemCompletedNotification = Schema.Struct({
 
 export type ServerNotification__ItemStartedNotification = {
   readonly item: ServerNotification__ThreadItem;
-  readonly startedAtMs: number;
+  readonly startedAtMs?: number;
   readonly threadId: string;
   readonly turnId: string;
 };
 export const ServerNotification__ItemStartedNotification = Schema.Struct({
   item: ServerNotification__ThreadItem,
-  startedAtMs: Schema.Number.annotate({
-    description: "Unix timestamp (in milliseconds) when this item lifecycle started.",
-    format: "int64",
-  }).check(Schema.isInt()),
+  startedAtMs: Schema.optionalKey(
+    Schema.Number.annotate({
+      description: "Unix timestamp (in milliseconds) when this item lifecycle started.",
+      format: "int64",
+    }).check(Schema.isInt()),
+  ),
   threadId: Schema.String,
   turnId: Schema.String,
 });
@@ -25926,7 +25930,7 @@ export type ServerNotification__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26011,9 +26015,11 @@ export const ServerNotification__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -26300,7 +26306,7 @@ export type V2ThreadForkResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26385,9 +26391,11 @@ export const V2ThreadForkResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -26447,7 +26455,7 @@ export type V2ThreadListResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26532,9 +26540,11 @@ export const V2ThreadListResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -26594,7 +26604,7 @@ export type V2ThreadMetadataUpdateResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26679,9 +26689,11 @@ export const V2ThreadMetadataUpdateResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -26741,7 +26753,7 @@ export type V2ThreadReadResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26826,9 +26838,11 @@ export const V2ThreadReadResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -26888,7 +26902,7 @@ export type V2ThreadResumeResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -26973,9 +26987,11 @@ export const V2ThreadResumeResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -27035,7 +27051,7 @@ export type V2ThreadStartedNotification__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -27120,9 +27136,11 @@ export const V2ThreadStartedNotification__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -27182,7 +27200,7 @@ export type V2ThreadStartResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -27267,9 +27285,11 @@ export const V2ThreadStartResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -27329,7 +27349,7 @@ export type V2ThreadUnarchiveResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -27414,9 +27434,11 @@ export const V2ThreadUnarchiveResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -32312,16 +32334,18 @@ export const V2HookStartedNotification__HookSource = Schema.Literals([
 ]);
 
 export type V2ItemCompletedNotification = {
-  readonly completedAtMs: number;
+  readonly completedAtMs?: number;
   readonly item: V2ItemCompletedNotification__ThreadItem;
   readonly threadId: string;
   readonly turnId: string;
 };
 export const V2ItemCompletedNotification = Schema.Struct({
-  completedAtMs: Schema.Number.annotate({
-    description: "Unix timestamp (in milliseconds) when this item lifecycle completed.",
-    format: "int64",
-  }).check(Schema.isInt()),
+  completedAtMs: Schema.optionalKey(
+    Schema.Number.annotate({
+      description: "Unix timestamp (in milliseconds) when this item lifecycle completed.",
+      format: "int64",
+    }).check(Schema.isInt()),
+  ),
   item: V2ItemCompletedNotification__ThreadItem,
   threadId: Schema.String,
   turnId: Schema.String,
@@ -32438,16 +32462,18 @@ export const V2ItemGuardianApprovalReviewStartedNotification = Schema.Struct({
 
 export type V2ItemStartedNotification = {
   readonly item: V2ItemStartedNotification__ThreadItem;
-  readonly startedAtMs: number;
+  readonly startedAtMs?: number;
   readonly threadId: string;
   readonly turnId: string;
 };
 export const V2ItemStartedNotification = Schema.Struct({
   item: V2ItemStartedNotification__ThreadItem,
-  startedAtMs: Schema.Number.annotate({
-    description: "Unix timestamp (in milliseconds) when this item lifecycle started.",
-    format: "int64",
-  }).check(Schema.isInt()),
+  startedAtMs: Schema.optionalKey(
+    Schema.Number.annotate({
+      description: "Unix timestamp (in milliseconds) when this item lifecycle started.",
+      format: "int64",
+    }).check(Schema.isInt()),
+  ),
   threadId: Schema.String,
   turnId: Schema.String,
 }).annotate({ title: "ItemStartedNotification" });
@@ -35105,7 +35131,7 @@ export type V2ThreadRollbackResponse = {
     readonly name?: string | null;
     readonly path?: string | null;
     readonly preview: string;
-    readonly sessionId: string;
+    readonly sessionId?: string;
     readonly source:
       | "cli"
       | "vscode"
@@ -35192,9 +35218,11 @@ export const V2ThreadRollbackResponse = Schema.Struct({
     preview: Schema.String.annotate({
       description: "Usually the first user message in the thread, if available.",
     }),
-    sessionId: Schema.String.annotate({
-      description: "Session id shared by threads that belong to the same session tree.",
-    }),
+    sessionId: Schema.optionalKey(
+      Schema.String.annotate({
+        description: "Session id shared by threads that belong to the same session tree.",
+      }),
+    ),
     source: Schema.Union(
       [
         Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),
@@ -35323,7 +35351,7 @@ export type V2ThreadRollbackResponse__Thread = {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
   readonly source:
     | "cli"
     | "vscode"
@@ -35408,9 +35436,11 @@ export const V2ThreadRollbackResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  sessionId: Schema.String.annotate({
-    description: "Session id shared by threads that belong to the same session tree.",
-  }),
+  sessionId: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Session id shared by threads that belong to the same session tree.",
+    }),
+  ),
   source: Schema.Union(
     [
       Schema.Literals(["cli", "vscode", "exec", "appServer", "unknown"]),

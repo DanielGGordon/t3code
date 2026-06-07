@@ -54,7 +54,7 @@ export class IdAllocatorV2AllocationError extends Schema.TaggedErrorClass<IdAllo
   {
     kind: IdAllocatorV2Kind,
     input: Schema.optional(Schema.Unknown),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -170,13 +170,22 @@ export interface IdAllocatorV2Shape {
 }
 
 export class IdAllocatorV2 extends Context.Service<IdAllocatorV2, IdAllocatorV2Shape>()(
-  "t3/orchestration-v2/IdAllocator",
+  "t3/orchestration-v2/IdAllocator/IdAllocatorV2",
 ) {}
 
 const encodePart = (part: string | number): string => encodeURIComponent(String(part));
 
 const joinId = (prefix: string, ...parts: ReadonlyArray<string | number>): string =>
   [prefix, ...parts.map(encodePart)].join(":");
+
+const randomUuidV4 = Effect.gen(function* () {
+  const bytes = yield* Effect.all(Array.from({ length: 16 }, () => Random.nextIntBetween(0, 256)));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+
+  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10, 16).join("")}`;
+});
 
 const randomId =
   <Id, Input>(input: {
@@ -186,7 +195,7 @@ const randomId =
     readonly make: (value: string) => Id;
   }) =>
   (allocationInput: Input): Effect.Effect<Id, IdAllocatorV2Error> =>
-    Random.nextUUIDv4.pipe(
+    randomUuidV4.pipe(
       Effect.map((uuid) => input.make(joinId(input.prefix, ...input.parts, uuid))),
       Effect.mapError(
         (cause) =>
