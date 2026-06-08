@@ -1601,6 +1601,7 @@ async function ensureSavedEnvironmentConnection(
                   scopes: scopeHint,
                   serverConfig: options?.serverConfig ?? null,
                   allowManagedRenewal: false,
+                  relayTraceHeaders: renewed.relayTraceHeaders,
                 });
               }
             }
