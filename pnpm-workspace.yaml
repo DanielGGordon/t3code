@@ -84,6 +84,7 @@ overrides:
   "@pierre/diffs>@shikijs/transformers": ^4.2.0
   "@types/node": "catalog:"
   effect: "catalog:"
+  expo-modules-jsi: 56.0.10
   vite: "catalog:"
   yaml: "catalog:"
 
