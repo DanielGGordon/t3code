@@ -16,9 +16,11 @@
 }
 
 [data-slot="sidebar-wrapper"] {
+  /* Two fixed controls sit top-left (sidebar trigger + theme toggle, 0.25rem
+     apart); content starts after both. */
   --workspace-titlebar-content-left: calc(
-    var(--workspace-controls-left) + var(--workspace-titlebar-control-size) +
-      var(--workspace-titlebar-control-gap)
+    var(--workspace-controls-left) + var(--workspace-titlebar-control-size) + 0.25rem +
+      var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap)
   );
 }
 
