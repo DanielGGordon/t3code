@@ -47,6 +47,13 @@ export default function App() {
     if (fontsLoaded) SplashScreen.hide();
   }, [fontsLoaded]);
 
+  // Text measured with the fallback font keeps its stale width when the
+  // custom font swaps in, clipping trailing glyphs. Hold rendering (behind
+  // the splash screen) until fonts resolve.
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <CloudAuthProvider>
