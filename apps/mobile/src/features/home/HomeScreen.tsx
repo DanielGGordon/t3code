@@ -162,9 +162,7 @@ export function HomeScreen(props: HomeScreenProps) {
   >(() => new Map());
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
-  // Chain collapse writes so rapid toggles can't complete out of order and
-  // resurrect a stale collapsed-group list.
-  const collapsePersistQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const collapseDirtyRef = useRef(false);
   const insets = useSafeAreaInsets();
   const accentColor = useThemeColor("--color-icon-muted");
 
@@ -196,23 +194,31 @@ export function HomeScreen(props: HomeScreenProps) {
   }, []);
 
   const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    if (action === "toggle-collapsed") {
+      collapseDirtyRef.current = true;
+    }
     setGroupDisplayStates((previous) => {
       const next = new Map(previous);
       next.set(
         key,
         nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
       );
-      if (action === "toggle-collapsed") {
-        const collapsedProjectGroups = [...next.entries()]
-          .filter(([, state]) => state.collapsed)
-          .map(([groupKey]) => groupKey);
-        collapsePersistQueueRef.current = collapsePersistQueueRef.current
-          .then(() => savePreferencesPatch({ collapsedProjectGroups }))
-          .catch(() => undefined);
-      }
       return next;
     });
   }, []);
+
+  // Persist collapse changes after commit — once per state change, outside
+  // the updater, so it can't interleave with other preference writes.
+  useEffect(() => {
+    if (!collapseDirtyRef.current) {
+      return;
+    }
+    collapseDirtyRef.current = false;
+    const collapsedProjectGroups = [...groupDisplayStates.entries()]
+      .filter(([, state]) => state.collapsed)
+      .map(([groupKey]) => groupKey);
+    void savePreferencesPatch({ collapsedProjectGroups }).catch(() => undefined);
+  }, [groupDisplayStates]);
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {

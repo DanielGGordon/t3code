@@ -197,14 +197,22 @@ export async function loadPreferences(): Promise<Preferences> {
   return preferences;
 }
 
+// Serialize read-modify-write cycles so concurrent patches from different
+// screens can't read the same blob and silently drop each other's fields.
+let preferencesWriteQueue: Promise<unknown> = Promise.resolve();
+
 export async function savePreferencesPatch(patch: Partial<Preferences>): Promise<Preferences> {
-  const current = await loadPreferences();
-  const next: Preferences = {
-    ...current,
-    ...patch,
-  };
-  await writeJsonStorageItem(PREFERENCES_KEY, next);
-  return next;
+  const write = preferencesWriteQueue.then(async () => {
+    const current = await loadPreferences();
+    const next: Preferences = {
+      ...current,
+      ...patch,
+    };
+    await writeJsonStorageItem(PREFERENCES_KEY, next);
+    return next;
+  });
+  preferencesWriteQueue = write.catch(() => undefined);
+  return write;
 }
 
 export async function loadOrCreateAgentAwarenessDeviceId(): Promise<string> {
