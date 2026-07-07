@@ -67,6 +67,8 @@ export interface Preferences {
   /** Code/diff font size override; null/absent means derived from baseFontSize. */
   readonly codeFontSize?: number | null;
   readonly codeWordBreak?: boolean;
+  /** Home-screen project groups the user collapsed, by group key. */
+  readonly collapsedProjectGroups?: readonly string[];
 }
 
 async function readStorageItem(key: MobileStorageKeyValue): Promise<string | null> {
@@ -165,6 +167,7 @@ export async function loadPreferences(): Promise<Preferences> {
     markdownFontSize?: number;
     codeFontSize?: number | null;
     codeWordBreak?: boolean;
+    collapsedProjectGroups?: readonly string[];
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -184,6 +187,11 @@ export async function loadPreferences(): Promise<Preferences> {
   }
   if (typeof parsed.codeWordBreak === "boolean") {
     preferences.codeWordBreak = parsed.codeWordBreak;
+  }
+  if (Array.isArray(parsed.collapsedProjectGroups)) {
+    preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
+      (key): key is string => typeof key === "string",
+    );
   }
 
   return preferences;

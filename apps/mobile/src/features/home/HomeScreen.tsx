@@ -12,7 +12,7 @@ import type {
   SidebarProjectGroupingMode,
   SidebarThreadSortOrder,
 } from "@t3tools/contracts";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +22,7 @@ import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey } from "../../lib/scopedEntities";
+import { loadPreferences, savePreferencesPatch } from "../../lib/storage";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   PendingTaskListRow,
@@ -164,6 +165,33 @@ export function HomeScreen(props: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const accentColor = useThemeColor("--color-icon-muted");
 
+  // Collapsed groups survive restarts. Hydration only fills groups the user
+  // hasn't already toggled this session, so a fast tap can't be clobbered by
+  // the async preferences read.
+  useEffect(() => {
+    let cancelled = false;
+    loadPreferences()
+      .then((preferences) => {
+        const collapsedKeys = preferences.collapsedProjectGroups;
+        if (cancelled || !collapsedKeys || collapsedKeys.length === 0) {
+          return;
+        }
+        setGroupDisplayStates((previous) => {
+          const next = new Map(previous);
+          for (const key of collapsedKeys) {
+            if (!next.has(key)) {
+              next.set(key, { ...DEFAULT_GROUP_DISPLAY_STATE, collapsed: true });
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
     setGroupDisplayStates((previous) => {
       const next = new Map(previous);
@@ -171,6 +199,12 @@ export function HomeScreen(props: HomeScreenProps) {
         key,
         nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
       );
+      if (action === "toggle-collapsed") {
+        const collapsedProjectGroups = [...next.entries()]
+          .filter(([, state]) => state.collapsed)
+          .map(([groupKey]) => groupKey);
+        void savePreferencesPatch({ collapsedProjectGroups }).catch(() => undefined);
+      }
       return next;
     });
   }, []);
