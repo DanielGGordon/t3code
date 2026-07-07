@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
+import { T3Wordmark } from "../../components/T3Wordmark";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
@@ -185,15 +186,18 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         <View style={{ alignSelf: "center", gap: 12, maxWidth: 720, width: "100%" }}>
           <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
             <View style={{ alignItems: "center", flexDirection: "row", flex: 1, gap: 8 }}>
+              {/* Mirrors the desktop SidebarBrand: T3 mark + muted "Code". */}
+              <T3Wordmark color={iconColor} height={15} />
               <RNText
                 style={{
-                  color: iconColor,
-                  fontFamily: "DMSans_700Bold",
+                  color: mutedColor,
+                  fontFamily: "DMSans_500Medium",
                   fontSize: MOBILE_TYPOGRAPHY.title.fontSize,
                   letterSpacing: -0.5,
+                  marginLeft: -2,
                 }}
               >
-                T3 Code
+                Code
               </RNText>
               <View
                 style={{
