@@ -12,6 +12,21 @@ export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
   return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
 }
 
+/* Shiki themes used by the markdown code-block highlighter.
+ * Kept separate from DIFF_THEME_NAMES so the chat code-block palette
+ * tracks the app theme (Solarized) while the diff renderer keeps the
+ * pierre theme that ships with `@pierre/diffs`. */
+export const SHIKI_THEME_NAMES = {
+  light: "solarized-light",
+  dark: "solarized-dark",
+} as const;
+
+export type ShikiThemeName = (typeof SHIKI_THEME_NAMES)[keyof typeof SHIKI_THEME_NAMES];
+
+export function resolveShikiThemeName(theme: "light" | "dark"): ShikiThemeName {
+  return theme === "dark" ? SHIKI_THEME_NAMES.dark : SHIKI_THEME_NAMES.light;
+}
+
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
 const FNV_PRIME_32 = 0x01000193;
 const SECONDARY_HASH_SEED = 0x9e3779b9;

@@ -50,7 +50,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useOpenInPreferredEditor } from "../editorPreferences";
-import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
+import { resolveShikiThemeName, type ShikiThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
@@ -264,7 +264,11 @@ function extractCodeBlock(
   };
 }
 
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
+function createHighlightCacheKey(
+  code: string,
+  language: string,
+  themeName: ShikiThemeName,
+): string {
   return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
 }
 
@@ -277,7 +281,7 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    themes: [resolveShikiThemeName("dark"), resolveShikiThemeName("light")],
     langs: [language as SupportedLanguages],
     preferredHighlighter: "shiki-js",
   }).catch((err) => {
@@ -633,7 +637,7 @@ function MarkdownCodeBlock({
 interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
-  themeName: DiffThemeName;
+  themeName: ShikiThemeName;
   isStreaming: boolean;
 }
 
@@ -670,7 +674,7 @@ function SuspenseShikiCodeBlock({
 interface UncachedShikiCodeBlockProps {
   code: string;
   language: string;
-  themeName: DiffThemeName;
+  themeName: ShikiThemeName;
   cacheKey: string;
   isStreaming: boolean;
 }
@@ -1252,7 +1256,7 @@ function ChatMarkdown({
     environmentId,
     serverConfig?.availableEditors ?? [],
   );
-  const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const diffThemeName = resolveShikiThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
