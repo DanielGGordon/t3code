@@ -117,6 +117,7 @@ interface ClaudeResumeState {
   readonly threadId?: ThreadId;
   readonly resume?: string;
   readonly resumeSessionAt?: string;
+  readonly forkSession?: boolean;
   readonly turnCount?: number;
 }
 
@@ -185,6 +186,11 @@ interface ClaudeSessionContext {
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
+  // When true, the persisted resume cursor still requests a fork of
+  // `forkOriginSessionId`. Cleared once the SDK reports the forked session's
+  // new id, so later turns continue the fork instead of re-forking the origin.
+  forkSession: boolean;
+  readonly forkOriginSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -568,6 +574,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resume?: unknown;
     sessionId?: unknown;
     resumeSessionAt?: unknown;
+    forkSession?: unknown;
     turnCount?: unknown;
   };
 
@@ -585,12 +592,16 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
+  // `forkSession` only makes sense when paired with `resume`; the SDK forks the
+  // resumed session into a brand-new session id on the first turn.
+  const forkSession = cursor.forkSession === true && resume !== undefined ? true : undefined;
   const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
     ...(resumeSessionAt ? { resumeSessionAt } : {}),
+    ...(forkSession ? { forkSession } : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
@@ -1454,6 +1465,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       threadId,
       ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
       ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
+      // Only persist the fork request until the forked session id is captured;
+      // once `ensureThreadId` clears the flag, later turns continue the fork.
+      ...(context.forkSession ? { forkSession: true } : {}),
       turnCount: context.turns.length,
     };
 
@@ -1655,6 +1669,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
     const nextThreadId = message.session_id;
     context.resumeSessionId = message.session_id;
+    // The first durable message of a fork carries the new session id (distinct
+    // from the origin we resumed). Clear the fork flag so the persisted cursor
+    // continues this forked session instead of re-forking the origin next turn.
+    if (context.forkSession && message.session_id !== context.forkOriginSessionId) {
+      context.forkSession = false;
+    }
     yield* updateResumeCursor(context);
 
     if (context.lastThreadStartedId !== nextThreadId) {
@@ -3093,6 +3113,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
       const sessionId = existingResumeSessionId ?? newSessionId;
+      // Fork only applies when resuming an existing session. On the first turn
+      // the SDK loads `existingResumeSessionId`'s history but writes to a brand
+      // new session id; `ensureThreadId` captures that id and clears the flag so
+      // subsequent turns continue the fork rather than re-forking the origin.
+      const forkSession =
+        resumeState?.forkSession === true && existingResumeSessionId !== undefined;
 
       const runtimeContext = yield* Effect.context<never>();
       const runFork = Effect.runForkWith(runtimeContext);
@@ -3460,6 +3486,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
+        ...(forkSession ? { forkSession: true } : {}),
+        // Only pin the resume checkpoint when forking. On a normal resume we
+        // deliberately avoid pinning to a (possibly stale) assistant message so
+        // the SDK continues from the live head of the session.
+        ...(forkSession && resumeState?.resumeSessionAt
+          ? { resumeSessionAt: resumeState.resumeSessionAt }
+          : {}),
         includePartialMessages: true,
         canUseTool,
         env: claudeEnvironment,
@@ -3489,6 +3522,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.resume.thread_id": resumeState?.threadId ?? "",
         "claude.resume.session_id": existingResumeSessionId ?? "",
         "claude.resume.session_at": resumeState?.resumeSessionAt ?? "",
+        "claude.resume.fork_session": forkSession,
         "claude.resume.turn_count": resumeState?.turnCount ?? -1,
         "claude.query.cwd": input.cwd ?? "",
         "claude.query.model": apiModelId ?? "",
@@ -3533,6 +3567,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(threadId ? { threadId } : {}),
           ...(sessionId ? { resume: sessionId } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
+          ...(forkSession ? { forkSession: true } : {}),
           turnCount: resumeState?.turnCount ?? 0,
         },
         createdAt: startedAt,
@@ -3548,6 +3583,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
+        forkSession,
+        forkOriginSessionId: forkSession ? existingResumeSessionId : undefined,
         pendingApprovals,
         pendingUserInputs,
         turns: [],

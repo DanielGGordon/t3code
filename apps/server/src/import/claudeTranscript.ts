@@ -1,0 +1,265 @@
+/**
+ * Portable parser for Claude Code conversation transcripts (JSONL).
+ *
+ * Reads a `.jsonl` transcript (one JSON object per line) and extracts the
+ * minimal data needed to import a conversation into another system.
+ *
+ * This module is intentionally dependency-free (pure parsing, no T3/Effect
+ * imports) so it can be reused or extracted into its own package later.
+ *
+ * "Phase A minimal": text turns only. Tool calls, tool results and sub-agent
+ * (sidechain) handling are deliberately deferred to a later phase. The code is
+ * structured so that those extensions slot in cleanly:
+ *  - Each emitted message keeps its `uuid` (future idempotency key).
+ *  - We classify line types in one place so new types can be handled later.
+ *  - We never reconstruct the parentUuid tree here (deferred to a later phase);
+ *    we rely on natural file (append) order instead.
+ */
+
+export interface ParsedClaudeMessage {
+  uuid: string;
+  role: "user" | "assistant";
+  text: string;
+  timestamp: string; // ISO-8601 from the line
+}
+
+export interface ParsedClaudeSession {
+  sessionId: string; // from message.sessionId (fallback: derive from filename if passed)
+  cwd: string | null; // from any line's cwd
+  gitBranch: string | null;
+  title: string | null; // ai-title || custom-title || first user prompt (truncated)
+  startedAt: string | null; // first threaded line timestamp
+  endedAt: string | null; // last threaded line timestamp
+  messages: ParsedClaudeMessage[];
+}
+
+export interface ParseClaudeTranscriptOptions {
+  sessionIdFromFilename?: string;
+}
+
+/** Result of parsing, including a count of lines we could not parse/handle. */
+export interface ParseClaudeTranscriptResult {
+  session: ParsedClaudeSession;
+  /** Number of lines that were present but could not be JSON-parsed. */
+  malformedLineCount: number;
+}
+
+const TITLE_MAX_LENGTH = 80;
+
+/** Threaded line types that carry the conversation envelope (uuid, etc.). */
+const THREADED_TYPES = new Set(["user", "assistant", "system", "attachment"]);
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function truncateTitle(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= TITLE_MAX_LENGTH) return trimmed;
+  return trimmed.slice(0, TITLE_MAX_LENGTH).trimEnd();
+}
+
+/**
+ * Extract concatenated `text` block content from an assistant `message.content`
+ * array. `tool_use` (and any other non-text) blocks are skipped in minimal mode.
+ */
+function extractAssistantText(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!isRecord(block)) continue;
+    if (block.type !== "text") continue;
+    const text = asString(block.text);
+    if (text !== null && text.length > 0) parts.push(text);
+  }
+  return parts.join("");
+}
+
+/**
+ * Parse a Claude Code transcript JSONL string into a minimal session.
+ *
+ * Parses defensively: every field except the line `type` is treated as
+ * possibly-absent, and malformed (non-JSON) lines are skipped and counted
+ * rather than throwing.
+ */
+export function parseClaudeTranscript(
+  jsonlContent: string,
+  opts: ParseClaudeTranscriptOptions = {},
+): ParsedClaudeSession {
+  return parseClaudeTranscriptWithStats(jsonlContent, opts).session;
+}
+
+/**
+ * Like {@link parseClaudeTranscript} but also returns parse statistics
+ * (e.g. the count of malformed lines that were skipped).
+ */
+export function parseClaudeTranscriptWithStats(
+  jsonlContent: string,
+  opts: ParseClaudeTranscriptOptions = {},
+): ParseClaudeTranscriptResult {
+  const messages: ParsedClaudeMessage[] = [];
+
+  let sessionId: string | null = null;
+  let cwd: string | null = null;
+  let gitBranch: string | null = null;
+
+  let aiTitle: string | null = null;
+  let customTitle: string | null = null;
+  let firstUserPrompt: string | null = null;
+
+  let startedAt: string | null = null;
+  let endedAt: string | null = null;
+
+  let malformedLineCount = 0;
+
+  const lines = jsonlContent.split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      malformedLineCount += 1;
+      continue;
+    }
+    if (!isRecord(parsed)) {
+      malformedLineCount += 1;
+      continue;
+    }
+
+    const type = asString(parsed.type);
+    if (type === null) continue;
+
+    // Sidecar / state lines (no uuid). Capture titles, otherwise ignore.
+    if (type === "ai-title") {
+      aiTitle = asString(parsed.title) ?? aiTitle;
+      continue;
+    }
+    if (type === "custom-title") {
+      customTitle = asString(parsed.title) ?? customTitle;
+      continue;
+    }
+
+    // Threaded lines carry the conversation envelope.
+    if (THREADED_TYPES.has(type)) {
+      // Track session-wide metadata from any threaded line.
+      sessionId = sessionId ?? asString(parsed.sessionId);
+      cwd = cwd ?? asString(parsed.cwd);
+      gitBranch = gitBranch ?? asString(parsed.gitBranch);
+
+      const timestamp = asString(parsed.timestamp);
+      if (timestamp !== null) {
+        if (startedAt === null) startedAt = timestamp;
+        endedAt = timestamp;
+      }
+
+      if (type === "user") {
+        handleUserLine(parsed, timestamp, messages, (prompt) => {
+          if (firstUserPrompt === null) firstUserPrompt = prompt;
+        });
+        continue;
+      }
+
+      if (type === "assistant") {
+        handleAssistantLine(parsed, timestamp, messages);
+        continue;
+      }
+
+      // `system` and `attachment` threaded lines carry no minimal-mode
+      // conversation text; they are ignored here (their timestamps still
+      // contribute to startedAt/endedAt above).
+      continue;
+    }
+
+    // All other types (file-history-snapshot, queue-operation, mode,
+    // permission-mode, agent-name, last-prompt, ...) are ignored in minimal mode.
+  }
+
+  const title =
+    aiTitle ?? customTitle ?? (firstUserPrompt !== null ? truncateTitle(firstUserPrompt) : null);
+
+  const session: ParsedClaudeSession = {
+    sessionId: sessionId ?? opts.sessionIdFromFilename ?? "",
+    cwd,
+    gitBranch,
+    title,
+    startedAt,
+    endedAt,
+    messages,
+  };
+
+  return { session, malformedLineCount };
+}
+
+function handleUserLine(
+  parsed: UnknownRecord,
+  timestamp: string | null,
+  messages: ParsedClaudeMessage[],
+  onFirstPrompt: (prompt: string) => void,
+): void {
+  // Filter out injected / non-conversation user lines.
+  if (asBoolean(parsed.isMeta)) return;
+  if (asBoolean(parsed.isCompactSummary)) return;
+  if (asBoolean(parsed.isVisibleInTranscriptOnly)) return;
+
+  const message = parsed.message;
+  if (!isRecord(message)) return;
+
+  // For a typed prompt, message.content is a STRING. Tool results arrive as an
+  // ARRAY of tool_result blocks; skip those in minimal mode.
+  const content = message.content;
+  const text = asString(content);
+  if (text === null) return; // array content (tool_result) -> skip
+
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return;
+
+  onFirstPrompt(trimmed);
+
+  const uuid = asString(parsed.uuid);
+  if (uuid === null) return;
+
+  messages.push({
+    uuid,
+    role: "user",
+    text,
+    timestamp: timestamp ?? "",
+  });
+}
+
+function handleAssistantLine(
+  parsed: UnknownRecord,
+  timestamp: string | null,
+  messages: ParsedClaudeMessage[],
+): void {
+  const message = parsed.message;
+  if (!isRecord(message)) return;
+
+  // One model turn may be split across multiple assistant lines sharing the
+  // same message.id. In minimal mode we do NOT dedupe by message.id; we emit
+  // the text blocks of each line in file order.
+  const text = extractAssistantText(message.content);
+  if (text.length === 0) return; // tool_use-only line -> emit nothing
+
+  const uuid = asString(parsed.uuid);
+  if (uuid === null) return;
+
+  messages.push({
+    uuid,
+    role: "assistant",
+    text,
+    timestamp: timestamp ?? "",
+  });
+}
