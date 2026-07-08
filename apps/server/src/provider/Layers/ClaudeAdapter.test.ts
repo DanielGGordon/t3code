@@ -1794,6 +1794,7 @@ describe("ClaudeAdapterLive", () => {
         result: "done",
         stop_reason: "end_turn",
         session_id: "sdk-session-result-usage",
+        total_cost_usd: 0.4275,
         usage: {
           input_tokens: 4,
           cache_creation_input_tokens: 2715,
@@ -1820,6 +1821,7 @@ describe("ClaudeAdapterLive", () => {
             inputTokens: 23863,
             outputTokens: 679,
             maxTokens: 200000,
+            costUsd: 0.4275,
           },
         });
       }
@@ -1861,6 +1863,7 @@ describe("ClaudeAdapterLive", () => {
         result: "done",
         stop_reason: "end_turn",
         session_id: "sdk-session-result-usage-clamped",
+        total_cost_usd: 1.5,
         usage: {
           total_tokens: 535000,
         },
@@ -1883,6 +1886,7 @@ describe("ClaudeAdapterLive", () => {
             lastUsedTokens: 200000,
             totalProcessedTokens: 535000,
             maxTokens: 200000,
+            costUsd: 1.5,
           },
         });
       }

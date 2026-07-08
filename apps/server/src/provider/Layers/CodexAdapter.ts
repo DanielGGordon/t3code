@@ -60,6 +60,7 @@ import {
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
+import { estimateCodexCostUsd } from "./codexPricing.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
@@ -84,11 +85,85 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+/**
+ * Mutable per-session state needed to price token usage.
+ *
+ * The tokenUsage notification carries no model, so we track the model most
+ * recently bound to the session (start or per-turn override). Spend is
+ * accumulated from per-update deltas priced at the model bound when they
+ * were incurred: pricing the cumulative breakdown at the *current* model
+ * would make the emitted costUsd DROP after a mid-session switch to a
+ * cheaper model, which the web accumulator
+ * (deriveLatestContextWindowSnapshot) reads as a session restart and
+ * double-counts. State dies with the session, so the emitted running total
+ * keeps the contract's "resets with the session" semantics.
+ */
+interface CodexSessionCostState {
+  model: string | undefined;
+  /** Cumulative token breakdown already folded into `costUsd`. */
+  pricedTotal: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+  };
+  /** Monotonic running session cost; undefined until any tokens were priced. */
+  costUsd: number | undefined;
+  /** True once tokens accrued while the bound model had no pricing entry. */
+  hasUnpricedTokens: boolean;
+}
+
+function makeCodexSessionCostState(model: string | undefined): CodexSessionCostState {
+  return {
+    model,
+    pricedTotal: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    costUsd: undefined,
+    hasUnpricedTokens: false,
+  };
+}
+
+/**
+ * Fold the tokens added since the previous update into the session's running
+ * cost, priced at the currently-bound model, and return the fields to attach
+ * to the outgoing snapshot. Mutates `costState`.
+ */
+function priceCodexTokenUsageDelta(
+  total: EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification["tokenUsage"]["total"],
+  costState: CodexSessionCostState | undefined,
+): Pick<ThreadTokenUsageSnapshot, "costUsd" | "costUsdIncomplete"> {
+  if (!costState) {
+    return {};
+  }
+  const delta = {
+    inputTokens: Math.max(0, total.inputTokens - costState.pricedTotal.inputTokens),
+    cachedInputTokens: Math.max(
+      0,
+      total.cachedInputTokens - costState.pricedTotal.cachedInputTokens,
+    ),
+    outputTokens: Math.max(0, total.outputTokens - costState.pricedTotal.outputTokens),
+  };
+  costState.pricedTotal = {
+    inputTokens: Math.max(costState.pricedTotal.inputTokens, total.inputTokens),
+    cachedInputTokens: Math.max(costState.pricedTotal.cachedInputTokens, total.cachedInputTokens),
+    outputTokens: Math.max(costState.pricedTotal.outputTokens, total.outputTokens),
+  };
+  const deltaCost = estimateCodexCostUsd(costState.model, delta);
+  if (deltaCost !== undefined) {
+    costState.costUsd = (costState.costUsd ?? 0) + deltaCost;
+  } else if (delta.inputTokens > 0 || delta.cachedInputTokens > 0 || delta.outputTokens > 0) {
+    costState.hasUnpricedTokens = true;
+  }
+  return {
+    ...(costState.costUsd !== undefined ? { costUsd: costState.costUsd } : {}),
+    ...(costState.hasUnpricedTokens ? { costUsdIncomplete: true } : {}),
+  };
+}
+
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  readonly costState: CodexSessionCostState;
   stopped: boolean;
 }
 
@@ -155,6 +230,7 @@ function isFatalCodexProcessStderrMessage(message: string): boolean {
 
 function normalizeCodexTokenUsage(
   usage: EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification["tokenUsage"],
+  costState?: CodexSessionCostState,
 ): ThreadTokenUsageSnapshot | undefined {
   const totalProcessedTokens = usage.total.totalTokens;
   const usedTokens = usage.last.totalTokens;
@@ -167,6 +243,13 @@ function normalizeCodexTokenUsage(
   const cachedInputTokens = usage.last.cachedInputTokens;
   const outputTokens = usage.last.outputTokens;
   const reasoningOutputTokens = usage.last.reasoningOutputTokens;
+
+  // Price only the tokens added since the previous update, at the model
+  // bound while they were incurred, and emit the per-session running total.
+  // This keeps costUsd monotonic per session and reset-aligned with
+  // totalProcessedTokens even across mid-session model switches (see
+  // CodexSessionCostState).
+  const cost = priceCodexTokenUsageDelta(usage.total, costState);
 
   return {
     usedTokens,
@@ -185,6 +268,7 @@ function normalizeCodexTokenUsage(
     ...(reasoningOutputTokens !== undefined
       ? { lastReasoningOutputTokens: reasoningOutputTokens }
       : {}),
+    ...cost,
     compactsAutomatically: true,
   };
 }
@@ -489,6 +573,7 @@ function mapItemLifecycle(
 function mapToRuntimeEvents(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
+  costState?: CodexSessionCostState,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (event.kind === "error") {
     if (!event.message) {
@@ -729,7 +814,9 @@ function mapToRuntimeEvents(
       EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
       event.payload,
     );
-    const normalizedUsage = payload ? normalizeCodexTokenUsage(payload.tokenUsage) : undefined;
+    const normalizedUsage = payload
+      ? normalizeCodexTokenUsage(payload.tokenUsage, costState)
+      : undefined;
     if (!normalizedUsage) {
       return [];
     }
@@ -1417,6 +1504,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
             : {}),
         };
+        const costState = makeCodexSessionCostState(
+          input.modelSelection?.instanceId === boundInstanceId
+            ? input.modelSelection.model
+            : undefined,
+        );
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
@@ -1441,7 +1533,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, costState);
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1479,6 +1571,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
+          costState,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1527,6 +1620,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
     const session = yield* requireSession(input.threadId);
+    if (input.modelSelection?.instanceId === boundInstanceId && input.modelSelection.model) {
+      session.costState.model = input.modelSelection.model;
+    }
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")

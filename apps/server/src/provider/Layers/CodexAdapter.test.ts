@@ -46,6 +46,7 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
+import { estimateCodexCostUsd } from "./codexPricing.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -1082,10 +1083,253 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastCachedInputTokens: 0,
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
+        // No model bound to the session -> tokens accrued unpriced.
+        costUsdIncomplete: true,
         compactsAutomatically: true,
       });
+      // No model bound to the session -> no cost estimate on the snapshot.
+      NodeAssert.ok(!("costUsd" in firstEvent.value.payload.usage));
     }),
   );
+
+  it.effect("prices Codex token usage snapshots when a model is bound to the session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-cost"),
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5-codex", []),
+        runtimeMode: "full-access",
+      });
+      const runtime = lifecycleRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-codex-thread-token-usage-priced"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-cost"),
+        turnId: asTurnId("turn-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/tokenUsage/updated",
+        payload: {
+          threadId: "thread-cost",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              inputTokens: 11_833,
+              cachedInputTokens: 3456,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 11_839,
+            },
+            last: {
+              inputTokens: 120,
+              cachedInputTokens: 0,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 126,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.type, "thread.token-usage.updated");
+      if (firstEvent.value.type !== "thread.token-usage.updated") {
+        return;
+      }
+
+      // First update: the delta from zero is the full cumulative breakdown,
+      // priced at gpt-5.5 list rates:
+      // ((11833 - 3456) * 5 + 3456 * 0.5 + 6 * 30) / 1e6
+      NodeAssert.equal(firstEvent.value.payload.usage.costUsd, 0.043793);
+      NodeAssert.equal(firstEvent.value.payload.usage.totalProcessedTokens, 11_839);
+      // All tokens were priced, so no partial-coverage flag.
+      NodeAssert.ok(!("costUsdIncomplete" in firstEvent.value.payload.usage));
+    }),
+  );
+
+  it.effect(
+    "keeps costUsd monotonic across a mid-session switch to a cheaper model by pricing deltas",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-cost-switch"),
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5", []),
+          runtimeMode: "full-access",
+        });
+        const runtime = lifecycleRuntimeFactory.lastRuntime;
+        NodeAssert.ok(runtime);
+
+        const tokenUsageEvent = (
+          id: string,
+          total: {
+            inputTokens: number;
+            cachedInputTokens: number;
+            outputTokens: number;
+            reasoningOutputTokens: number;
+            totalTokens: number;
+          },
+          last: {
+            inputTokens: number;
+            cachedInputTokens: number;
+            outputTokens: number;
+            reasoningOutputTokens: number;
+            totalTokens: number;
+          },
+        ) =>
+          ({
+            id: asEventId(id),
+            kind: "notification",
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-cost-switch"),
+            turnId: asTurnId("turn-1"),
+            createdAt: "2026-01-01T00:00:00.000Z",
+            method: "thread/tokenUsage/updated",
+            payload: {
+              threadId: "thread-cost-switch",
+              turnId: "turn-1",
+              tokenUsage: { total, last, modelContextWindow: 258_400 },
+            },
+          }) satisfies ProviderEvent;
+
+        // Turn 1 on gpt-5.5: (100k * 5 + 10k * 30) / 1e6 = $0.80.
+        const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+        yield* runtime.emit(
+          tokenUsageEvent(
+            "evt-cost-switch-1",
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+          ),
+        );
+        // Wait for the first snapshot to be priced before switching models so
+        // the two updates are deterministically priced at different rates.
+        const firstEvent = yield* Fiber.join(firstEventFiber);
+        NodeAssert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        NodeAssert.equal(firstEvent.value.type, "thread.token-usage.updated");
+        if (firstEvent.value.type !== "thread.token-usage.updated") {
+          return;
+        }
+        NodeAssert.equal(firstEvent.value.payload.usage.costUsd, 0.8);
+
+        // Switch the next turn to the cheaper gpt-5.4-mini.
+        yield* Effect.ignore(
+          adapter.sendTurn({
+            threadId: asThreadId("thread-cost-switch"),
+            input: "hello",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("codex"),
+              "gpt-5.4-mini",
+              [],
+            ),
+            attachments: [],
+          }),
+        );
+
+        // Turn 2 adds the same token counts again; only the delta is priced,
+        // at gpt-5.4-mini rates: (100k * 0.75 + 10k * 4.5) / 1e6 = $0.12.
+        const secondEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+        yield* runtime.emit(
+          tokenUsageEvent(
+            "evt-cost-switch-2",
+            {
+              inputTokens: 200_000,
+              cachedInputTokens: 0,
+              outputTokens: 20_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 220_000,
+            },
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+          ),
+        );
+
+        const secondEvent = yield* Fiber.join(secondEventFiber);
+        NodeAssert.equal(secondEvent._tag, "Some");
+        if (secondEvent._tag !== "Some") {
+          return;
+        }
+        NodeAssert.equal(secondEvent.value.type, "thread.token-usage.updated");
+        if (secondEvent.value.type !== "thread.token-usage.updated") {
+          return;
+        }
+        // Monotonic running total ($0.80 + $0.12), NOT the whole cumulative
+        // breakdown repriced at mini rates ($0.24), which would decrease and
+        // make the web accumulator bank the pre-switch spend twice.
+        NodeAssert.equal(secondEvent.value.payload.usage.costUsd, 0.92);
+      }),
+  );
+});
+
+it("estimates Codex cost with the cached-input discount", () => {
+  const cost = estimateCodexCostUsd("gpt-5.5-codex", {
+    inputTokens: 1000,
+    cachedInputTokens: 400,
+    outputTokens: 100,
+  });
+  // (600 * 5 + 400 * 0.5 + 100 * 30) / 1e6
+  NodeAssert.equal(cost, 0.0062);
+});
+
+it("clamps uncached input at zero when cached tokens exceed input tokens", () => {
+  const cost = estimateCodexCostUsd("gpt-5.5", {
+    inputTokens: 100,
+    cachedInputTokens: 200,
+    outputTokens: 0,
+  });
+  // (0 * 5 + 200 * 0.5 + 0 * 30) / 1e6
+  NodeAssert.equal(cost, 0.0001);
+});
+
+it("returns undefined for unknown or missing models", () => {
+  const usage = { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 100 };
+  NodeAssert.equal(estimateCodexCostUsd("gpt-6-experimental", usage), undefined);
+  NodeAssert.equal(estimateCodexCostUsd(undefined, usage), undefined);
+});
+
+it("prefers the most specific pricing prefix", () => {
+  const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+  // gpt-5.4-mini rate (0.75/1M input), not the shorter gpt-5.4 prefix (2.5/1M).
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.4-mini-2026-01-01", usage), 0.75);
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.4", usage), 2.5);
+});
+
+it("prices gpt-5.3-codex but keeps the API-unavailable spark preview unpriced", () => {
+  const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.3-codex", usage), 1.75);
+  // gpt-5.3-codex-spark has no published API list price (research preview),
+  // so it must stay unpriced despite sharing the gpt-5.3-codex prefix.
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.3-codex-spark", usage), undefined);
 });
 
 const scopedLifecycleRuntimeFactory = makeScopedRuntimeFactory();

@@ -13,6 +13,8 @@ import {
   resolveScopedWeeklyLabel,
   selectHeaderUsageStats,
   selectHeaderUsageStatsVisibility,
+  SPEND_STAT_PARTIAL_TOOLTIP,
+  SPEND_STAT_TOOLTIP,
 } from "./HeaderUsageStats";
 
 function makeActivity(id: string, payload: unknown): OrchestrationThreadActivity {
@@ -28,7 +30,7 @@ function makeActivity(id: string, payload: unknown): OrchestrationThreadActivity
 }
 
 const contextWindow = deriveLatestContextWindowSnapshot([
-  makeActivity("activity-1", { usedTokens: 167_000, maxTokens: 200_000 }),
+  makeActivity("activity-1", { usedTokens: 167_000, maxTokens: 200_000, costUsd: 1.416 }),
 ]);
 
 const claudeUsage: ClaudeAccountUsage = {
@@ -42,6 +44,7 @@ const claudeUsage: ClaudeAccountUsage = {
 
 const allVisible: HeaderUsageStatsVisibility = {
   context: true,
+  spend: true,
   session: true,
   weekly: true,
   scopedWeekly: true,
@@ -51,6 +54,7 @@ describe("selectHeaderUsageStatsVisibility", () => {
   it("defaults every stat to hidden", () => {
     expect(selectHeaderUsageStatsVisibility(DEFAULT_CLIENT_SETTINGS)).toEqual({
       context: false,
+      spend: false,
       session: false,
       weekly: false,
       scopedWeekly: false,
@@ -68,10 +72,63 @@ describe("selectHeaderUsageStats", () => {
 
     expect(stats.map((stat) => ({ id: stat.id, label: stat.label, value: stat.value }))).toEqual([
       { id: "context", label: "Context", value: "167k" },
+      { id: "spend", label: "Spend", value: "$1.42" },
       { id: "session", label: "Session", value: "42%" },
       { id: "weekly", label: "Weekly", value: "63%" },
       { id: "scopedWeekly", label: "Fable", value: "18%" },
     ]);
+  });
+
+  it("attaches the estimate caveat tooltip to the spend stat only", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow,
+      claudeUsage,
+    });
+
+    expect(stats.find((stat) => stat.id === "spend")?.tooltip).toBe(SPEND_STAT_TOOLTIP);
+    expect(stats.filter((stat) => stat.tooltip !== undefined).map((stat) => stat.id)).toEqual([
+      "spend",
+    ]);
+  });
+
+  it("marks the spend stat as partial when some usage had no list price", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", { usedTokens: 10_000, costUsd: 1.416 }),
+        // e.g. a Codex session on a model with no published API list price.
+        makeActivity("activity-2", { usedTokens: 20_000, costUsdIncomplete: true }),
+      ]),
+      claudeUsage: null,
+    });
+
+    const spend = stats.find((stat) => stat.id === "spend");
+    expect(spend?.label).toBe("Spend (partial)");
+    expect(spend?.value).toBe("$1.42");
+    expect(spend?.tooltip).toBe(SPEND_STAT_PARTIAL_TOOLTIP);
+  });
+
+  it("omits the spend stat when it is toggled off", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: { ...allVisible, spend: false },
+      contextWindow,
+      claudeUsage,
+    });
+
+    expect(stats.map((stat) => stat.id)).toEqual(["context", "session", "weekly", "scopedWeekly"]);
+  });
+
+  it("omits the spend stat when no cost data ever arrived", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", { usedTokens: 167_000, maxTokens: 200_000 }),
+      ]),
+      claudeUsage: null,
+    });
+
+    expect(stats.map((stat) => stat.id)).toEqual(["context"]);
   });
 
   it("assigns a distinct color per stat", () => {
@@ -91,7 +148,7 @@ describe("selectHeaderUsageStats", () => {
       claudeUsage,
     });
 
-    expect(stats.map((stat) => stat.id)).toEqual(["context", "scopedWeekly"]);
+    expect(stats.map((stat) => stat.id)).toEqual(["context", "spend", "scopedWeekly"]);
   });
 
   it("renders nothing for a toggled-on stat whose data is unavailable", () => {

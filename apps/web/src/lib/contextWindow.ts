@@ -23,6 +23,12 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
   readonly usedPercentage: number | null;
   readonly remainingPercentage: number | null;
   readonly threadTotalTokens: number;
+  readonly threadTotalCostUsd: number | null;
+  /**
+   * True when any session in the thread reported unpriced token usage, so
+   * `threadTotalCostUsd` covers only part of the thread's real spend.
+   */
+  readonly threadTotalCostUsdIncomplete: boolean;
   readonly activityId: string;
   readonly updatedAt: string;
 };
@@ -59,6 +65,11 @@ export function deriveLatestContextWindowSnapshot(
   // thread total never regresses when the latest snapshot lacks it.
   let committedTotal = 0;
   let runningTotal: number | null = null;
+  // costUsd has the same per-provider-session cumulative semantics as
+  // totalProcessedTokens, so it gets the same reset-tolerant accumulator.
+  let committedCostUsd = 0;
+  let runningCostUsd: number | null = null;
+  let costUsdIncomplete = false;
   let peakUsedTokens = 0;
   let latest: { activity: OrchestrationThreadActivity; usedTokens: number } | null = null;
 
@@ -78,6 +89,17 @@ export function deriveLatestContextWindowSnapshot(
       }
       runningTotal = totalProcessedTokens;
     }
+    const costUsd = asFiniteNumber(payload?.costUsd);
+    if (costUsd !== null && costUsd >= 0) {
+      if (runningCostUsd !== null && costUsd < runningCostUsd) {
+        // Session restarted: bank the previous run before tracking the new one.
+        committedCostUsd += runningCostUsd;
+      }
+      runningCostUsd = costUsd;
+    }
+    if (asBoolean(payload?.costUsdIncomplete) === true) {
+      costUsdIncomplete = true;
+    }
     peakUsedTokens = Math.max(peakUsedTokens, usedTokens);
     latest = { activity, usedTokens };
   }
@@ -95,6 +117,10 @@ export function deriveLatestContextWindowSnapshot(
     maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
   const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
   const threadTotalTokens = Math.max(committedTotal + (runningTotal ?? 0), peakUsedTokens);
+  const threadTotalCostUsd =
+    runningCostUsd === null && committedCostUsd === 0
+      ? null
+      : committedCostUsd + (runningCostUsd ?? 0);
 
   return {
     usedTokens,
@@ -104,6 +130,10 @@ export function deriveLatestContextWindowSnapshot(
     usedPercentage,
     remainingPercentage,
     threadTotalTokens,
+    threadTotalCostUsd,
+    threadTotalCostUsdIncomplete: costUsdIncomplete,
+    costUsd: asFiniteNumber(payload?.costUsd),
+    costUsdIncomplete: asBoolean(payload?.costUsdIncomplete),
     inputTokens: asFiniteNumber(payload?.inputTokens),
     cachedInputTokens: asFiniteNumber(payload?.cachedInputTokens),
     outputTokens: asFiniteNumber(payload?.outputTokens),
@@ -129,7 +159,12 @@ export function isSameContextWindowSnapshot(
   a: ContextWindowSnapshot,
   b: ContextWindowSnapshot,
 ): boolean {
-  return a.activityId === b.activityId && a.threadTotalTokens === b.threadTotalTokens;
+  return (
+    a.activityId === b.activityId &&
+    a.threadTotalTokens === b.threadTotalTokens &&
+    a.threadTotalCostUsd === b.threadTotalCostUsd &&
+    a.threadTotalCostUsdIncomplete === b.threadTotalCostUsdIncomplete
+  );
 }
 
 export function formatPercentage(value: number | null): string | null {
@@ -140,6 +175,19 @@ export function formatPercentage(value: number | null): string | null {
     return `${value.toFixed(1).replace(/\.0$/, "")}%`;
   }
   return `${Math.round(value)}%`;
+}
+
+export function formatCostUsd(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  if (value > 0 && value < 0.01) {
+    return "<$0.01";
+  }
+  if (value < 100) {
+    return `$${value.toFixed(2)}`;
+  }
+  return `$${Math.round(value)}`;
 }
 
 export function formatContextWindowTokens(value: number | null): string {

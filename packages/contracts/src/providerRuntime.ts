@@ -4,6 +4,7 @@ import {
   EventId,
   IsoDateTime,
   NonNegativeInt,
+  NonNegativeNumber,
   ProviderItemId,
   PositiveInt,
   RuntimeItemId,
@@ -320,6 +321,20 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+  /**
+   * Cumulative modeled cost (USD, API-equivalent) for the current provider
+   * session. Resets with the session, like totalProcessedTokens, and is
+   * monotonic within one: adapters price per-update token deltas at the
+   * model bound when they were incurred, so a mid-session model switch
+   * never makes the series decrease.
+   */
+  costUsd: Schema.optional(NonNegativeNumber),
+  /**
+   * True when some of this session's tokens had no pricing entry for the
+   * bound model, so `costUsd` (and any thread spend total derived from it)
+   * understates actual usage rather than covering it fully.
+   */
+  costUsdIncomplete: Schema.optional(Schema.Boolean),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 

@@ -12,9 +12,13 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
+import {
+  type ContextWindowSnapshot,
+  formatContextWindowTokens,
+  formatCostUsd,
+} from "~/lib/contextWindow";
 
-export type HeaderUsageStatId = "context" | "session" | "weekly" | "scopedWeekly";
+export type HeaderUsageStatId = "context" | "spend" | "session" | "weekly" | "scopedWeekly";
 
 export type HeaderUsageStatsVisibility = Readonly<Record<HeaderUsageStatId, boolean>>;
 
@@ -38,6 +42,12 @@ export const HEADER_USAGE_STAT_DEFINITIONS: ReadonlyArray<HeaderUsageStatDefinit
     menuLabel: () => "Context window",
     colorClass: "text-accent-cyan",
     patch: (visible) => ({ headerUsageContextVisible: visible }),
+  },
+  {
+    id: "spend",
+    menuLabel: () => "Spend (est.)",
+    colorClass: "text-accent-green",
+    patch: (visible) => ({ headerUsageSpendVisible: visible }),
   },
   {
     id: "session",
@@ -64,6 +74,7 @@ export function selectHeaderUsageStatsVisibility(
 ): HeaderUsageStatsVisibility {
   return {
     context: settings.headerUsageContextVisible,
+    spend: settings.headerUsageSpendVisible,
     session: settings.headerUsageSessionVisible,
     weekly: settings.headerUsageWeeklyVisible,
     scopedWeekly: settings.headerUsageScopedWeeklyVisible,
@@ -86,7 +97,15 @@ export interface HeaderUsageStatItem {
   /** Big formatted readout, e.g. "167k" or "42%". */
   readonly value: string;
   readonly colorClass: string;
+  /** Optional caveat shown on hover (e.g. spend is an estimate, not a bill). */
+  readonly tooltip?: string;
 }
+
+export const SPEND_STAT_TOOLTIP =
+  "Estimated API-equivalent cost from token counts at list prices. Not a bill — subscription (Max / ChatGPT plan) usage is included in your plan.";
+
+/** Shown instead when part of the thread's usage has no list price. */
+export const SPEND_STAT_PARTIAL_TOOLTIP = `${SPEND_STAT_TOOLTIP} Part of this thread's usage ran on a model with no published list price and is not included in this total.`;
 
 function formatLimitPercent(limit: ClaudeAccountUsageLimit): string {
   return `${Math.round(limit.percent)}%`;
@@ -116,6 +135,20 @@ export function selectHeaderUsageStats(input: {
             label: "Context",
             value: formatContextWindowTokens(contextWindow.usedTokens),
             colorClass: definition.colorClass,
+          });
+        }
+        break;
+      }
+      case "spend": {
+        const value = formatCostUsd(contextWindow?.threadTotalCostUsd ?? null);
+        if (value !== null) {
+          const partial = contextWindow?.threadTotalCostUsdIncomplete === true;
+          stats.push({
+            id: definition.id,
+            label: partial ? "Spend (partial)" : "Spend",
+            value,
+            colorClass: definition.colorClass,
+            tooltip: partial ? SPEND_STAT_PARTIAL_TOOLTIP : SPEND_STAT_TOOLTIP,
           });
         }
         break;
@@ -172,16 +205,29 @@ export function HeaderUsageStats(props: { stats: ReadonlyArray<HeaderUsageStatIt
   }
   return (
     <div className="hidden shrink-0 items-center gap-8 xl:flex">
-      {stats.map((stat) => (
-        <div key={stat.id} className="flex flex-col items-start">
-          <span className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
-            {stat.label}
-          </span>
-          <span className={cn("text-2xl font-semibold leading-none tabular-nums", stat.colorClass)}>
-            {stat.value}
-          </span>
-        </div>
-      ))}
+      {stats.map((stat) => {
+        const block = (
+          <div key={stat.id} className="flex flex-col items-start">
+            <span className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+              {stat.label}
+            </span>
+            <span
+              className={cn("text-2xl font-semibold leading-none tabular-nums", stat.colorClass)}
+            >
+              {stat.value}
+            </span>
+          </div>
+        );
+        if (!stat.tooltip) {
+          return block;
+        }
+        return (
+          <Tooltip key={stat.id}>
+            <TooltipTrigger render={block} />
+            <TooltipPopup className="max-w-72">{stat.tooltip}</TooltipPopup>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }

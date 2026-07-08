@@ -88,6 +88,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   headerUsageSessionVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageSpendVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageWeeklyVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   providerModelPreferences: Schema.Record(
     ProviderInstanceId,
@@ -578,6 +579,7 @@ export const ClientSettingsPatch = Schema.Struct({
   headerUsageContextVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageScopedWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSessionVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageSpendVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   providerModelPreferences: Schema.optionalKey(
     Schema.Record(

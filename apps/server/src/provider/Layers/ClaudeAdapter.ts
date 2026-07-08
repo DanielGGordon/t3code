@@ -1972,9 +1972,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           }
         : undefined);
 
+    // Fold the SDK's cumulative session cost into the snapshot so spend flows
+    // through the same context-window pipeline as token totals. Mid-turn
+    // streaming snapshots intentionally omit costUsd; the web accumulator
+    // keeps the last-seen running value.
+    const usageSnapshotWithCost: ThreadTokenUsageSnapshot | undefined =
+      usageSnapshot && typeof result?.total_cost_usd === "number" && result.total_cost_usd >= 0
+        ? { ...usageSnapshot, costUsd: result.total_cost_usd }
+        : usageSnapshot;
+
     const turnState = context.turnState;
     if (!turnState) {
-      yield* emitThreadTokenUsage(context, usageSnapshot, {
+      yield* emitThreadTokenUsage(context, usageSnapshotWithCost, {
         rawMethod: "claude/result",
         rawPayload: result ?? { status },
       });
@@ -2048,7 +2057,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       items: [...turnState.items],
     });
 
-    yield* emitThreadTokenUsage(context, usageSnapshot, {
+    yield* emitThreadTokenUsage(context, usageSnapshotWithCost, {
       rawMethod: "claude/result",
       rawPayload: result ?? { status },
     });

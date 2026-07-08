@@ -4,6 +4,7 @@ import { EventId, type OrchestrationThreadActivity, TurnId } from "@t3tools/cont
 import {
   deriveLatestContextWindowSnapshot,
   formatContextWindowTokens,
+  formatCostUsd,
   isSameContextWindowSnapshot,
 } from "./contextWindow";
 
@@ -145,6 +146,125 @@ describe("contextWindow", () => {
 
     expect(snapshot?.usedTokens).toBe(94_000);
     expect(snapshot?.threadTotalTokens).toBe(900_000);
+  });
+
+  it("derives the thread cost total from the latest costUsd", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 14_000,
+        costUsd: 1.25,
+      }),
+    ]);
+
+    expect(snapshot?.costUsd).toBe(1.25);
+    expect(snapshot?.threadTotalCostUsd).toBe(1.25);
+  });
+
+  it("keeps the thread cost total when a later snapshot omits costUsd", () => {
+    // Claude only attaches costs at turn end; mid-turn snapshots carry bare
+    // context sizes and must not regress the running spend.
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 14_000,
+        costUsd: 0.8,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 15_000,
+      }),
+    ]);
+
+    expect(snapshot?.costUsd).toBeNull();
+    expect(snapshot?.threadTotalCostUsd).toBe(0.8);
+  });
+
+  it("sums costs across provider session restarts while tokens reset independently", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 400_000,
+        totalProcessedTokens: 1_789_632,
+        costUsd: 0.8,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 20_000,
+        totalProcessedTokens: 25_000,
+        costUsd: 0.1,
+      }),
+    ]);
+
+    expect(snapshot?.threadTotalCostUsd).toBeCloseTo(0.9, 10);
+    expect(snapshot?.threadTotalTokens).toBe(1_789_632 + 25_000);
+  });
+
+  it("reports a null cost total when no snapshot ever carried costUsd", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", { usedTokens: 14_000 }),
+    ]);
+
+    expect(snapshot?.threadTotalCostUsd).toBeNull();
+    expect(snapshot?.threadTotalCostUsdIncomplete).toBe(false);
+  });
+
+  it("flags the thread cost total as incomplete when any session reported unpriced usage", () => {
+    // Mixed thread: a priced Claude session plus a Codex session on a model
+    // with no list price. The total shows only the priced part.
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 14_000,
+        costUsd: 0.8,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 20_000,
+        costUsdIncomplete: true,
+      }),
+    ]);
+
+    expect(snapshot?.threadTotalCostUsd).toBe(0.8);
+    expect(snapshot?.threadTotalCostUsdIncomplete).toBe(true);
+    expect(snapshot?.costUsdIncomplete).toBe(true);
+  });
+
+  it("keeps the incomplete flag once set even when later snapshots are fully priced", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 14_000,
+        costUsdIncomplete: true,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 15_000,
+        costUsd: 0.4,
+      }),
+    ]);
+
+    expect(snapshot?.threadTotalCostUsd).toBe(0.4);
+    expect(snapshot?.threadTotalCostUsdIncomplete).toBe(true);
+    expect(snapshot?.costUsdIncomplete).toBeNull();
+  });
+
+  it("formats cost readouts", () => {
+    expect(formatCostUsd(null)).toBeNull();
+    expect(formatCostUsd(0)).toBe("$0.00");
+    expect(formatCostUsd(0.004)).toBe("<$0.01");
+    expect(formatCostUsd(1.416)).toBe("$1.42");
+    expect(formatCostUsd(142.5)).toBe("$143");
+  });
+
+  it("treats snapshots as different when only the cost total changes", () => {
+    const latest = makeActivity("activity-2", "context-window.updated", {
+      usedTokens: 10_000,
+      costUsd: 0.5,
+    });
+    const a = deriveLatestContextWindowSnapshot([latest]);
+    const b = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 1_000,
+        costUsd: 0.8,
+      }),
+      latest,
+    ]);
+
+    expect(a?.activityId).toBe(b?.activityId);
+    expect(a?.threadTotalTokens).toBe(b?.threadTotalTokens);
+    expect(a && b && isSameContextWindowSnapshot(a, b)).toBe(false);
   });
 
   it("treats snapshots as identical only for the same activity and total", () => {

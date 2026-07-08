@@ -25,6 +25,7 @@ const clientSettings: ClientSettings = {
   headerUsageContextVisible: false,
   headerUsageScopedWeeklyVisible: false,
   headerUsageSessionVisible: false,
+  headerUsageSpendVisible: false,
   headerUsageWeeklyVisible: false,
   providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",
