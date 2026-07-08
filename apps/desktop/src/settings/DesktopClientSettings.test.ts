@@ -19,6 +19,9 @@ const clientSettings: ClientSettings = {
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   favorites: [],
+  headerGitActionsVisibility: "auto",
+  headerOpenInEditorVisibility: "auto",
+  headerProjectScriptsVisibility: "auto",
   providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {

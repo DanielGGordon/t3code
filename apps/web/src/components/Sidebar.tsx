@@ -241,7 +241,7 @@ const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> =
   separate: "Keep separate",
 };
 const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
-  "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+  "inline-flex h-6 min-w-6 pointer-coarse:h-8 pointer-coarse:min-w-8 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
@@ -844,7 +844,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                         />
                       }
                     >
-                      <CloudIcon className="size-3 text-muted-foreground/40" />
+                      <CloudIcon className="size-3 text-muted-foreground/70" />
                     </TooltipTrigger>
                     <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
                   </Tooltip>
@@ -868,7 +868,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     className={`text-[10px] tabular-nums ${
                       isHighlighted
                         ? "text-foreground/72 dark:text-foreground/82"
-                        : "text-muted-foreground/40"
+                        : "text-muted-foreground/80 dark:text-muted-foreground/90"
                     }`}
                   >
                     {formatRelativeTimeLabel(
@@ -978,13 +978,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   return (
     <SidebarMenuSub
       ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
+      className="mx-2 mt-1 mb-0.5 w-auto translate-x-0 gap-0.5 overflow-hidden border-border/50 px-1.5 py-0 sm:mx-2.5"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
         <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
           <div
             data-thread-selection-safe
-            className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
+            className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[11px] text-muted-foreground/80 dark:text-muted-foreground/90"
           >
             <span>No threads yet</span>
           </div>
@@ -1030,7 +1030,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             render={showMoreButtonRender}
             data-thread-selection-safe
             size="sm"
-            className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+            className="h-6 pointer-coarse:h-9 w-full translate-x-0 justify-start px-2 text-left text-[11px] text-muted-foreground/80 hover:bg-accent hover:text-foreground dark:text-muted-foreground/90"
             onClick={() => {
               expandThreadListForProject(projectKey);
             }}
@@ -1048,7 +1048,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             render={showLessButtonRender}
             data-thread-selection-safe
             size="sm"
-            className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+            className="h-6 pointer-coarse:h-9 w-full translate-x-0 justify-start px-2 text-left text-[11px] text-muted-foreground/80 hover:bg-accent hover:text-foreground dark:text-muted-foreground/90"
             onClick={() => {
               collapseThreadListForProject(projectKey);
             }}
@@ -2203,7 +2203,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
-          className={`gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
+          className={`h-auto min-h-11 gap-2.5 rounded-xl border border-border/60 bg-card/70 px-3 py-2.5 pr-9 text-left shadow-xs transition-colors hover:bg-card group-hover/project-header:bg-card max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2243,11 +2243,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           )}
           <ProjectFavicon environmentId={project.environmentId} cwd={project.workspaceRoot} />
           <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-xs font-medium text-foreground/90">
+            <span className="truncate text-sm font-medium text-card-foreground">
               {project.displayName}
             </span>
             {project.groupedProjectCount > 1 ? (
-              <span className="shrink-0 text-[10px] text-muted-foreground/60">
+              <span className="shrink-0 text-[11px] text-muted-foreground/80 dark:text-muted-foreground/90">
                 {project.groupedProjectCount} projects
               </span>
             ) : null}
@@ -2266,7 +2266,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                       ? "Local sandbox project"
                       : "Remote project"
                   }
-                  className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
+                  className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:right-10 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
                 />
               }
             >
@@ -2286,7 +2286,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <Tooltip>
           <TooltipTrigger
             render={
-              <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+              <div className="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.displayName}`}
@@ -3028,7 +3028,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
           >
-            <SidebarMenu>
+            <SidebarMenu className="gap-1.5">
               <SortableContext
                 items={sortedProjects.map((project) => project.projectKey)}
                 strategy={verticalListSortingStrategy}
@@ -3065,7 +3065,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             </SidebarMenu>
           </DndContext>
         ) : (
-          <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+          <SidebarMenu ref={attachProjectListAutoAnimateRef} className="gap-1.5">
             {sortedProjects.map((project) => (
               <SidebarProjectListRow
                 key={project.projectKey}

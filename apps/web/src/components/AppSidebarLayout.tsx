@@ -7,6 +7,7 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import { isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import ThreadSidebar from "./Sidebar";
+import { ThemeToggle } from "./ThemeToggle";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -36,7 +37,7 @@ function SidebarControl() {
 
   return (
     <div
-      className="pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center"
+      className="pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center gap-1"
       data-sidebar-control=""
     >
       <Tooltip>
@@ -49,6 +50,7 @@ function SidebarControl() {
           Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
         </TooltipPopup>
       </Tooltip>
+      <ThemeToggle className="pointer-events-auto" />
     </div>
   );
 }
@@ -82,7 +84,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <Sidebar
         side="left"
         collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground"
+        className="border-r border-border bg-background text-foreground"
         resizable={{
           minWidth: THREAD_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: ({ nextWidth, wrapper }) =>

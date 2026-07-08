@@ -1,7 +1,25 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import { resolveHeaderControlVisibility, shouldShowOpenInPicker } from "./ChatHeader";
+
+describe("resolveHeaderControlVisibility", () => {
+  it("auto shows the control on desktop", () => {
+    expect(resolveHeaderControlVisibility("auto", false)).toBe(true);
+  });
+
+  it("auto hides the control on mobile", () => {
+    expect(resolveHeaderControlVisibility("auto", true)).toBe(false);
+  });
+
+  it("show overrides the mobile default", () => {
+    expect(resolveHeaderControlVisibility("show", true)).toBe(true);
+  });
+
+  it("hide overrides the desktop default", () => {
+    expect(resolveHeaderControlVisibility("hide", false)).toBe(false);
+  });
+});
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");

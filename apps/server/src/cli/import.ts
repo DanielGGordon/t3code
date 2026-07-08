@@ -21,13 +21,18 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as References from "effect/References";
+import * as Result from "effect/Result";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
-import { ServerConfig } from "../config.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../config.ts";
 import {
+  isNonConversationalTitle,
   parseClaudeTranscript,
   type ParsedClaudeSession,
 } from "../import/claudeTranscript.ts";
+import { isRalphSession, planThreadSync } from "../import/syncPlan.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "../orchestration/runtimeLayer.ts";
@@ -35,10 +40,10 @@ import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
-import { RepositoryIdentityResolverLive } from "../project/Layers/RepositoryIdentityResolver.ts";
-import { ServerSettingsLive, ServerSettingsService } from "../serverSettings.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { expandHomePath } from "../os-jank.ts";
-import { WorkspacePathsLive } from "../workspace/Layers/WorkspacePaths.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -57,23 +62,20 @@ class ImportCommandError extends Data.TaggedError("ImportCommandError")<{
  * ambient CLI runtime layer (NodeServices) provided in `bin.ts`.
  */
 const ImportCliRuntimeLive = Layer.mergeAll(
-  WorkspacePathsLive,
-  ServerSettingsLive,
+  WorkspacePaths.layer,
+  ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer)),
   ProviderSessionDirectoryLive.pipe(Layer.provide(ProviderSessionRuntimeRepositoryLive)),
   OrchestrationLayerLive,
 ).pipe(
-  Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(RepositoryIdentityResolver.layer),
   Layer.provideMerge(SqlitePersistenceLayerLive),
 );
 
-const claudeModel =
-  DEFAULT_MODEL_BY_PROVIDER[CLAUDE_DRIVER_KIND] ?? "claude-opus-4-8";
+const claudeModel = DEFAULT_MODEL_BY_PROVIDER[CLAUDE_DRIVER_KIND] ?? "claude-sonnet-5";
 
 const claudeUuid = Crypto.Crypto.pipe(
   Effect.flatMap((crypto) => crypto.randomUUIDv4),
-  Effect.mapError(
-    () => new ImportCommandError({ message: "Failed to generate an identifier." }),
-  ),
+  Effect.mapError(() => new ImportCommandError({ message: "Failed to generate an identifier." })),
 );
 
 /**
@@ -93,16 +95,14 @@ const resolveTranscript = Effect.fn("resolveTranscript")(function* (sessionArg: 
   // Treat the argument as a direct file path first.
   const asPathExists = yield* fs.exists(trimmed).pipe(Effect.orElseSucceed(() => false));
   if (asPathExists) {
-    const content = yield* fs
-      .readFileString(trimmed)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ImportCommandError({
-              message: `Failed to read transcript '${trimmed}': ${String(cause)}.`,
-            }),
-        ),
-      );
+    const content = yield* fs.readFileString(trimmed).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ImportCommandError({
+            message: `Failed to read transcript '${trimmed}': ${String(cause)}.`,
+          }),
+      ),
+    );
     const base = path.basename(trimmed);
     const sessionIdFromFilename = base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
     return { content, sessionIdFromFilename };
@@ -120,16 +120,14 @@ const resolveTranscript = Effect.fn("resolveTranscript")(function* (sessionArg: 
     const candidate = path.join(projectsRoot, dir, fileName);
     const exists = yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false));
     if (exists) {
-      const content = yield* fs
-        .readFileString(candidate)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new ImportCommandError({
-                message: `Failed to read transcript '${candidate}': ${String(cause)}.`,
-              }),
-          ),
-        );
+      const content = yield* fs.readFileString(candidate).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ImportCommandError({
+              message: `Failed to read transcript '${candidate}': ${String(cause)}.`,
+            }),
+        ),
+      );
       return { content, sessionIdFromFilename: trimmed };
     }
   }
@@ -143,12 +141,12 @@ const resolveTranscript = Effect.fn("resolveTranscript")(function* (sessionArg: 
 
 /**
  * Resolve the Claude provider instance id to use for the imported thread and
- * its resume binding. See the recipe's "Instance resolution" section.
+ * its resume binding.
  */
 const resolveClaudeInstanceId = Effect.fn("resolveClaudeInstanceId")(function* (
   explicitInstance: Option.Option<string>,
 ) {
-  const settings = yield* ServerSettingsService;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const current = yield* settings.getSettings.pipe(
     Effect.mapError(
       (cause) =>
@@ -191,12 +189,74 @@ const resolveClaudeInstanceId = Effect.fn("resolveClaudeInstanceId")(function* (
   });
 });
 
-const runImport = Effect.fn("runImport")(function* (input: {
+/**
+ * Deletion-tombstone source: every thread stream id that EVER received an
+ * event, straight from the event log. The projection row for a deleted thread
+ * normally survives with `deletedAt` set (and `planThreadSync` skips it), but
+ * if the row is ever purged or a rebuild drops it, the projection alone would
+ * make the session look never-imported and the sync would resurrect it. The
+ * event log is append-only, so stream existence is a permanent tombstone.
+ */
+const loadEverExistingThreadStreamIds = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql`
+    SELECT DISTINCT stream_id AS streamId
+    FROM orchestration_events
+    WHERE aggregate_kind = 'thread'
+  `.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ImportCommandError({
+          message: `Failed to read thread streams from the event log: ${String(cause)}.`,
+        }),
+    ),
+  );
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const value = (row as Record<string, unknown>)["streamId"];
+    if (typeof value === "string") ids.add(value);
+  }
+  return ids as ReadonlySet<string>;
+});
+
+/** Outcome of a create-or-incremental-update pass for one session. */
+type SyncOutcome =
+  | {
+      readonly kind: "created";
+      readonly threadId: ThreadId;
+      readonly projectId: ProjectId;
+      readonly workspaceRoot: string;
+      readonly imported: number;
+      readonly reusedProject: boolean;
+    }
+  | { readonly kind: "updated"; readonly threadId: ThreadId; readonly appended: number }
+  | { readonly kind: "unchanged"; readonly threadId: ThreadId }
+  | { readonly kind: "skipped-deleted"; readonly threadId: ThreadId }
+  | { readonly kind: "skipped-forked"; readonly threadId: ThreadId; readonly reason: string };
+
+/**
+ * Create-or-incrementally-update the T3 thread mirroring a Claude session.
+ *
+ * Imported messages use the transcript entry uuid as their message id, so the
+ * incremental pass appends exactly the transcript messages whose uuids are not
+ * on the thread yet (command receipts additionally dedupe on replay).
+ *
+ * Fork-safety: if the thread has been continued inside T3 (provider turns, or
+ * messages the transcript cannot explain), it is skipped permanently — see
+ * `planThreadSync`.
+ *
+ * `projectOverlay` maps workspaceRoot -> ProjectId for projects created during
+ * this process run (the snapshot is read once and not refreshed mid-batch).
+ */
+const syncSession = Effect.fn("syncSession")(function* (input: {
   readonly session: ParsedClaudeSession;
   readonly instanceId: ProviderInstanceId;
   readonly snapshot: OrchestrationReadModel;
+  /** Thread stream ids that ever existed in the event log (tombstones). */
+  readonly everExistingThreadStreamIds: ReadonlySet<string>;
+  readonly projectOverlay?: Map<string, ProjectId>;
 }) {
-  const { session, instanceId, snapshot } = input;
+  const { session, instanceId, snapshot, everExistingThreadStreamIds, projectOverlay } = input;
   const path = yield* Path.Path;
 
   const cwd = session.cwd;
@@ -227,67 +287,106 @@ const runImport = Effect.fn("runImport")(function* (input: {
   // Deterministic ids so re-import dedupes via command receipts.
   const threadId = ThreadId.make(`claude-import-${sessionId}`);
 
+  const existingThread = snapshot.threads.find((thread) => thread.id === threadId);
+  const plan = planThreadSync({
+    session,
+    existingThread: existingThread
+      ? {
+          deletedAt: existingThread.deletedAt,
+          hasTurns: existingThread.latestTurn !== null,
+          messages: existingThread.messages.map((message) => ({
+            id: message.id,
+            turnId: message.turnId,
+          })),
+        }
+      : null,
+    threadStreamEverExisted: everExistingThreadStreamIds.has(threadId),
+  });
+
+  if (plan.kind === "skip-deleted") {
+    return { kind: "skipped-deleted", threadId } satisfies SyncOutcome;
+  }
+  if (plan.kind === "skip-forked") {
+    return { kind: "skipped-forked", threadId, reason: plan.reason } satisfies SyncOutcome;
+  }
+  if (plan.kind === "unchanged") {
+    return { kind: "unchanged", threadId } satisfies SyncOutcome;
+  }
+
   const engine = yield* OrchestrationEngineService;
 
-  // 1. Project: dedupe by workspaceRoot against the snapshot.
-  const existingProject = snapshot.projects.find(
-    (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
-  );
   let projectId: ProjectId;
-  if (existingProject) {
-    projectId = existingProject.id;
-  } else {
-    projectId = ProjectId.make(yield* claudeUuid);
-    const projectTitle = (() => {
-      const base = path.basename(workspaceRoot).trim();
-      if (base.length > 0) return base;
-      const fromSession = session.title?.trim();
-      return fromSession && fromSession.length > 0 ? fromSession : "project";
-    })();
+  let reusedProject = true;
+  if (plan.kind === "create") {
+    // 1. Project: dedupe by workspaceRoot against the snapshot, then against
+    // projects created earlier in this run (the snapshot is not refreshed).
+    const existingProject = snapshot.projects.find(
+      (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
+    );
+    const overlayProjectId = projectOverlay?.get(workspaceRoot);
+    if (existingProject) {
+      projectId = existingProject.id;
+    } else if (overlayProjectId !== undefined) {
+      projectId = overlayProjectId;
+    } else {
+      reusedProject = false;
+      projectId = ProjectId.make(yield* claudeUuid);
+      const projectTitle = (() => {
+        const base = path.basename(workspaceRoot).trim();
+        if (base.length > 0) return base;
+        const fromSession = session.title?.trim();
+        return fromSession && fromSession.length > 0 ? fromSession : "project";
+      })();
+      yield* engine
+        .dispatch({
+          type: "project.create",
+          commandId: CommandId.make(`import:${threadId}:project-create`),
+          projectId,
+          title: projectTitle,
+          workspaceRoot,
+          defaultModelSelection: modelSelection,
+          createdAt: projectCreatedAt,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ImportCommandError({ message: `Failed to create project: ${String(cause)}.` }),
+          ),
+        );
+      projectOverlay?.set(workspaceRoot, projectId);
+    }
+
+    // 2. Thread.
+    const threadTitle = session.title?.trim();
     yield* engine
       .dispatch({
-        type: "project.create",
-        commandId: CommandId.make(`import:${threadId}:project-create`),
+        type: "thread.create",
+        commandId: CommandId.make(`import:${threadId}:thread-create`),
+        threadId,
         projectId,
-        title: projectTitle,
-        workspaceRoot,
-        defaultModelSelection: modelSelection,
-        createdAt: projectCreatedAt,
+        title: threadTitle && threadTitle.length > 0 ? threadTitle : "Imported Claude session",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: session.gitBranch,
+        worktreePath: null,
+        createdAt: threadCreatedAt,
       })
       .pipe(
         Effect.mapError(
           (cause) =>
-            new ImportCommandError({ message: `Failed to create project: ${String(cause)}.` }),
+            new ImportCommandError({ message: `Failed to create thread: ${String(cause)}.` }),
         ),
       );
+  } else {
+    projectId = existingThread!.projectId;
   }
 
-  // 2. Thread.
-  const threadTitle = session.title?.trim();
-  yield* engine
-    .dispatch({
-      type: "thread.create",
-      commandId: CommandId.make(`import:${threadId}:thread-create`),
-      threadId,
-      projectId,
-      title: threadTitle && threadTitle.length > 0 ? threadTitle : "Imported Claude session",
-      modelSelection,
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      branch: session.gitBranch,
-      worktreePath: null,
-      createdAt: threadCreatedAt,
-    })
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new ImportCommandError({ message: `Failed to create thread: ${String(cause)}.` }),
-      ),
-    );
-
-  // 3. Messages, chronological, backdated.
+  // 3. Messages, chronological, backdated. On an incremental pass this is
+  // only the transcript messages that are not on the thread yet.
+  const messagesToImport = plan.kind === "create" ? plan.messages : plan.newMessages;
   let imported = 0;
-  for (const message of session.messages) {
+  for (const message of messagesToImport) {
     const createdAt: IsoDateTime =
       message.timestamp.trim().length > 0 ? message.timestamp : threadCreatedAt;
     yield* engine
@@ -342,13 +441,17 @@ const runImport = Effect.fn("runImport")(function* (input: {
       ),
     );
 
+  if (plan.kind === "append") {
+    return { kind: "updated", threadId, appended: imported } satisfies SyncOutcome;
+  }
   return {
+    kind: "created",
     threadId,
     projectId,
     workspaceRoot,
     imported,
-    reusedProject: existingProject !== undefined,
-  };
+    reusedProject,
+  } satisfies SyncOutcome;
 });
 
 const instanceFlag = Flag.string("instance").pipe(
@@ -382,34 +485,381 @@ const importClaudeCommand = Command.make("claude", {
       const result = yield* Effect.gen(function* () {
         const instanceId = yield* resolveClaudeInstanceId(flags.instance);
         const snapshotQuery = yield* ProjectionSnapshotQuery;
-        const snapshot = yield* snapshotQuery
-          .getSnapshot()
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ImportCommandError({
-                  message: `Failed to read orchestration snapshot: ${String(cause)}.`,
-                }),
-            ),
-          );
-        return yield* runImport({ session, instanceId, snapshot });
+        const snapshot = yield* snapshotQuery.getSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ImportCommandError({
+                message: `Failed to read orchestration snapshot: ${String(cause)}.`,
+              }),
+          ),
+        );
+        const everExistingThreadStreamIds = yield* loadEverExistingThreadStreamIds;
+        return yield* syncSession({ session, instanceId, snapshot, everExistingThreadStreamIds });
       }).pipe(
         Effect.provide(
           ImportCliRuntimeLive.pipe(
-            Layer.provide(Layer.succeed(ServerConfig, config)),
+            Layer.provide(ServerConfig.layer(config)),
+            Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
+          ),
+        ),
+      );
+
+      switch (result.kind) {
+        case "created":
+          yield* Console.log(
+            [
+              `Imported Claude session ${session.sessionId}.`,
+              `  thread:   ${result.threadId}`,
+              `  project:  ${result.projectId} (${result.reusedProject ? "reused" : "created"}) at ${result.workspaceRoot}`,
+              `  messages: ${result.imported} imported`,
+              `  resume:   wired (forkSession on — continuing forks a new Claude transcript)`,
+            ].join("\n"),
+          );
+          break;
+        case "updated":
+          yield* Console.log(
+            [
+              `Updated Claude session ${session.sessionId}.`,
+              `  thread:   ${result.threadId}`,
+              `  messages: ${result.appended} appended`,
+            ].join("\n"),
+          );
+          break;
+        case "unchanged":
+          yield* Console.log(
+            `Claude session ${session.sessionId} is already up to date (thread ${result.threadId}); nothing to import.`,
+          );
+          break;
+        case "skipped-deleted":
+          yield* Console.log(
+            `Skipped Claude session ${session.sessionId}: thread ${result.threadId} was deleted in T3.`,
+          );
+          break;
+        case "skipped-forked":
+          yield* Console.log(
+            `Skipped Claude session ${session.sessionId}: thread ${result.threadId} was continued in T3 (${result.reason}). ` +
+              `Incremental updates are permanently disabled for this thread to avoid corrupting it.`,
+          );
+          break;
+      }
+    }),
+  ),
+);
+
+const projectsDirFlag = Flag.string("projects-dir").pipe(
+  Flag.withDescription(
+    "Directory containing Claude project transcript folders (defaults to ~/.claude/projects).",
+  ),
+  Flag.optional,
+);
+
+const includeRalphFlag = Flag.boolean("include-ralph").pipe(
+  Flag.withDescription(
+    "Also sync ralph harness transcripts (generator/evaluator/rescue agent runs), which are excluded by default.",
+  ),
+);
+
+interface SyncCounters {
+  created: number;
+  updated: number;
+  appended: number;
+  unchanged: number;
+  skippedForked: number;
+  skippedRalph: number;
+  skippedEmpty: number;
+  skippedDeleted: number;
+  failed: number;
+  total: number;
+}
+
+const importSyncCommand = Command.make("sync", {
+  ...projectLocationFlags,
+  instance: instanceFlag,
+  projectsDir: projectsDirFlag,
+  includeRalph: includeRalphFlag,
+}).pipe(
+  Command.withDescription(
+    "Scan every Claude transcript under the projects directory and create or incrementally update its T3 thread (single process, fork-safe).",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const config = yield* resolveCliAuthConfig({ baseDir: flags.baseDir }, logLevel);
+      const minimumLogLevel = config.logLevel;
+
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const projectsRoot = Option.isSome(flags.projectsDir)
+        ? flags.projectsDir.value
+        : yield* expandHomePath("~/.claude/projects");
+
+      const projectDirs = yield* fs
+        .readDirectory(projectsRoot)
+        .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+
+      const transcriptPaths: Array<string> = [];
+      for (const dir of projectDirs) {
+        const dirPath = path.join(projectsRoot, dir);
+        const entries = yield* fs
+          .readDirectory(dirPath)
+          .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+        for (const entry of entries) {
+          if (entry.endsWith(".jsonl")) {
+            transcriptPaths.push(path.join(dirPath, entry));
+          }
+        }
+      }
+      transcriptPaths.sort();
+
+      const counters: SyncCounters = {
+        created: 0,
+        updated: 0,
+        appended: 0,
+        unchanged: 0,
+        skippedForked: 0,
+        skippedRalph: 0,
+        skippedEmpty: 0,
+        skippedDeleted: 0,
+        failed: 0,
+        total: 0,
+      };
+
+      yield* Effect.gen(function* () {
+        const instanceId = yield* resolveClaudeInstanceId(flags.instance);
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const snapshot = yield* snapshotQuery.getSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ImportCommandError({
+                message: `Failed to read orchestration snapshot: ${String(cause)}.`,
+              }),
+          ),
+        );
+
+        const everExistingThreadStreamIds = yield* loadEverExistingThreadStreamIds;
+        const projectOverlay = new Map<string, ProjectId>();
+        const seenSessionIds = new Set<string>();
+
+        for (const transcriptPath of transcriptPaths) {
+          counters.total += 1;
+          const base = path.basename(transcriptPath);
+          const sessionIdFromFilename = base.endsWith(".jsonl")
+            ? base.slice(0, -".jsonl".length)
+            : base;
+
+          const content = yield* fs
+            .readFileString(transcriptPath)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (content === null) {
+            counters.failed += 1;
+            yield* Console.log(`failed sessionId=${sessionIdFromFilename} error=unreadable-file`);
+            continue;
+          }
+
+          const session = parseClaudeTranscript(content, { sessionIdFromFilename });
+          const sessionId = session.sessionId.trim();
+
+          if (
+            sessionId.length === 0 ||
+            session.messages.length === 0 ||
+            session.cwd === null ||
+            session.cwd.trim().length === 0
+          ) {
+            counters.skippedEmpty += 1;
+            yield* Console.log(`skipped-empty sessionId=${sessionIdFromFilename}`);
+            continue;
+          }
+
+          if (seenSessionIds.has(sessionId)) {
+            counters.skippedEmpty += 1;
+            yield* Console.log(`skipped-duplicate sessionId=${sessionId} path=${transcriptPath}`);
+            continue;
+          }
+          seenSessionIds.add(sessionId);
+
+          if (!flags.includeRalph && isRalphSession(session)) {
+            counters.skippedRalph += 1;
+            yield* Console.log(`skipped-ralph sessionId=${sessionId}`);
+            continue;
+          }
+
+          const outcome = yield* Effect.result(
+            syncSession({
+              session,
+              instanceId,
+              snapshot,
+              everExistingThreadStreamIds,
+              projectOverlay,
+            }),
+          );
+
+          if (Result.isFailure(outcome)) {
+            counters.failed += 1;
+            yield* Console.log(`failed sessionId=${sessionId} error=${outcome.failure.message}`);
+            continue;
+          }
+
+          const result = outcome.success;
+          switch (result.kind) {
+            case "created":
+              counters.created += 1;
+              yield* Console.log(`created sessionId=${sessionId} messages=${result.imported}`);
+              break;
+            case "updated":
+              counters.updated += 1;
+              counters.appended += result.appended;
+              yield* Console.log(`updated sessionId=${sessionId} appended=${result.appended}`);
+              break;
+            case "unchanged":
+              counters.unchanged += 1;
+              yield* Console.log(`unchanged sessionId=${sessionId}`);
+              break;
+            case "skipped-deleted":
+              counters.skippedDeleted += 1;
+              yield* Console.log(`skipped-deleted sessionId=${sessionId}`);
+              break;
+            case "skipped-forked":
+              counters.skippedForked += 1;
+              yield* Console.log(`skipped-forked sessionId=${sessionId} reason=${result.reason}`);
+              break;
+          }
+        }
+      }).pipe(
+        Effect.provide(
+          ImportCliRuntimeLive.pipe(
+            Layer.provide(ServerConfig.layer(config)),
             Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
           ),
         ),
       );
 
       yield* Console.log(
-        [
-          `Imported Claude session ${session.sessionId}.`,
-          `  thread:   ${result.threadId}`,
-          `  project:  ${result.projectId} (${result.reusedProject ? "reused" : "created"}) at ${result.workspaceRoot}`,
-          `  messages: ${result.imported} imported`,
-          `  resume:   wired (forkSession on — continuing forks a new Claude transcript)`,
-        ].join("\n"),
+        `summary created=${counters.created} updated=${counters.updated} appended=${counters.appended} ` +
+          `unchanged=${counters.unchanged} skipped-forked=${counters.skippedForked} ` +
+          `skipped-ralph=${counters.skippedRalph} skipped-empty=${counters.skippedEmpty} ` +
+          `skipped-deleted=${counters.skippedDeleted} failed=${counters.failed} total=${counters.total}`,
+      );
+    }),
+  ),
+);
+
+const dryRunFlag = Flag.boolean("dry-run").pipe(
+  Flag.withDescription("Print the planned title changes without dispatching any commands."),
+);
+
+const IMPORTED_THREAD_ID_PREFIX = "claude-import-";
+const IMPORTED_THREAD_FALLBACK_TITLE = "Imported Claude session";
+
+/** Small stable hash so re-running with the same computed title dedupes. */
+function titleFingerprint(title: string): string {
+  let hash = 5381;
+  for (let i = 0; i < title.length; i += 1) {
+    hash = ((hash << 5) + hash + title.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+const importRetitleCommand = Command.make("retitle", {
+  ...projectLocationFlags,
+  dryRun: dryRunFlag,
+}).pipe(
+  Command.withDescription(
+    "Recompute titles for imported Claude threads whose current title is non-conversational " +
+      "junk (slash-command receipts, local-command stdout, caveats, system reminders).",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const config = yield* resolveCliAuthConfig({ baseDir: flags.baseDir }, logLevel);
+      const minimumLogLevel = config.logLevel;
+
+      const counters = { junk: 0, retitled: 0, fallback: 0, missingTranscript: 0, failed: 0 };
+
+      yield* Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const snapshot = yield* snapshotQuery.getSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ImportCommandError({
+                message: `Failed to read orchestration snapshot: ${String(cause)}.`,
+              }),
+          ),
+        );
+        const engine = yield* OrchestrationEngineService;
+
+        for (const thread of snapshot.threads) {
+          if (!thread.id.startsWith(IMPORTED_THREAD_ID_PREFIX)) continue;
+          if (thread.deletedAt !== null) continue;
+          if (!isNonConversationalTitle(thread.title)) continue;
+          counters.junk += 1;
+
+          const sessionId = thread.id.slice(IMPORTED_THREAD_ID_PREFIX.length);
+          const transcript = yield* Effect.result(resolveTranscript(sessionId));
+          let newTitle: string;
+          if (Result.isSuccess(transcript)) {
+            const parsed = parseClaudeTranscript(transcript.success.content, {
+              sessionIdFromFilename: sessionId,
+            });
+            const fromTranscript = parsed.title?.trim();
+            newTitle =
+              fromTranscript && fromTranscript.length > 0
+                ? fromTranscript
+                : IMPORTED_THREAD_FALLBACK_TITLE;
+          } else {
+            counters.missingTranscript += 1;
+            newTitle = IMPORTED_THREAD_FALLBACK_TITLE;
+          }
+          if (newTitle === IMPORTED_THREAD_FALLBACK_TITLE) counters.fallback += 1;
+          if (newTitle === thread.title) continue;
+
+          const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
+          yield* Console.log(
+            `retitle threadId=${thread.id}${flags.dryRun ? " (dry-run)" : ""}\n` +
+              `  old: '${oneLine(thread.title)}'\n` +
+              `  new: '${oneLine(newTitle)}'`,
+          );
+          if (flags.dryRun) continue;
+
+          const outcome = yield* Effect.result(
+            engine
+              .dispatch({
+                type: "thread.meta.update",
+                commandId: CommandId.make(
+                  `import:${thread.id}:retitle:${titleFingerprint(newTitle)}`,
+                ),
+                threadId: thread.id,
+                title: newTitle,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ImportCommandError({
+                      message: `Failed to retitle thread ${thread.id}: ${String(cause)}.`,
+                    }),
+                ),
+              ),
+          );
+          if (Result.isFailure(outcome)) {
+            counters.failed += 1;
+            yield* Console.log(`failed threadId=${thread.id} error=${outcome.failure.message}`);
+            continue;
+          }
+          counters.retitled += 1;
+        }
+      }).pipe(
+        Effect.provide(
+          ImportCliRuntimeLive.pipe(
+            Layer.provide(ServerConfig.layer(config)),
+            Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
+          ),
+        ),
+      );
+
+      yield* Console.log(
+        `summary junk-titled=${counters.junk} retitled=${counters.retitled} ` +
+          `fallback-titled=${counters.fallback} missing-transcript=${counters.missingTranscript} ` +
+          `failed=${counters.failed}${flags.dryRun ? " (dry-run: nothing dispatched)" : ""}`,
       );
     }),
   ),
@@ -417,5 +867,5 @@ const importClaudeCommand = Command.make("claude", {
 
 export const importCommand = Command.make("import").pipe(
   Command.withDescription("Import conversations from other coding agents into T3."),
-  Command.withSubcommands([importClaudeCommand]),
+  Command.withSubcommands([importClaudeCommand, importSyncCommand, importRetitleCommand]),
 );

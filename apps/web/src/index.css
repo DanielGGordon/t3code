@@ -16,9 +16,11 @@
 }
 
 [data-slot="sidebar-wrapper"] {
+  /* Two fixed controls sit top-left (sidebar trigger + theme toggle, 0.25rem
+     apart); content starts after both. */
   --workspace-titlebar-content-left: calc(
-    var(--workspace-controls-left) + var(--workspace-titlebar-control-size) +
-      var(--workspace-titlebar-control-gap)
+    var(--workspace-controls-left) + var(--workspace-titlebar-control-size) + 0.25rem +
+      var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap)
   );
 }
 
@@ -890,4 +892,174 @@ label:has(> select#reasoning-effort) select {
 
 .dark .model-picker-list::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+/* ============================================================================
+ * Solarized theme layer (append-only override block).
+ *
+ * Everything below re-values the semantic tokens defined in the upstream
+ * `:root` block above (later, equal-specificity declarations win) and adds a
+ * few new semantic tokens (role/diff/raw accents). Keeping this as a single
+ * appended section — instead of editing the upstream block in place — keeps
+ * rebases against upstream conflict-free.
+ *
+ * Palette: canonical Solarized (Ethan Schoonover). Dark = base03/base02
+ * surfaces with the base0/base1 text ramp; light = base3/base2 with
+ * base00/base01. Accents share hues across both themes.
+ * ==========================================================================*/
+
+@theme inline {
+  /* Role tokens — surface for `bg-role-user`, `text-role-assistant`, etc. */
+  --color-role-user: var(--role-user);
+  --color-role-user-foreground: var(--role-user-foreground);
+  --color-role-assistant: var(--role-assistant);
+  --color-role-assistant-foreground: var(--role-assistant-foreground);
+  --color-role-system: var(--role-system);
+  /* Diff tokens */
+  --color-diff-add: var(--diff-add);
+  --color-diff-add-bg: var(--diff-add-bg);
+  --color-diff-remove: var(--diff-remove);
+  --color-diff-remove-bg: var(--diff-remove-bg);
+  /* Solarized raw accents — used by charts, badges, role dots. */
+  --color-accent-yellow: var(--accent-yellow);
+  --color-accent-orange: var(--accent-orange);
+  --color-accent-red: var(--accent-red);
+  --color-accent-magenta: var(--accent-magenta);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-green: var(--accent-green);
+}
+
+:root {
+  /* Solarized accents — same hue in both themes. */
+  --accent-yellow: #b58900;
+  --accent-orange: #cb4b16;
+  --accent-red: #dc322f;
+  --accent-magenta: #d33682;
+  --accent-violet: #6c71c4;
+  --accent-blue: #268bd2;
+  --accent-cyan: #2aa198;
+  --accent-green: #859900;
+
+  /* Solarized Light base palette. */
+  --background: #fdf6e3; /* base3 */
+  --foreground: #657b83; /* base00 — body text */
+  --card: #eee8d5; /* base2 — panel */
+  --card-foreground: #586e75; /* base01 — emphasis on panels */
+  --popover: #eee8d5;
+  --popover-foreground: #586e75;
+  --primary: var(--accent-blue);
+  --primary-foreground: #fdf6e3;
+  --secondary: #eee8d5;
+  --secondary-foreground: #586e75;
+  --muted: #eee8d5;
+  --muted-foreground: #93a1a1; /* base1 — secondary text on light */
+  --accent: #eee8d5;
+  --accent-foreground: #586e75;
+  --destructive: var(--accent-red);
+  --destructive-foreground: #fdf6e3;
+  --border: color-mix(in srgb, #93a1a1 45%, transparent); /* base1-derived subtle border */
+  --input: color-mix(in srgb, #93a1a1 35%, transparent);
+  --ring: var(--accent-blue);
+  --info: var(--accent-cyan);
+  --info-foreground: var(--accent-cyan);
+  --success: var(--accent-green);
+  --success-foreground: var(--accent-green);
+  --warning: var(--accent-yellow);
+  --warning-foreground: var(--accent-yellow);
+
+  /* New semantic tokens — roles & diffs. */
+  --role-user: #eee8d5; /* base2 panel */
+  --role-user-foreground: #586e75;
+  --role-assistant: var(--accent-blue);
+  --role-assistant-foreground: #fdf6e3;
+  --role-system: var(--accent-violet);
+  --diff-add: var(--accent-green);
+  --diff-add-bg: color-mix(in srgb, var(--accent-green) 18%, var(--background));
+  --diff-remove: var(--accent-red);
+  --diff-remove-bg: color-mix(in srgb, var(--accent-red) 18%, var(--background));
+
+  @variant dark {
+    /* Solarized Dark base palette. */
+    --background: #002b36; /* base03 */
+    --foreground: #839496; /* base0 — body text */
+    --card: #073642; /* base02 — panel */
+    --card-foreground: #93a1a1; /* base1 — emphasis on panels */
+    --popover: #073642;
+    --popover-foreground: #93a1a1;
+    --primary: var(--accent-blue);
+    --primary-foreground: #002b36;
+    --secondary: #073642;
+    --secondary-foreground: #93a1a1;
+    --muted: #073642;
+    --muted-foreground: #93a1a1; /* base1 — secondary text on dark */
+    --accent: #073642;
+    --accent-foreground: #93a1a1;
+    --destructive: var(--accent-red);
+    --destructive-foreground: #fdf6e3;
+    --border: color-mix(in srgb, #586e75 55%, transparent); /* base01-derived hairline */
+    --input: color-mix(in srgb, #586e75 65%, transparent);
+    --ring: var(--accent-blue);
+    --info: var(--accent-cyan);
+    --info-foreground: var(--accent-cyan);
+    --success: var(--accent-green);
+    --success-foreground: var(--accent-green);
+    --warning: var(--accent-yellow);
+    --warning-foreground: var(--accent-yellow);
+
+    --role-user: #073642;
+    --role-user-foreground: #93a1a1;
+    --role-assistant: var(--accent-blue);
+    --role-assistant-foreground: #002b36;
+    --role-system: var(--accent-violet);
+    --diff-add: var(--accent-green);
+    --diff-add-bg: color-mix(in srgb, var(--accent-green) 22%, var(--background));
+    --diff-remove: var(--accent-red);
+    --diff-remove-bg: color-mix(in srgb, var(--accent-red) 22%, var(--background));
+  }
+}
+
+/* Scrollbars: tint the neutral rgba thumbs toward the Solarized base ramp so
+ * they don't read as gray smudges on base03/base3. */
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #586e75 30%, transparent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, #586e75 45%, transparent);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #93a1a1 22%, transparent);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, #93a1a1 34%, transparent);
+}
+
+/* Bridge the Solarized --diff-* tokens through to the @pierre/diffs runtime
+ * CSS variables so add/remove lines inherit the app palette instead of
+ * pierre's bundled greens/reds. */
+.diff-render-file,
+.diff-panel-viewport,
+[data-diff-tokens] {
+  --diffs-bg-addition-override: var(--diff-add-bg);
+  --diffs-bg-addition-number-override: var(--diff-add-bg);
+  --diffs-bg-addition-emphasis-override: color-mix(
+    in srgb,
+    var(--diff-add) 28%,
+    var(--diff-add-bg)
+  );
+  --diffs-bg-deletion-override: var(--diff-remove-bg);
+  --diffs-bg-deletion-number-override: var(--diff-remove-bg);
+  --diffs-bg-deletion-emphasis-override: color-mix(
+    in srgb,
+    var(--diff-remove) 28%,
+    var(--diff-remove-bg)
+  );
+  --diffs-addition-color-override: var(--diff-add);
+  --diffs-deletion-color-override: var(--diff-remove);
+  --diffs-fg-number-addition-override: var(--diff-add);
+  --diffs-fg-number-deletion-override: var(--diff-remove);
 }
