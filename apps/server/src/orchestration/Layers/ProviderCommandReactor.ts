@@ -544,6 +544,24 @@ const make = Effect.gen(function* () {
       const resumeCursor = shouldRestartForModelChange
         ? undefined
         : (activeSession?.resumeCursor ?? undefined);
+      // Restarting replaces the provider process, which terminates any
+      // agent-spawned background tasks still running between user turns.
+      // Make that kill observable instead of silent.
+      const restartActivity = yield* providerService.getSessionActivity(threadId);
+      if (restartActivity.liveTaskCount > 0) {
+        yield* Effect.logWarning(
+          "provider command reactor restarting provider session with live background tasks",
+          {
+            threadId,
+            liveTaskCount: restartActivity.liveTaskCount,
+            runtimeModeChanged,
+            cwdChanged,
+            instanceChanged,
+            shouldRestartForModelChange,
+            shouldRestartForModelSelectionChange,
+          },
+        );
+      }
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
         existingSessionThreadId,

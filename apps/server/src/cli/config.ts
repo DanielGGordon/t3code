@@ -128,6 +128,21 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  // Provider session reaper tuning. Left unset, the reaper layer defaults
+  // apply; `T3CODE_SESSION_IDLE_REAP_MS <= 0` disables the reaper entirely.
+  // Invalid (non-integer) values fail loudly at startup via `Config.int`.
+  sessionIdleReapMs: Config.int("T3CODE_SESSION_IDLE_REAP_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  sessionReaperSweepMs: Config.int("T3CODE_SESSION_REAPER_SWEEP_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  sessionReaperTaskCapMs: Config.int("T3CODE_SESSION_REAPER_TASK_CAP_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
 });
 
 export interface CliServerFlags {
@@ -366,6 +381,9 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      sessionIdleReapMs: env.sessionIdleReapMs,
+      sessionReaperSweepMs: env.sessionReaperSweepMs,
+      sessionReaperTaskCapMs: env.sessionReaperTaskCapMs,
     };
 
     return config;

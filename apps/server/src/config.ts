@@ -75,6 +75,15 @@ export class ServerConfig extends Context.Service<
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
+    /**
+     * Provider session reaper tuning (`T3CODE_SESSION_IDLE_REAP_MS`,
+     * `T3CODE_SESSION_REAPER_SWEEP_MS`, `T3CODE_SESSION_REAPER_TASK_CAP_MS`).
+     * `undefined` means "use the reaper layer default"; an idle threshold
+     * `<= 0` disables the reaper entirely.
+     */
+    readonly sessionIdleReapMs: number | undefined;
+    readonly sessionReaperSweepMs: number | undefined;
+    readonly sessionReaperTaskCapMs: number | undefined;
   }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
@@ -174,6 +183,9 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    sessionIdleReapMs: undefined,
+    sessionReaperSweepMs: undefined,
+    sessionReaperTaskCapMs: undefined,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,

@@ -22,6 +22,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { it, assert, vi } from "@effect/vitest";
 
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -1889,6 +1890,184 @@ validation.layer("ProviderServiceLive validation", (it) => {
       if (Option.isSome(runtime)) {
         assert.equal(runtime.value.threadId, session.threadId);
       }
+    }),
+  );
+});
+
+const activity = makeProviderServiceLayer();
+const settleRuntimeEvents = advanceTestClock(50).pipe(
+  Effect.andThen(
+    Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true }),
+  ),
+);
+activity.layer("ProviderServiceLive session activity", (it) => {
+  it.effect("tracks runtime activity and live background tasks per thread", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-activity");
+      const session = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      // Let the layer's adapter event subscription fibers start before
+      // emitting; events published before subscription would be dropped.
+      yield* settleRuntimeEvents;
+
+      const before = yield* provider.getSessionActivity(threadId);
+      assert.equal(before.lastActivityAtMs, undefined);
+      assert.equal(before.liveTaskCount, 0);
+
+      const beforeStartEmitMs = yield* Clock.currentTimeMillis;
+      activity.codex.emit({
+        type: "task.started",
+        eventId: asEventId("evt-activity-1"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-1" },
+      });
+      yield* settleRuntimeEvents;
+      const afterStartSettleMs = yield* Clock.currentTimeMillis;
+
+      const afterStart = yield* provider.getSessionActivity(threadId);
+      assert.ok(afterStart.lastActivityAtMs !== undefined);
+      assert.ok(afterStart.lastActivityAtMs >= beforeStartEmitMs);
+      assert.ok(afterStart.lastActivityAtMs <= afterStartSettleMs);
+      assert.equal(afterStart.liveTaskCount, 1);
+
+      // `task.progress` from long-running background work must refresh
+      // `lastActivityAtMs` (the mechanism the reaper relies on between user
+      // turns) without changing the live-task count.
+      yield* advanceTestClock(1_000);
+      activity.codex.emit({
+        type: "task.progress",
+        eventId: asEventId("evt-activity-progress"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:01.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-1", description: "still working" },
+      });
+      yield* settleRuntimeEvents;
+      const afterProgressSettleMs = yield* Clock.currentTimeMillis;
+
+      const afterProgress = yield* provider.getSessionActivity(threadId);
+      assert.ok(afterProgress.lastActivityAtMs !== undefined);
+      assert.ok(afterProgress.lastActivityAtMs >= afterStart.lastActivityAtMs + 1_000);
+      assert.ok(afterProgress.lastActivityAtMs <= afterProgressSettleMs);
+      assert.equal(afterProgress.liveTaskCount, 1);
+
+      activity.codex.emit({
+        type: "task.completed",
+        eventId: asEventId("evt-activity-2"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-1", status: "completed" },
+      });
+      yield* settleRuntimeEvents;
+
+      const afterComplete = yield* provider.getSessionActivity(threadId);
+      assert.equal(typeof afterComplete.lastActivityAtMs, "number");
+      assert.equal(afterComplete.liveTaskCount, 0);
+
+      activity.codex.emit({
+        type: "task.started",
+        eventId: asEventId("evt-activity-3"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-2" },
+      });
+      yield* settleRuntimeEvents;
+
+      activity.codex.emit({
+        type: "session.exited",
+        eventId: asEventId("evt-activity-4"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { reason: "exited" },
+      });
+      yield* settleRuntimeEvents;
+
+      const afterExit = yield* provider.getSessionActivity(threadId);
+      assert.equal(afterExit.lastActivityAtMs, undefined);
+      assert.equal(afterExit.liveTaskCount, 0);
+    }),
+  );
+
+  it.effect("clears tracked activity when a session is stopped", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-activity-stop");
+      const session = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* settleRuntimeEvents;
+
+      activity.codex.emit({
+        type: "task.started",
+        eventId: asEventId("evt-activity-stop-1"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-stop" },
+      });
+      yield* settleRuntimeEvents;
+
+      const beforeStop = yield* provider.getSessionActivity(threadId);
+      assert.equal(beforeStop.liveTaskCount, 1);
+
+      yield* provider.stopSession({ threadId });
+
+      const afterStop = yield* provider.getSessionActivity(threadId);
+      assert.equal(afterStop.lastActivityAtMs, undefined);
+      assert.equal(afterStop.liveTaskCount, 0);
+    }),
+  );
+
+  it.effect("resets tracked activity when a session is restarted for the same thread", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-activity-restart");
+      const startInput = {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      } as const;
+      const session = yield* provider.startSession(threadId, startInput);
+      yield* settleRuntimeEvents;
+
+      activity.codex.emit({
+        type: "task.started",
+        eventId: asEventId("evt-activity-restart-1"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: session.threadId,
+        payload: { taskId: "task-background-restart" },
+      });
+      yield* settleRuntimeEvents;
+
+      const beforeRestart = yield* provider.getSessionActivity(threadId);
+      assert.equal(beforeRestart.liveTaskCount, 1);
+
+      // Replacement path: `startSession` for a thread that already has a
+      // session (e.g. Claude restarts on model/runtime-mode changes) tears
+      // down the old process without emitting `session.exited`, so the
+      // activity entry must be reset here — otherwise phantom live tasks
+      // would shield the new idle session from the reaper.
+      yield* provider.startSession(threadId, startInput);
+
+      const afterRestart = yield* provider.getSessionActivity(threadId);
+      assert.equal(afterRestart.lastActivityAtMs, undefined);
+      assert.equal(afterRestart.liveTaskCount, 0);
     }),
   );
 });

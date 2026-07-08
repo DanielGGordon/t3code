@@ -25,6 +25,7 @@ import {
   type ProviderSession,
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -213,6 +214,36 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  // Tracks per-thread runtime liveliness so the session reaper can
+  // distinguish "idle because nothing is happening" from "idle between user
+  // turns while agent-spawned background tasks are still running". Entries
+  // are dropped on `session.exited`, on successful `stopSession`, and on
+  // successful `startSession` (adapter replacement paths tear down the old
+  // process without emitting `session.exited`, so a stale entry could carry
+  // phantom live tasks into the new session); a fresh entry is recreated on
+  // the first runtime event the session emits.
+  const sessionActivity = new Map<
+    ThreadId,
+    { lastActivityAtMs: number; liveTaskIds: Set<string> }
+  >();
+  const recordSessionActivity = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      if (event.type === "session.exited") {
+        sessionActivity.delete(event.threadId);
+        return;
+      }
+      let entry = sessionActivity.get(event.threadId);
+      if (!entry) {
+        entry = { lastActivityAtMs: now, liveTaskIds: new Set<string>() };
+        sessionActivity.set(event.threadId, entry);
+      }
+      entry.lastActivityAtMs = now;
+      if (event.type === "task.started") {
+        entry.liveTaskIds.add(event.payload.taskId);
+      } else if (event.type === "task.completed") {
+        entry.liveTaskIds.delete(event.payload.taskId);
+      }
+    });
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
@@ -290,10 +321,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   ): Effect.Effect<void> =>
     Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
       Effect.flatMap((canonicalEvent) =>
-        increment(providerRuntimeEventsTotal, {
-          provider: canonicalEvent.provider,
-          eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        recordSessionActivity(canonicalEvent).pipe(
+          Effect.andThen(
+            increment(providerRuntimeEventsTotal, {
+              provider: canonicalEvent.provider,
+              eventType: canonicalEvent.type,
+            }),
+          ),
+          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
+        ),
       ),
     );
 
@@ -612,6 +648,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: resolvedInstanceId,
         };
 
+        // A (re)started session must begin with fresh task bookkeeping.
+        // Adapter replacement paths (e.g. Claude restarts on model or
+        // runtime-mode changes) kill the old process without emitting
+        // `session.exited`, so a stale entry here would keep phantom live
+        // tasks protecting the new, idle session from the reaper.
+        yield* Effect.sync(() => {
+          sessionActivity.delete(threadId);
+        });
         yield* stopStaleSessionsForThread({
           threadId,
           currentInstanceId: resolvedInstanceId,
@@ -859,6 +903,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             activeTurnId: null,
           },
         });
+        yield* Effect.sync(() => {
+          sessionActivity.delete(input.threadId);
+        });
         yield* analytics.record("provider.session.stopped", {
           provider: routed.adapter.provider,
         });
@@ -966,6 +1013,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const getInstanceInfo: ProviderServiceMethod<"getInstanceInfo"> = (instanceId) =>
     registry.getInstanceInfo(instanceId);
+
+  const getSessionActivity: ProviderServiceMethod<"getSessionActivity"> = (threadId) =>
+    Effect.sync(() => {
+      const entry = sessionActivity.get(threadId);
+      return {
+        lastActivityAtMs: entry?.lastActivityAtMs,
+        liveTaskCount: entry?.liveTaskIds.size ?? 0,
+      };
+    });
 
   const rollbackConversation: ProviderServiceMethod<"rollbackConversation"> = Effect.fn(
     "rollbackConversation",
@@ -1078,6 +1134,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listSessions,
     getCapabilities,
     getInstanceInfo,
+    getSessionActivity,
     rollbackConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

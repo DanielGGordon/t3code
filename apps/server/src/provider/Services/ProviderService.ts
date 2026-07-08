@@ -98,6 +98,27 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderServiceError>;
 
   /**
+   * Read in-memory runtime activity for a thread's provider session.
+   *
+   * `lastActivityAtMs` is the wall-clock time of the last canonical runtime
+   * event observed for the thread (undefined when no live session has emitted
+   * events). `liveTaskCount` counts `task.started` events without a matching
+   * `task.completed` — i.e. agent-spawned background work that is still
+   * running. The session reaper uses both to avoid killing sessions that are
+   * only idle between user turns while background tasks are alive.
+   *
+   * Caveat: `task.started`/`task.completed` are currently emitted only by the
+   * Claude adapter (mapped from the SDK's `task_started`/`task_notification`
+   * messages). Sessions for other providers always report `liveTaskCount: 0`,
+   * so live-task reap protection is effectively Claude-only; other providers
+   * rely on `lastActivityAtMs` and the projection's active-turn guard.
+   */
+  readonly getSessionActivity: (threadId: ThreadId) => Effect.Effect<{
+    readonly lastActivityAtMs: number | undefined;
+    readonly liveTaskCount: number;
+  }>;
+
+  /**
    * Roll back provider conversation state by a number of turns.
    */
   readonly rollbackConversation: (input: {

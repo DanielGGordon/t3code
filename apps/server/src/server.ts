@@ -23,7 +23,7 @@ import * as ProviderSessionRuntime from "./persistence/ProviderSessionRuntime.ts
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
-import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
+import { makeProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
@@ -279,10 +279,26 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   ),
 );
 
-const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
-  Layer.provideMerge(ProviderLayerLive),
-  Layer.provideMerge(OrchestrationLayerLive),
-);
+// Session-reaper tuning comes from `ServerConfig` (declared alongside the
+// other `T3CODE_*` env knobs in `cli/config.ts`). Unset values fall back to
+// the reaper layer defaults; `T3CODE_SESSION_IDLE_REAP_MS <= 0` disables the
+// reaper entirely.
+const ProviderRuntimeLayerLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    return makeProviderSessionReaperLive({
+      ...(config.sessionIdleReapMs !== undefined
+        ? { inactivityThresholdMs: config.sessionIdleReapMs }
+        : {}),
+      ...(config.sessionReaperSweepMs !== undefined
+        ? { sweepIntervalMs: config.sessionReaperSweepMs }
+        : {}),
+      ...(config.sessionReaperTaskCapMs !== undefined
+        ? { maxLiveTaskIdleMs: config.sessionReaperTaskCapMs }
+        : {}),
+    });
+  }),
+).pipe(Layer.provideMerge(ProviderLayerLive), Layer.provideMerge(OrchestrationLayerLive));
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services

@@ -326,6 +326,7 @@ describe("ProviderCommandReactor", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      getSessionActivity: () => Effect.succeed({ lastActivityAtMs: undefined, liveTaskCount: 0 }),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },
