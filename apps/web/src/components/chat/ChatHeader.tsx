@@ -5,6 +5,7 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import { type HeaderControlVisibility } from "@t3tools/contracts/settings";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
@@ -17,6 +18,8 @@ import ProjectScriptsControl, {
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useClientSettings } from "../../hooks/useSettings";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -38,6 +41,16 @@ interface ChatHeaderProps {
     input: NewProjectScriptInput,
   ) => Promise<ProjectScriptActionResult>;
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
+}
+
+export function resolveHeaderControlVisibility(
+  visibility: HeaderControlVisibility,
+  isMobile: boolean,
+): boolean {
+  if (visibility === "auto") {
+    return !isMobile;
+  }
+  return visibility === "show";
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -71,11 +84,31 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const showOpenInPicker = shouldShowOpenInPicker({
-    activeProjectName,
-    activeThreadEnvironmentId,
-    primaryEnvironmentId,
-  });
+  const isMobile = useIsMobile();
+  const headerControlVisibility = useClientSettings((settings) => ({
+    gitActions: settings.headerGitActionsVisibility,
+    openInEditor: settings.headerOpenInEditorVisibility,
+    projectScripts: settings.headerProjectScriptsVisibility,
+  }));
+  const showGitActions = resolveHeaderControlVisibility(
+    headerControlVisibility.gitActions,
+    isMobile,
+  );
+  const showOpenInEditor = resolveHeaderControlVisibility(
+    headerControlVisibility.openInEditor,
+    isMobile,
+  );
+  const showProjectScripts = resolveHeaderControlVisibility(
+    headerControlVisibility.projectScripts,
+    isMobile,
+  );
+  const showOpenInPicker =
+    showOpenInEditor &&
+    shouldShowOpenInPicker({
+      activeProjectName,
+      activeThreadEnvironmentId,
+      primaryEnvironmentId,
+    });
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
@@ -100,7 +133,7 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
-        {activeProjectScripts && (
+        {showProjectScripts && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
             keybindings={keybindings}
@@ -119,7 +152,7 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
+        {showGitActions && activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}

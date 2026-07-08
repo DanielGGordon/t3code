@@ -13,6 +13,15 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+/**
+ * Visibility of an individual chat-header action control.
+ * "auto" resolves per device: shown on desktop-width viewports, hidden on
+ * mobile-width viewports. Explicit "show"/"hide" override the device default.
+ */
+export const HeaderControlVisibility = Schema.Literals(["auto", "show", "hide"]);
+export type HeaderControlVisibility = typeof HeaderControlVisibility.Type;
+export const DEFAULT_HEADER_CONTROL_VISIBILITY: HeaderControlVisibility = "auto";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -63,6 +72,15 @@ export const ClientSettingsSchema = Schema.Struct({
       model: TrimmedNonEmptyString,
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  headerGitActionsVisibility: HeaderControlVisibility.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
+  ),
+  headerOpenInEditorVisibility: HeaderControlVisibility.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
+  ),
+  headerProjectScriptsVisibility: HeaderControlVisibility.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
+  ),
   providerModelPreferences: Schema.Record(
     ProviderInstanceId,
     Schema.Struct({
@@ -546,6 +564,9 @@ export const ClientSettingsPatch = Schema.Struct({
       }),
     ),
   ),
+  headerGitActionsVisibility: Schema.optionalKey(HeaderControlVisibility),
+  headerOpenInEditorVisibility: Schema.optionalKey(HeaderControlVisibility),
+  headerProjectScriptsVisibility: Schema.optionalKey(HeaderControlVisibility),
   providerModelPreferences: Schema.optionalKey(
     Schema.Record(
       ProviderInstanceId,
