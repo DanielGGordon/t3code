@@ -19,7 +19,14 @@ import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { useClientSettings } from "../../hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import {
+  HeaderUsageStats,
+  HeaderUsageStatsMenu,
+  resolveScopedWeeklyLabel,
+  selectHeaderUsageStats,
+  selectHeaderUsageStatsVisibility,
+} from "./HeaderUsageStats";
 import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
 import { TokenUsageBadge } from "./TokenUsageBadge";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
@@ -97,6 +104,18 @@ export const ChatHeader = memo(function ChatHeader({
     openInEditor: settings.headerOpenInEditorVisibility,
     projectScripts: settings.headerProjectScriptsVisibility,
   }));
+  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
+  const updateClientSettings = useUpdateClientSettings();
+  // The usage RPC reads the primary server's host credentials, so only surface
+  // Claude account stats for threads that actually run there (same gate as
+  // ClaudeAccountUsageBadge below).
+  const claudeUsageForThread =
+    activeThreadEnvironmentId === primaryEnvironmentId ? claudeAccountUsage : null;
+  const usageStats = selectHeaderUsageStats({
+    visibility: usageStatsVisibility,
+    contextWindow,
+    claudeUsage: claudeUsageForThread,
+  });
   const showGitActions = resolveHeaderControlVisibility(
     headerControlVisibility.gitActions,
     isMobile,
@@ -133,6 +152,7 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
       </div>
+      <HeaderUsageStats stats={usageStats} />
       <div
         data-chat-header-actions
         className={cn(
@@ -146,6 +166,11 @@ export const ChatHeader = memo(function ChatHeader({
         {claudeAccountUsage && activeThreadEnvironmentId === primaryEnvironmentId && (
           <ClaudeAccountUsageBadge usage={claudeAccountUsage} />
         )}
+        <HeaderUsageStatsMenu
+          visibility={usageStatsVisibility}
+          scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
+          onPatch={updateClientSettings}
+        />
         {showProjectScripts && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

@@ -81,6 +81,14 @@ export const ClientSettingsSchema = Schema.Struct({
   headerProjectScriptsVisibility: HeaderControlVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
   ),
+  // Large usage readouts rendered in the chat header's middle area on wide
+  // viewports. All default off; toggled per device from the header menu.
+  headerUsageContextVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageScopedWeeklyVisible: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  headerUsageSessionVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageWeeklyVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   providerModelPreferences: Schema.Record(
     ProviderInstanceId,
     Schema.Struct({
@@ -567,6 +575,10 @@ export const ClientSettingsPatch = Schema.Struct({
   headerGitActionsVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerOpenInEditorVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerProjectScriptsVisibility: Schema.optionalKey(HeaderControlVisibility),
+  headerUsageContextVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageScopedWeeklyVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageSessionVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   providerModelPreferences: Schema.optionalKey(
     Schema.Record(
       ProviderInstanceId,

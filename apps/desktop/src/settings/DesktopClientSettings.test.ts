@@ -22,6 +22,10 @@ const clientSettings: ClientSettings = {
   headerGitActionsVisibility: "auto",
   headerOpenInEditorVisibility: "auto",
   headerProjectScriptsVisibility: "auto",
+  headerUsageContextVisible: false,
+  headerUsageScopedWeeklyVisible: false,
+  headerUsageSessionVisible: false,
+  headerUsageWeeklyVisible: false,
   providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
