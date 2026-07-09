@@ -56,6 +56,7 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  CodexSettings,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -1250,15 +1251,6 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetClaudeAccountUsage, getClaudeAccountUsage, {
             "rpc.aggregate": "server",
           }),
-        [WS_METHODS.serverGetCodexUsage]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.serverGetCodexUsage,
-            serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) => CodexUsage.readCodexUsage(settings.providers.codex)),
-              Effect.orElseSucceed(() => null),
-            ),
-            { "rpc.aggregate": "server" },
-          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -1337,6 +1329,26 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetCodexUsage]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetCodexUsage,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => {
+                const configs: Array<CodexSettings> = [settings.providers.codex];
+                for (const instance of Object.values(settings.providerInstances)) {
+                  if (instance.driver !== "codex" || instance.config === undefined) continue;
+                  try {
+                    configs.push(Schema.decodeUnknownSync(CodexSettings)(instance.config));
+                  } catch {
+                    /* skip instances whose config doesn't decode */
+                  }
+                }
+                return CodexUsage.readCodexUsage(configs);
+              }),
+              Effect.orElseSucceed(() => null),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,

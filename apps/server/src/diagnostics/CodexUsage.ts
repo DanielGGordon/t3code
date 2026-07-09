@@ -6,13 +6,6 @@ import * as Path from "effect/Path";
 
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 
-// How many of the newest date directories to scan for rollout files. Rollout
-// files are named by session *start* date, so a long-running session begun
-// "yesterday" but still being written to has a newer mtime than files under
-// "today". Scanning the two most recent non-empty day directories bounds the
-// work while still catching that cross-midnight case.
-const MAX_DAY_DIRECTORIES_TO_SCAN = 2;
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -31,8 +24,13 @@ function sortNumericDesc(names: ReadonlyArray<string>): string[] {
   return names.filter((name) => /^\d+$/.test(name)).sort((a, b) => b.localeCompare(a));
 }
 
-// Collect rollout file paths from the newest date directories, descending.
-function collectRecentRolloutFiles(
+// Collect all rollout file paths across every date directory. Rollout files
+// live under sessions/YYYY/MM/DD/rollout-*.jsonl. Long-running sessions keep
+// writing under their original start-date directory, so the globally freshest
+// file by mtime can reside in an arbitrarily old day folder. Directory listing
+// is cheap; the expensive file-content reads are bounded later by trying
+// candidates in mtime order and stopping at the first valid snapshot.
+function collectRolloutFiles(
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
   sessionsDir: string,
@@ -45,17 +43,13 @@ function collectRecentRolloutFiles(
       );
 
     const files: string[] = [];
-    let dayDirsScanned = 0;
 
     const years = yield* readDirNumericDesc(sessionsDir);
     for (const year of years) {
-      if (dayDirsScanned >= MAX_DAY_DIRECTORIES_TO_SCAN) break;
       const months = yield* readDirNumericDesc(path.join(sessionsDir, year));
       for (const month of months) {
-        if (dayDirsScanned >= MAX_DAY_DIRECTORIES_TO_SCAN) break;
         const days = yield* readDirNumericDesc(path.join(sessionsDir, year, month));
         for (const day of days) {
-          if (dayDirsScanned >= MAX_DAY_DIRECTORIES_TO_SCAN) break;
           const dayDir = path.join(sessionsDir, year, month, day);
           const entries = yield* fileSystem
             .readDirectory(dayDir)
@@ -63,11 +57,9 @@ function collectRecentRolloutFiles(
           const rollouts = entries.filter(
             (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"),
           );
-          if (rollouts.length === 0) continue;
           for (const name of rollouts) {
             files.push(path.join(dayDir, name));
           }
-          dayDirsScanned += 1;
         }
       }
     }
@@ -76,23 +68,21 @@ function collectRecentRolloutFiles(
   });
 }
 
-// Return the path with the newest mtime, plus that mtime (epoch seconds).
-function newestByMtime(
+// Stat every path and return them sorted by mtime descending (newest first).
+function sortByMtimeDesc(
   fileSystem: FileSystem.FileSystem,
   paths: ReadonlyArray<string>,
-): Effect.Effect<{ readonly path: string; readonly mtimeSeconds: number } | null> {
+): Effect.Effect<ReadonlyArray<{ readonly path: string; readonly mtimeSeconds: number }>> {
   return Effect.gen(function* () {
-    let best: { path: string; mtimeSeconds: number } | null = null;
+    const entries: Array<{ path: string; mtimeSeconds: number }> = [];
     for (const filePath of paths) {
       const info = yield* fileSystem.stat(filePath).pipe(Effect.option);
       if (Option.isNone(info)) continue;
       const mtime = info.value.mtime;
       const mtimeSeconds = Option.isSome(mtime) ? Math.floor(mtime.value.getTime() / 1000) : 0;
-      if (best === null || mtimeSeconds > best.mtimeSeconds) {
-        best = { path: filePath, mtimeSeconds };
-      }
+      entries.push({ path: filePath, mtimeSeconds });
     }
-    return best;
+    return entries.sort((a, b) => b.mtimeSeconds - a.mtimeSeconds);
   });
 }
 
@@ -142,6 +132,12 @@ function parseLatestRateLimits(text: string): {
 /**
  * Read the Codex CLI's latest subscription rate-limit snapshot from disk.
  *
+ * Accepts one or more `CodexSettings` configs so callers can supply every
+ * configured Codex instance (legacy `providers.codex` plus any explicit
+ * `providerInstances` entries with driver "codex"). Rollout files from all
+ * homes are merged, sorted by mtime, and tried newest-first until a valid
+ * `rate_limits` snapshot is found.
+ *
  * Passive only — this never calls the Codex API. It reflects usage as of the
  * last time the `codex` binary ran on this host, so it stays fresh precisely
  * when Codex is active (including out-of-band `codex exec` subprocesses that
@@ -149,30 +145,39 @@ function parseLatestRateLimits(text: string): {
  * fails: usage is best-effort telemetry.
  */
 export const readCodexUsage = (
-  config: CodexSettings,
+  configs: ReadonlyArray<CodexSettings>,
 ): Effect.Effect<CodexUsageResult, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const layout = yield* resolveCodexHomeLayout(config);
-    // Session rollout files live under the shared Codex home, even when a
-    // shadow home isolates auth.json.
-    const sessionsDir = path.join(layout.sharedHomePath, "sessions");
 
-    const candidatePaths = yield* collectRecentRolloutFiles(fileSystem, path, sessionsDir);
-    if (candidatePaths.length === 0) return null;
+    // Collect rollout files from every configured Codex home.
+    const allCandidatePaths: string[] = [];
+    for (const config of configs) {
+      const layout = yield* resolveCodexHomeLayout(config);
+      const sessionsDir = path.join(layout.sharedHomePath, "sessions");
+      const candidates = yield* collectRolloutFiles(fileSystem, path, sessionsDir);
+      for (const candidate of candidates) {
+        allCandidatePaths.push(candidate);
+      }
+    }
 
-    const newest = yield* newestByMtime(fileSystem, candidatePaths);
-    if (newest === null) return null;
+    if (allCandidatePaths.length === 0) return null;
 
-    const text = yield* fileSystem.readFileString(newest.path);
-    const rateLimits = parseLatestRateLimits(text);
-    if (rateLimits === null) return null;
-
-    return {
-      planType: rateLimits.planType,
-      primary: parseWindow(rateLimits.primary),
-      secondary: parseWindow(rateLimits.secondary),
-      capturedAt: newest.mtimeSeconds,
-    };
+    // Try candidates newest-first; stop at the first file with a valid
+    // rate_limits snapshot so we don't needlessly read older files.
+    const sorted = yield* sortByMtimeDesc(fileSystem, allCandidatePaths);
+    for (const entry of sorted) {
+      const text = yield* fileSystem.readFileString(entry.path).pipe(Effect.option);
+      if (Option.isNone(text)) continue;
+      const rateLimits = parseLatestRateLimits(text.value);
+      if (rateLimits === null) continue;
+      return {
+        planType: rateLimits.planType,
+        primary: parseWindow(rateLimits.primary),
+        secondary: parseWindow(rateLimits.secondary),
+        capturedAt: entry.mtimeSeconds,
+      };
+    }
+    return null;
   }).pipe(Effect.orElseSucceed(() => null));
