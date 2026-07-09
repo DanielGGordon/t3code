@@ -27,9 +27,11 @@ import {
   probeExternal,
   PROD_DIR,
   purgeBaseDir,
+  readSeedManifest,
   realProbe,
   realStopUnit,
   releaseClaim,
+  resolveSeedTemplate,
   runCapture,
   seedBaseDir,
   serverBinFor,
@@ -37,18 +39,97 @@ import {
   testUrlFor,
   unitForExternal,
   updateClaim,
+  worktreeMigrationCount,
   type Claim,
+  type ResolvedTemplate,
   type SeedMode,
 } from "./test-deploy-lib.ts";
 
 function parseSeed(raw: string | undefined): SeedMode {
   if (raw === undefined) {
-    return "minimal";
+    return "curated";
   }
-  if (raw === "minimal" || raw === "copy" || raw === "empty") {
+  if (raw === "curated" || raw === "minimal" || raw === "copy" || raw === "empty") {
     return raw;
   }
-  throw new Error(`Invalid --seed ${raw}. Use minimal (default), copy, or empty.`);
+  throw new Error(`Invalid --seed ${raw}. Use curated (default), minimal, copy, or empty.`);
+}
+
+interface SeedDecision {
+  readonly mode: SeedMode;
+  /** Resolved template userdata dir when the effective mode is curated. */
+  readonly templateUserdata: string | undefined;
+  readonly template: ResolvedTemplate | null;
+}
+
+/**
+ * Resolve the effective seed mode against the curated template's presence:
+ *   - default (no --seed) + template present  → curated
+ *   - default + no template                   → fall back to minimal (with note)
+ *   - explicit --seed curated + no template   → hard error (unsatisfiable)
+ *   - explicit minimal|copy|empty             → unchanged
+ */
+function decideSeed(requested: SeedMode, explicit: boolean): SeedDecision {
+  const template = resolveSeedTemplate();
+  if (requested !== "curated") {
+    return { mode: requested, templateUserdata: undefined, template };
+  }
+  if (template !== null) {
+    return { mode: "curated", templateUserdata: template.userdata, template };
+  }
+  if (explicit) {
+    throw new Error(
+      "Explicit --seed curated, but no curated seed template is present. " +
+        "Build one first: node scripts/test-seed-refresh.ts",
+    );
+  }
+  process.stdout.write(
+    "[test-deploy] No curated seed template. Falling back to minimal. " +
+      "Build one: node scripts/test-seed-refresh.ts\n",
+  );
+  return { mode: "minimal", templateUserdata: undefined, template: null };
+}
+
+/**
+ * Surface template staleness at deploy time (no auto-refresh): age since build,
+ * prod sha, DB schema, and a loud warning if the template's schema differs from
+ * this worktree's migration count. Deploy still proceeds; the worktree server
+ * migrates the seeded DB forward on boot (same as minimal's fresh DB).
+ */
+function printSeedStaleness(template: ResolvedTemplate, worktreePath: string): void {
+  const manifest = readSeedManifest(template.dir);
+  if (manifest === null) {
+    process.stdout.write("[test-deploy] curated template present but manifest unreadable.\n");
+    return;
+  }
+  const builtMs = Date.parse(manifest.builtAt);
+  const ageStr = Number.isFinite(builtMs) ? formatAge(Date.now() - builtMs) : "unknown";
+  process.stdout.write(
+    `[test-deploy] curated template: age ${ageStr}, prodGitSha ${manifest.prodGitSha}, ` +
+      `dbSchemaVersion ${manifest.dbSchemaVersion}\n`,
+  );
+  const branchSchema = worktreeMigrationCount(worktreePath);
+  if (branchSchema > 0 && manifest.dbSchemaVersion !== branchSchema) {
+    process.stdout.write(
+      `[test-deploy] WARNING: template built at schema ${manifest.dbSchemaVersion}, this branch is at ` +
+        `schema ${branchSchema} — rebuild if the DB layout changed (node scripts/test-seed-refresh.ts).\n`,
+    );
+  }
+}
+
+function formatAge(ms: number): string {
+  if (ms < 0) {
+    return "0m";
+  }
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) {
+    return `${hours}h`;
+  }
+  return `${Math.floor(hours / 24)}d`;
 }
 
 /**
@@ -221,7 +302,8 @@ function main(): void {
     },
   });
 
-  const seedMode = parseSeed(values.seed);
+  const requestedSeed = parseSeed(values.seed);
+  const seedExplicit = values.seed !== undefined;
   const prUrlArg = values.pr ?? null;
   const note = values.note ?? null;
   const postComment = values.comment === true;
@@ -251,6 +333,14 @@ function main(): void {
     );
   }
 
+  // Resolve the effective seed mode against the curated template's presence, and
+  // surface the template's staleness (age/sha/schema) before we take any slot.
+  const seed = decideSeed(requestedSeed, seedExplicit);
+  const seedMode = seed.mode;
+  if (seedMode === "curated" && seed.template !== null) {
+    printSeedStaleness(seed.template, worktreePath);
+  }
+
   const {
     claim: initialClaim,
     reused,
@@ -278,7 +368,7 @@ function main(): void {
     if (!reused) {
       purgeBaseDir(externalPort);
     }
-    const seedResult = seedBaseDir(externalPort, seedMode);
+    const seedResult = seedBaseDir(externalPort, seedMode, undefined, seed.templateUserdata);
     process.stdout.write(`[test-deploy] base-dir: ${seedResult}\n`);
 
     // Keep the claim's claimedAt fresh while the synchronous build blocks the

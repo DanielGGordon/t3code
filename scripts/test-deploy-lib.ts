@@ -18,10 +18,12 @@ import {
   closeSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -53,7 +55,32 @@ export const PROD_USERDATA_DIR = join(homedir(), ".t3", "userdata");
 
 export const UNIT_NAME_PATTERN = /^t3-test-\d+\.service$/;
 
-export type SeedMode = "minimal" | "copy" | "empty";
+export type SeedMode = "minimal" | "copy" | "empty" | "curated";
+
+// ---------------------------------------------------------------------------
+// Curated seed constants
+// ---------------------------------------------------------------------------
+
+/**
+ * DB schema (`MAX(migration_id)` in `effect_sql_migrations`) the curated prune
+ * list in `test-seed-refresh.ts` was authored against. The prune is schema-
+ * coupled: every project_id/thread_id-keyed table must appear in `pruneCuratedDb`
+ * because there are NO SQL foreign keys (`PRAGMA foreign_keys = 0`), so nothing
+ * cascades. If a newer migration adds such a table, the refresh REFUSES rather
+ * than silently orphaning rows — bump this constant AND extend the prune list
+ * together, in lockstep.
+ */
+export const PRUNE_SCHEMA_VERSION = 32 as const;
+
+/** Default number of most-recently-active projects kept in a curated template. */
+export const SEED_DEFAULT_PROJECTS = 3;
+/** Default number of most-recently-active threads kept per project ("a few"). */
+export const SEED_DEFAULT_THREADS = 4;
+/** Title prefix stamped onto every kept project/thread so a test instance is unmistakable. */
+export const COPYOF_PREFIX = "COPYOF ";
+
+/** Manifest schema version for `<template>/manifest.json` (not the DB schema). */
+export const SEED_MANIFEST_SCHEMA_VERSION = 1 as const;
 
 export function externalPorts(): number[] {
   return Array.from({ length: SLOT_COUNT }, (_, i) => EXTERNAL_PORT_BASE + i);
@@ -121,6 +148,12 @@ export interface RegistryPaths {
   readonly logs: string;
   readonly lockDir: string;
   readonly bootstrapMarker: string;
+  /** Symlink (never a real dir) → the currently-published curated seed version. */
+  readonly seedTemplate: string;
+  /** Real directory holding all built `<builtAt>` template versions. */
+  readonly seedVersions: string;
+  /** mkdir-lock serializing concurrent `test-seed-refresh` runs. */
+  readonly seedRefreshLock: string;
 }
 
 export function registryRoot(): string {
@@ -140,6 +173,9 @@ export function registryPaths(): RegistryPaths {
     logs: join(root, "logs"),
     lockDir: join(root, ".lock"),
     bootstrapMarker: join(root, "caddy-bootstrapped"),
+    seedTemplate: join(root, "seed-template"),
+    seedVersions: join(root, "seed-versions"),
+    seedRefreshLock: join(root, ".seed-refresh.lock"),
   };
 }
 
@@ -150,6 +186,11 @@ export function ensureRegistry(): RegistryPaths {
   mkdirSync(paths.claims, { recursive: true, mode: 0o700 });
   mkdirSync(paths.baseDirs, { recursive: true, mode: 0o700 });
   mkdirSync(paths.logs, { recursive: true, mode: 0o700 });
+  // seed-versions holds the real (immutable) template builds; seed-template is a
+  // symlink into it that we never mkdir here (it is atomically swapped by the
+  // refresh script). Older frameworks predating curated seeds still bootstrap
+  // cleanly — this only adds the versions dir.
+  mkdirSync(paths.seedVersions, { recursive: true, mode: 0o700 });
   return paths;
 }
 
@@ -473,9 +514,14 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Acquire the reclaim lock, force-breaking a stale one. Returns a release fn. */
-export function acquireReclaimLock(): () => void {
-  const { lockDir } = registryPaths();
+/**
+ * Acquire an mkdir-based lock at `lockDir`, force-breaking a stale one (old dir
+ * or dead holder pid) and retrying once. Returns a release fn. Throws
+ * `heldError` when a live holder still owns it after the break attempt. Shared
+ * by the reclaim scan and the seed-refresh build so both get identical
+ * stale-break semantics.
+ */
+export function acquireMkdirLock(lockDir: string, heldError: string): () => void {
   const tryMkdir = (): boolean => {
     try {
       mkdirSync(lockDir);
@@ -519,7 +565,25 @@ export function acquireReclaimLock(): () => void {
     }
   }
 
-  throw new Error(`Reclaim lock held by another agent (${lockDir}). Retry test-deploy shortly.`);
+  throw new Error(heldError);
+}
+
+/** Acquire the reclaim lock, force-breaking a stale one. Returns a release fn. */
+export function acquireReclaimLock(): () => void {
+  const { lockDir } = registryPaths();
+  return acquireMkdirLock(
+    lockDir,
+    `Reclaim lock held by another agent (${lockDir}). Retry test-deploy shortly.`,
+  );
+}
+
+/** Acquire the seed-refresh lock, serializing concurrent template builds. */
+export function acquireSeedRefreshLock(): () => void {
+  const { seedRefreshLock } = registryPaths();
+  return acquireMkdirLock(
+    seedRefreshLock,
+    `Seed-refresh lock held by another agent (${seedRefreshLock}). Retry test-seed-refresh shortly.`,
+  );
 }
 
 function forceBreakLock(lockDir: string): void {
@@ -696,22 +760,168 @@ export function reclaimStaleSlot(
 // Base-dir seeding
 // ---------------------------------------------------------------------------
 
-export type SeedResult = "seeded-minimal" | "seeded-copy" | "seeded-empty" | "kept-existing";
+export type SeedResult =
+  | "seeded-minimal"
+  | "seeded-copy"
+  | "seeded-empty"
+  | "seeded-curated"
+  | "kept-existing";
+
+// ---------------------------------------------------------------------------
+// Curated seed template: resolve + manifest (deploy-side read helpers)
+// ---------------------------------------------------------------------------
+
+export interface ResolvedTemplate {
+  /** realpath of the published `seed-versions/<builtAt>` version dir. */
+  readonly dir: string;
+  /** `<dir>/userdata` — the drop-in copied into a slot's base-dir. */
+  readonly userdata: string;
+  readonly manifestPath: string;
+}
+
+/**
+ * Resolve the currently-published curated template by following the
+ * `seed-template` symlink to its real version dir. Returns null when the symlink
+ * is missing, dangling, or points at a dir lacking `userdata/` (treated as "no
+ * template" — the deploy then falls back to minimal). Always resolves either the
+ * old complete version or the new complete one; the refresh publishes only via
+ * an atomic symlink swap, so a half-built dir is never observable here.
+ */
+export function resolveSeedTemplate(): ResolvedTemplate | null {
+  const { seedTemplate } = registryPaths();
+  let real: string;
+  try {
+    // lstat confirms the entry exists (even as a dangling symlink); realpath then
+    // follows it and throws on a dangling target — both caught as "no template".
+    lstatSync(seedTemplate);
+    real = realpathSync(seedTemplate);
+  } catch {
+    return null;
+  }
+  const userdata = join(real, "userdata");
+  if (!existsSync(userdata)) {
+    return null;
+  }
+  return { dir: real, userdata, manifestPath: join(real, "manifest.json") };
+}
+
+export interface SeedManifestKeptProject {
+  readonly id: string;
+  readonly title: string;
+  readonly threads: number;
+}
+
+export interface SeedManifest {
+  readonly schemaVersion: number;
+  readonly builtAt: string;
+  readonly prodDir: string;
+  readonly prodGitSha: string;
+  readonly dbSchemaVersion: number;
+  readonly pruneSchemaVersion: number;
+  readonly projects: number;
+  readonly threadsPerProject: number;
+  readonly keptProjects: readonly SeedManifestKeptProject[];
+  readonly keptThreadIds: readonly string[];
+  readonly prodDbBytes: number;
+  readonly templateDbBytes: number;
+  readonly sqliteLib: string;
+}
+
+/** Read + parse a template's manifest.json. Returns null if absent/corrupt. */
+export function readSeedManifest(templateDir: string): SeedManifest | null {
+  try {
+    return JSON.parse(readFileSync(join(templateDir, "manifest.json"), "utf8")) as SeedManifest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Count the DB migration files in a worktree WITHOUT booting the server — the
+ * code's schema version. Mirrors the on-disk convention: `NNN_*.ts` files under
+ * apps/server/src/persistence/Migrations, excluding `*.test.ts`.
+ */
+export function worktreeMigrationCount(worktreePath: string): number {
+  const dir = join(worktreePath, "apps", "server", "src", "persistence", "Migrations");
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  return entries.filter((e) => /^\d{3}_.*\.ts$/.test(e) && !e.endsWith(".test.ts")).length;
+}
+
+// ---------------------------------------------------------------------------
+// Attachment thread-segment derivation (ported from apps/server attachmentStore
+// + attachmentPaths so the refresh script stays free of the Effect toolchain).
+// A unit test asserts parity with the server helpers on <uuid> + claude-import
+// samples; keep these in lockstep if the server derivation ever changes.
+// ---------------------------------------------------------------------------
+
+const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
+const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
+const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const ATTACHMENT_ID_PATTERN = new RegExp(
+  `^(${ATTACHMENT_ID_THREAD_SEGMENT_PATTERN})-(${ATTACHMENT_ID_UUID_PATTERN})$`,
+  "i",
+);
+
+/** Derive the filesystem-safe attachment segment for a thread id (server parity). */
+export function toSafeThreadAttachmentSegment(threadId: string): string | null {
+  const segment = threadId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS)
+    .replace(/[-_]+$/g, "");
+  return segment.length === 0 ? null : segment;
+}
+
+/**
+ * Recover the thread segment from an attachment file name (`<segment>-<uuid>.<ext>`),
+ * or null if the name is not a well-formed attachment id. Combines the server's
+ * `parseAttachmentIdFromRelativePath` (strip a single extension) with
+ * `parseThreadSegmentFromAttachmentId` (match segment+uuid).
+ */
+export function attachmentFileThreadSegment(fileName: string): string | null {
+  const dot = fileName.lastIndexOf(".");
+  if (dot <= 0) {
+    return null;
+  }
+  const id = fileName.slice(0, dot);
+  if (id.length === 0 || id.includes(".") || id.includes("/") || id.includes("\\")) {
+    return null;
+  }
+  const match = ATTACHMENT_ID_PATTERN.exec(id);
+  return match ? match[1]?.toLowerCase() ?? null : null;
+}
 
 /**
  * Seed (or preserve) the isolated --base-dir for a slot.
  *
  * If base-dirs/<ext>/userdata already exists (redeploy), it is left untouched so
  * the user's paired 30-day session survives. Otherwise it is created per `mode`:
- *   - minimal (default): copy settings.json, keybindings.json, secrets/ from prod;
- *                        fresh DB + fresh environment-id (server generates them).
+ *   - curated (default): copy the pre-built curated template's inert userdata
+ *                        (VACUUMed static DB + settings/secrets/pruned attachments)
+ *                        wholesale. All the dangerous/expensive live-DB work
+ *                        happened once in test-seed-refresh; here it is a plain
+ *                        cpSync of static files, so no prod DB is opened.
+ *   - minimal: copy settings.json, keybindings.json, secrets/ from prod;
+ *              fresh DB + fresh environment-id (server generates them).
  *   - copy: full clone of prod userdata (escape hatch, non-default).
  *   - empty: nothing copied (escape hatch, non-default).
+ *
+ * `templateUserdata` is resolved by the caller (test-deploy resolves it once and
+ * decides the fallback matrix); when omitted it is resolved here.
  */
 export function seedBaseDir(
   externalPort: number,
   mode: SeedMode,
   prodUserdataDir: string = PROD_USERDATA_DIR,
+  templateUserdata?: string,
 ): SeedResult {
   const baseDir = baseDirFor(externalPort);
   const userdata = join(baseDir, "userdata");
@@ -724,6 +934,40 @@ export function seedBaseDir(
 
   if (mode === "empty") {
     return "seeded-empty";
+  }
+
+  if (mode === "curated") {
+    // Copy the static, already-curated template (no prod DB is opened here). The
+    // template DB is a VACUUMed single file, so a plain recursive cpSync is safe
+    // (unlike `copy` mode's live-prod-DB clone). The server regenerates a fresh
+    // environment-id / server-runtime.json on boot (absent from the template).
+    const resolved = templateUserdata ?? resolveSeedTemplate()?.userdata;
+    if (resolved === undefined || !existsSync(resolved)) {
+      throw new Error(
+        "curated seed requested but no curated template is present. " +
+          "Build one: node scripts/test-seed-refresh.ts",
+      );
+    }
+    try {
+      cpSync(resolved, userdata, { recursive: true });
+    } catch (error) {
+      // A concurrent `test-seed-refresh` GC keeps only the newest 2 version dirs;
+      // if two refreshes publish while this copy is mid-flight, the version we
+      // resolved can be deleted out from under cpSync (ENOENT). The newly-published
+      // template is complete and equally valid, so re-resolve the live symlink and
+      // retry the copy once against it rather than failing the deploy.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      rmSync(userdata, { recursive: true, force: true });
+      mkdirSync(userdata, { recursive: true, mode: 0o700 });
+      const retry = resolveSeedTemplate()?.userdata;
+      if (retry === undefined || !existsSync(retry)) {
+        throw error;
+      }
+      cpSync(retry, userdata, { recursive: true });
+    }
+    return "seeded-curated";
   }
 
   if (mode === "copy") {

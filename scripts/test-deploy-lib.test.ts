@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 
 import {
   assertNotProd,
+  attachmentFileThreadSegment,
   baseDirFor,
   buildClaim,
   buildPrCommentBody,
@@ -24,12 +25,17 @@ import {
   parsePairingUrl,
   PoolExhaustedError,
   readClaim,
+  readSeedManifest,
+  registryPaths,
   releaseClaim,
+  resolveSeedTemplate,
   seedBaseDir,
   STARTUP_GRACE_MS,
   testUrlFor,
+  toSafeThreadAttachmentSegment,
   unitForExternal,
   updateClaim,
+  worktreeMigrationCount,
   type ClaimDeps,
   type SlotProbe,
 } from "./test-deploy-lib.ts";
@@ -282,6 +288,94 @@ describe("seedBaseDir", () => {
     assert.equal(seedBaseDir(7446, "minimal", prod), "kept-existing");
     assert.equal(readFileSync(join(baseDirFor(7446), "userdata", "marker"), "utf8"), "x");
     rmSync(prod, { recursive: true, force: true });
+  });
+});
+
+describe("curated seed template (deploy side)", () => {
+  function publishFakeTemplate(name = "2026-07-09T00-00-00Z"): string {
+    ensureRegistry();
+    const { seedVersions, seedTemplate } = registryPaths();
+    const version = join(seedVersions, name);
+    const userdata = join(version, "userdata");
+    mkdirSync(userdata, { recursive: true });
+    writeFileSync(join(userdata, "state.sqlite"), "TEMPLATEDB");
+    writeFileSync(join(userdata, "settings.json"), "{}");
+    writeFileSync(
+      join(version, "manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        builtAt: "2026-07-09T00:00:00.000Z",
+        dbSchemaVersion: 32,
+        prodGitSha: "abc1234",
+        keptThreadIds: ["thread-1"],
+      }),
+    );
+    symlinkSync(join("seed-versions", name), seedTemplate);
+    return userdata;
+  }
+
+  it("resolves a published template via the symlink + reads its manifest", () => {
+    publishFakeTemplate();
+    const template = resolveSeedTemplate();
+    assert.isNotNull(template);
+    assert.isTrue(existsSync(join(template!.userdata, "state.sqlite")));
+    const manifest = readSeedManifest(template!.dir);
+    assert.equal(manifest?.dbSchemaVersion, 32);
+    assert.equal(manifest?.prodGitSha, "abc1234");
+  });
+
+  it("treats a missing or dangling symlink as no template", () => {
+    ensureRegistry();
+    assert.isNull(resolveSeedTemplate()); // no symlink at all
+    const { seedTemplate } = registryPaths();
+    symlinkSync(join("seed-versions", "does-not-exist"), seedTemplate); // dangling
+    assert.isNull(resolveSeedTemplate());
+  });
+
+  it("seedBaseDir curated copies the template userdata into a fresh slot", () => {
+    publishFakeTemplate();
+    assert.equal(seedBaseDir(7444, "curated"), "seeded-curated");
+    const slot = join(baseDirFor(7444), "userdata");
+    assert.equal(readFileSync(join(slot, "state.sqlite"), "utf8"), "TEMPLATEDB");
+    assert.isTrue(existsSync(join(slot, "settings.json")));
+  });
+
+  it("seedBaseDir curated throws when no template is present", () => {
+    ensureRegistry();
+    assert.throws(() => seedBaseDir(7445, "curated"), /no curated template/);
+  });
+});
+
+describe("worktreeMigrationCount", () => {
+  it("counts NNN_*.ts migration files, excluding *.test.ts and non-migrations", () => {
+    const wt = mkdtempSync(join(tmpdir(), "t3-wt-"));
+    const dir = join(wt, "apps", "server", "src", "persistence", "Migrations");
+    mkdirSync(dir, { recursive: true });
+    for (const name of ["001_A.ts", "002_B.ts", "002_B.test.ts", "readme.md", "helper.ts"]) {
+      writeFileSync(join(dir, name), "");
+    }
+    assert.equal(worktreeMigrationCount(wt), 2);
+    assert.equal(worktreeMigrationCount(join(tmpdir(), "does-not-exist-xyz")), 0);
+    rmSync(wt, { recursive: true, force: true });
+  });
+});
+
+describe("attachment segment helpers", () => {
+  it("round-trips a thread id through segment + file-name parse (uuid + import)", () => {
+    for (const threadId of [
+      "1c9df8e0-1111-2222-3333-444455556666",
+      "claude-import-1c9df8e0-1111-2222-3333-444455556666",
+    ]) {
+      const segment = toSafeThreadAttachmentSegment(threadId);
+      assert.isNotNull(segment);
+      const fileName = `${segment}-1c9df8e0-aaaa-bbbb-cccc-dddddddddddd.png`;
+      assert.equal(attachmentFileThreadSegment(fileName), segment);
+    }
+  });
+
+  it("rejects file names that are not attachment ids", () => {
+    assert.isNull(attachmentFileThreadSegment("no-extension"));
+    assert.isNull(attachmentFileThreadSegment("not-a-real-uuid.png"));
   });
 });
 

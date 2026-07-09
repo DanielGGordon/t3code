@@ -82,7 +82,10 @@ Central source of truth, a sibling of prod's `~/.t3/` so it never collides with 
 ├── base-dirs/              # isolated --base-dir per slot (persists across redeploys)
 │   └── 7444/userdata/...
 ├── logs/                   # per-slot stdout/stderr mirror (journal is primary)
+├── seed-template           # symlink -> the active curated template version (atomic swap)
+├── seed-versions/          # real curated template builds (<builtAt>/), newest 2 retained
 ├── .lock/                  # mkdir lock, present only during a stale-reclaim scan
+├── .seed-refresh.lock/     # mkdir lock, present only during a curated template build
 └── caddy-bootstrapped      # marker file (touch after the one-time Caddy bootstrap)
 ```
 
@@ -90,13 +93,54 @@ Central source of truth, a sibling of prod's `~/.t3/` so it never collides with 
 
 **Staleness.** A claim is stale (reclaimable) only when its unit is not `active` **and** nothing is listening on its loopback port. `test-status` labels each slot `alive` / `stale` / `free`. A reboot leaves claims on disk but kills the transient units, so those slots show `stale` and are auto-reclaimable; base-dirs survive, so a redeploy re-pairs cleanly. Reclaiming a stale slot when the pool is full is serialized by the `mkdir` lock so two agents can't reclaim the same slot.
 
-**Base-dir seeding** (`--seed`, default `minimal`):
+**Base-dir seeding** (`--seed`, default `curated`):
 
-- `minimal` (default): copy `settings.json`, `keybindings.json`, and `secrets/` from prod userdata; start with a fresh empty DB and a fresh `environment-id` (the server generates them). Keeps the test surface clean and avoids importing prod threads/projects.
-- `copy`: full clone of prod userdata (escape hatch, non-default).
+- `curated` (default): a small, safe copy of prod — ~3 projects with a few conversations each, every project name and thread title prefixed `COPYOF ` (e.g. "COPYOF t3code"). No prod sessions, pairing tokens, or provider resume state come along. Requires a template (build it with `test-seed-refresh`, below). If no template exists, deploys fall back to `minimal` and tell you to build one.
+- `minimal`: copy `settings.json`, `keybindings.json`, and `secrets/` from prod userdata; start with a fresh empty DB and a fresh `environment-id` (the server generates them). Keeps the test surface clean and avoids importing prod threads/projects.
+- `copy`: full clone of prod userdata (escape hatch, non-default, carries live data).
 - `empty`: nothing copied (escape hatch, non-default).
 
 Base-dirs persist across redeploys of the same slot, so the user's paired 30-day session survives a review-fix redeploy. Teardown **keeps** the base-dir by default; `--purge` drops it (use when the branch is abandoned/merged).
+
+## Seeding a test instance
+
+Every test deploy gets an isolated `--base-dir`. Choose what data it starts from with `--seed`:
+
+- `curated` (default) — a small, safe copy of prod: ~3 projects with a few
+  conversations each, every project name and thread title prefixed `COPYOF `
+  (e.g. "COPYOF t3code"). No prod sessions, pairing tokens, or provider
+  resume state come along. Requires a template (see below).
+- `minimal` — settings + keybindings + secrets, empty DB.
+- `copy` — full clone of prod userdata. Escape hatch; carries live data. Rare.
+- `empty` — nothing.
+
+### Build / refresh the curated template
+
+    node scripts/test-seed-refresh.ts            # 3 projects, 4 threads each
+    node scripts/test-seed-refresh.ts --projects 3 --threads 5
+
+Reads prod **read-only** (WAL-safe online backup), prunes to the most recently
+active projects/threads, prefixes titles with `COPYOF `, strips auth sessions,
+pairing links, and all provider resume state, and **redirects every workspace to
+an inert sandbox** (`~/.t3-test-deploy/curated-sandbox`) so a copied thread can
+never spawn a coding agent against the user's real repos, then publishes
+atomically to `~/.t3-test-deploy/seed-template`. Rerun any time to rebuild from
+current prod. The `COPYOF ` marker and the sandbox redirect are written to both
+the projection rows and the source events, so they survive even if the test
+worktree rebuilds projections.
+
+Optional size knobs (off by default): `--prefer-imported` biases the thread pick
+toward small `claude-import-*` chats; `--max-events-per-thread K` drops threads
+whose event count exceeds `K` (a live coding thread is 5-10× an imported chat).
+
+Deploy prints the template's age and schema at each run. It never auto-refreshes
+— rebuild it yourself when prod has changed or the DB schema has moved. If no
+template exists, deploys fall back to `minimal` and tell you to build one.
+
+Never modifies prod. The template is the only thing that touches prod data, and
+only for reading. The build snapshots prod with a read-only online backup and
+does every DELETE/UPDATE/VACUUM on the copy; it publishes via an atomic symlink
+swap and retains the newest two builds under `~/.t3-test-deploy/seed-versions/`.
 
 ## Pairing UX
 
