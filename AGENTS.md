@@ -46,6 +46,10 @@ sessions T3 itself spawned are skipped (`skipped-owned` — session id found in 
 worktrees dir; `skipped-copy` — a forkSession copy whose message uuids largely already live on
 another thread), and deleted imported threads stay deleted via the event-log tombstone.
 
+## Finishing a feature: MANDATORY test-deploy + PR flow
+
+When a feature or bugfix is complete in a `t3code/*` worktree, do NOT merge to `main`. Follow **[docs/test-deployments.md](docs/test-deployments.md)**: open a PR, deploy the branch to a test port from the pool (`node scripts/test-deploy.ts --pr <url> --note "<desc>" --comment`), and comment the test URL on the PR so the user can jump straight into the running instance. Prod (external `7443` / loopback `3773` / unit `t3code.service`) is only redeployed from `main` after the user approves the PR — and `t3code.service` is never restarted without explicit user approval in the conversation. The scripts refuse all prod targets; never work around the guard.
+
 ## Reference Repos
 
 - Open-source Codex repo: https://github.com/openai/codex
