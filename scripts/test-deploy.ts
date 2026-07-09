@@ -262,7 +262,7 @@ function main(): void {
   });
   const externalPort = initialClaim.externalPort;
   const unit = initialClaim.unit;
-  assertNotProd(externalPort, loopbackForExternal(externalPort), unit);
+  assertNotProd(externalPort, initialClaim.loopbackPort, unit);
   process.stdout.write(
     `[test-deploy] slot ${externalPort} (${reused ? "reused for branch" : reclaimedFrom !== null ? "reclaimed stale" : "fresh claim"}); loopback ${initialClaim.loopbackPort}\n`,
   );

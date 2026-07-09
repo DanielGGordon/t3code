@@ -582,14 +582,22 @@ export function claimSlot(input: ClaimInput, deps: ClaimDeps = defaultClaimDeps)
   for (const port of listClaimedPorts()) {
     const read = readClaim(port);
     if (read.status === "ok" && read.claim.branch === input.branch) {
-      // Refresh mutable, worktree-derived fields so a redeploy from a fresh
-      // worktree checkout does not start the old (possibly-removed) path. Also
-      // bump claimedAt so the startup grace window covers this redeploy's
-      // stop-old-unit → start-new-unit gap (during which the unit is briefly
-      // inactive and the port briefly free) — otherwise a concurrent reclaimer
-      // could grab the slot in that gap.
+      // Re-derive all port-dependent fields from the filename-based external
+      // port so that hand-edited or corrupted on-disk values (loopbackPort,
+      // unit, baseDir, testUrl) never survive into the returned claim. Also
+      // refresh worktreePath (may have moved) and bump claimedAt so the
+      // startup grace window covers this redeploy's stop-old-unit →
+      // start-new-unit gap.
+      const loopbackPort = loopbackForExternal(port);
+      const unit = unitForExternal(port);
+      assertNotProd(port, loopbackPort, unit);
       const refreshed: Claim = {
         ...read.claim,
+        externalPort: port,
+        loopbackPort,
+        testUrl: testUrlFor(port),
+        unit,
+        baseDir: baseDirFor(port),
         worktreePath: input.worktreePath,
         agentNote: input.agentNote ?? read.claim.agentNote,
         claimedAt: new Date().toISOString(),
