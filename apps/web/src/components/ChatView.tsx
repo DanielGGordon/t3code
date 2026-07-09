@@ -198,6 +198,7 @@ import {
   useThread,
   useThreadProposedPlans,
   useThreadRefs,
+  useThreadShell,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -215,6 +216,7 @@ import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
+import { RestartRequestBanner } from "./chat/RestartRequestBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
@@ -1292,6 +1294,24 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadRestartRequested = useThreadShell(activeThreadRef)?.requestingRestart ?? false;
+  const setRestartRequest = useAtomCommand(threadEnvironment.setRestartRequest, {
+    reportFailure: false,
+  });
+  const handleToggleRestartRequest = useCallback(() => {
+    if (!activeThread) {
+      return;
+    }
+    void setRestartRequest({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        requesting: !activeThreadRestartRequested,
+        source: "manual",
+        reason: null,
+      },
+    });
+  }, [setRestartRequest, activeThread, activeThreadRestartRequested]);
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null;
     readonly messageId: MessageId | null;
@@ -5066,6 +5086,8 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            restartRequested={activeThreadRestartRequested}
+            onToggleRestartRequest={handleToggleRestartRequest}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -5079,6 +5101,13 @@ function ChatViewContent(props: ChatViewProps) {
           error={threadError}
           onDismiss={() => setThreadError(activeThread.id, null)}
         />
+        {activeProject && (
+          <RestartRequestBanner
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+            projectId={activeProject.id}
+          />
+        )}
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}

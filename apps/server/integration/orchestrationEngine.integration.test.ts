@@ -266,6 +266,50 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
   ),
 );
 
+it.live("raises and auto-clears the restart-request flag on the thread shell", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      yield* harness.engine.dispatch({
+        type: "thread.restart-request.set",
+        commandId: CommandId.make("cmd-restart-request-set"),
+        threadId: THREAD_ID,
+        requesting: true,
+        source: "auto",
+        reason: "the dev server",
+        createdAt: nowIso(),
+      });
+
+      const raisedShell = yield* harness.snapshotQuery.getThreadShellById(THREAD_ID);
+      assert.equal(Option.isSome(raisedShell), true);
+      if (Option.isSome(raisedShell)) {
+        assert.equal(raisedShell.value.requestingRestart, true);
+        assert.equal(raisedShell.value.restartRequestReason, "the dev server");
+      }
+
+      // A user message in the requesting chat acknowledges the ask and clears it.
+      yield* harness.engine.dispatch({
+        type: "thread.message.import",
+        commandId: CommandId.make("cmd-restart-request-clear-user-msg"),
+        threadId: THREAD_ID,
+        messageId: asMessageId("msg-user-after-restart"),
+        role: "user",
+        text: "Restarted it, go ahead.",
+        turnId: null,
+        createdAt: nowIso(),
+      });
+
+      const clearedShell = yield* harness.snapshotQuery.getThreadShellById(THREAD_ID);
+      assert.equal(Option.isSome(clearedShell), true);
+      if (Option.isSome(clearedShell)) {
+        assert.equal(clearedShell.value.requestingRestart, false);
+        assert.equal(clearedShell.value.restartRequestReason, null);
+      }
+    }),
+  ),
+);
+
 it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
   "keeps the same Codex provider thread across runtime mode switches",
   () =>
