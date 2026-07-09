@@ -105,14 +105,14 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const claudeAccountUsage = useClaudeAccountUsage();
-  const codexUsage = useCodexUsage();
+  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
+  const codexUsage = useCodexUsage(usageStatsVisibility.codex);
   const isMobile = useIsMobile();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
     openInEditor: settings.headerOpenInEditorVisibility,
     projectScripts: settings.headerProjectScriptsVisibility,
   }));
-  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
   const updateClientSettings = useUpdateClientSettings();
   // The usage RPC reads the primary server's host credentials, so only surface
   // Claude account stats for threads that actually run there (same gate as

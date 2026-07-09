@@ -14,21 +14,26 @@ const REFRESH_INTERVAL_MS = 60_000;
  * Refreshes on an interval and when the window regains focus; the read is a
  * cheap file scan, no Codex API call.
  */
-export function useCodexUsage(): CodexUsageResult {
+export function useCodexUsage(enabled: boolean): CodexUsageResult {
   const environmentId = usePrimaryEnvironmentId();
   const query = useEnvironmentQuery(
-    environmentId !== null ? serverEnvironment.codexUsage({ environmentId, input: {} }) : null,
+    enabled && environmentId !== null
+      ? serverEnvironment.codexUsage({ environmentId, input: {} })
+      : null,
   );
   const refresh = query.refresh;
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const interval = setInterval(refresh, REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refresh);
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", refresh);
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return query.data;
 }
