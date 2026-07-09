@@ -696,9 +696,11 @@ export interface ReclaimResult {
 
 /**
  * Find one stale slot under the reclaim lock and atomically repurpose it for
- * `input`, returning the new claim. Returns null if none are stale. Never
- * touches a claim whose unit is live. Corrupt claim files are reclaimable only
- * if their (filename-derived) unit is dead.
+ * `input`, returning the new claim. Returns null if none are stale. Corrupt
+ * claim files whose (filename-derived) unit is dead are reclaimed first; if no
+ * cleanly stale slot exists, corrupt claims with live units are reclaimed as a
+ * last resort (the metadata is already unrecoverable, so the slot would
+ * otherwise stay permanently stuck).
  *
  * The freed slot is re-claimed WHILE STILL HOLDING THE LOCK, and the stale
  * claim file is overwritten in place (atomic rename) rather than unlinked and
@@ -713,6 +715,7 @@ export function reclaimStaleSlot(
 ): ReclaimResult | null {
   const release = acquireReclaimLock();
   try {
+    const corruptAlivePorts: number[] = [];
     for (const externalPort of listClaimedPorts()) {
       const loopbackPort = loopbackForExternal(externalPort);
       const unit = unitForExternal(externalPort);
@@ -724,7 +727,7 @@ export function reclaimStaleSlot(
       }
 
       if (read.status === "corrupt") {
-        // Derive unit/port from the filename; reclaim only if truly dead.
+        // Derive unit/port from the filename; reclaim immediately if truly dead.
         const derived = derivedClaimForPort(externalPort);
         if (computeSlotState(derived, deps.probe) === "stale") {
           deps.stopUnit(unit);
@@ -732,10 +735,8 @@ export function reclaimStaleSlot(
           writeClaimAtomic(claim); // overwrite the corrupt file in place
           return { claim, reclaimedFrom: externalPort };
         }
-        // Live unit but corrupt file — warn and skip; never silently delete.
-        process.stderr.write(
-          `[test-deploy] WARN: claim ${externalPort}.json is corrupt but unit ${unit} is live; skipping.\n`,
-        );
+        // Live unit but corrupt file — prefer a cleanly stale slot first.
+        corruptAlivePorts.push(externalPort);
         continue;
       }
 
@@ -750,6 +751,24 @@ export function reclaimStaleSlot(
         return { claim, reclaimedFrom: externalPort };
       }
     }
+
+    // No cleanly stale slot found. Reclaim the first corrupt+alive slot as a
+    // last resort: the claim metadata is already unrecoverable, so the slot
+    // cannot be matched to its original branch for redeploy. Without this,
+    // the slot stays permanently stuck until manual registry repair.
+    if (corruptAlivePorts.length > 0) {
+      const externalPort = corruptAlivePorts[0]!;
+      const unit = unitForExternal(externalPort);
+      assertNotProd(externalPort, loopbackForExternal(externalPort), unit);
+      process.stderr.write(
+        `[test-deploy] WARN: reclaiming corrupt+alive slot ${externalPort} (stopping ${unit}).\n`,
+      );
+      deps.stopUnit(unit);
+      const claim = buildClaim(externalPort, input);
+      writeClaimAtomic(claim);
+      return { claim, reclaimedFrom: externalPort };
+    }
+
     return null;
   } finally {
     release();
@@ -896,7 +915,7 @@ export function attachmentFileThreadSegment(fileName: string): string | null {
     return null;
   }
   const match = ATTACHMENT_ID_PATTERN.exec(id);
-  return match ? match[1]?.toLowerCase() ?? null : null;
+  return match ? (match[1]?.toLowerCase() ?? null) : null;
 }
 
 /**
@@ -1040,6 +1059,24 @@ export function serverBinFor(worktreePath: string): string {
  */
 export function vpBinFor(worktreePath: string): string {
   return join(worktreePath, "node_modules", ".bin", "vp");
+}
+
+/**
+ * Recover the WorkingDirectory of a systemd user unit. For transient units
+ * started by `systemd-run --working-directory=<path>`, this is the worktree
+ * path. Returns null when the unit is unknown or the property is empty.
+ */
+export function unitWorkingDirectory(unit: string): string | null {
+  const result = runCapture("systemctl", [
+    "--user",
+    "show",
+    unit,
+    "-p",
+    "WorkingDirectory",
+    "--value",
+  ]);
+  const dir = result.stdout.trim();
+  return result.status === 0 && dir.length > 0 ? dir : null;
 }
 
 export interface PairingRequest {
@@ -1232,16 +1269,28 @@ export function probeExternal(externalPort: number): string | null {
  * `setInterval` cannot fire in the main process. A detached child process
  * sidesteps that: it runs its own event loop independently, keeping the claim
  * fresh so `computeSlotState` never sees it as stale mid-build.
+ *
+ * The heartbeat self-terminates when its parent process is no longer alive,
+ * preventing orphaned heartbeats from keeping `claimedAt` fresh indefinitely
+ * after the parent dies (e.g. SIGKILL during the build). A PID sidecar file
+ * (`<claim>.hb.pid`) is written for external cleanup as a fallback.
  */
 export function spawnClaimHeartbeat(
   externalPort: number,
   intervalMs: number = 5 * 60_000,
 ): () => void {
   const claimPath = claimPathFor(externalPort);
+  const parentPid = process.pid;
+  const pidFile = heartbeatPidFile(externalPort);
   const script =
     `const fs=require("fs");` +
     `const p=${JSON.stringify(claimPath)};` +
-    `setInterval(()=>{try{` +
+    `const ppid=${parentPid};` +
+    `const pf=${JSON.stringify(pidFile)};` +
+    `function parentAlive(){try{process.kill(ppid,0);return true}catch(e){return e.code==="EPERM"}}` +
+    `const iv=setInterval(()=>{` +
+    `if(!parentAlive()){clearInterval(iv);try{fs.unlinkSync(pf)}catch{}process.exit(0)}` +
+    `try{` +
     `const c=JSON.parse(fs.readFileSync(p,"utf8"));` +
     `c.claimedAt=new Date().toISOString();` +
     `const t=p+".hb."+process.pid;` +
@@ -1253,11 +1302,26 @@ export function spawnClaimHeartbeat(
     stdio: "ignore",
   });
   child.unref();
+  try {
+    writeFileSync(pidFile, String(child.pid), { mode: 0o600 });
+  } catch {
+    // Best effort.
+  }
   return () => {
     try {
       child.kill();
     } catch {
       // Process may have already exited.
     }
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      // Best effort.
+    }
   };
+}
+
+/** Path to the heartbeat PID sidecar file for a slot. */
+export function heartbeatPidFile(externalPort: number): string {
+  return `${claimPathFor(externalPort)}.hb.pid`;
 }

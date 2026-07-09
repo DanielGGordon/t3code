@@ -12,6 +12,7 @@ import { parseArgs } from "node:util";
 
 import {
   assertNotProd,
+  baseDirFor,
   claimPathFor,
   computeSlotState,
   derivedClaimForPort,
@@ -24,6 +25,7 @@ import {
   realProbe,
   testUrlFor,
   unitForExternal,
+  unitWorkingDirectory,
   updateClaim,
   type Claim,
   type SlotState,
@@ -132,14 +134,33 @@ function printTable(rows: SlotRow[]): void {
 
 function requireLiveClaim(externalPort: number): Claim {
   const read = readClaim(externalPort);
-  if (read.status !== "ok") {
-    throw new Error(`Slot ${externalPort} is ${read.status === "missing" ? "free" : "corrupt"}; nothing to pair.`);
+  if (read.status === "missing") {
+    throw new Error(`Slot ${externalPort} is free; nothing to pair.`);
   }
-  const state = computeSlotState(read.claim, realProbe);
+  if (read.status === "ok") {
+    const state = computeSlotState(read.claim, realProbe);
+    if (state !== "alive") {
+      throw new Error(`Slot ${externalPort} is ${state}; deploy it before minting a pairing link.`);
+    }
+    return read.claim;
+  }
+  // Corrupt claim: derive what we can and recover worktreePath from the
+  // running unit's WorkingDirectory so --pair works for live corrupt slots.
+  const derived = derivedClaimForPort(externalPort);
+  const state = computeSlotState(derived, realProbe);
   if (state !== "alive") {
-    throw new Error(`Slot ${externalPort} is ${state}; deploy it before minting a pairing link.`);
+    throw new Error(
+      `Slot ${externalPort} is corrupt and ${state}; deploy it before minting a pairing link.`,
+    );
   }
-  return read.claim;
+  const worktreePath = unitWorkingDirectory(derived.unit);
+  if (worktreePath === null || worktreePath.length === 0) {
+    throw new Error(
+      `Slot ${externalPort} is corrupt but alive; could not recover worktreePath from ` +
+        `${derived.unit}. Redeploy the branch to repair the claim file.`,
+    );
+  }
+  return { ...derived, worktreePath, baseDir: baseDirFor(externalPort) };
 }
 
 function doPair(externalPort: number, baseUrlArg: string | undefined): void {
@@ -174,7 +195,9 @@ function main(): void {
     const externalPort = Number.parseInt(values.port, 10);
     assertNotProd(externalPort, loopbackForExternal(externalPort), unitForExternal(externalPort));
     if (readClaim(externalPort).status !== "ok") {
-      throw new Error(`No live claim for port ${externalPort} (claim file at ${claimPathFor(externalPort)}).`);
+      throw new Error(
+        `No live claim for port ${externalPort} (claim file at ${claimPathFor(externalPort)}).`,
+      );
     }
     updateClaim(externalPort, { prUrl: values["set-pr"] });
     process.stdout.write(`Set prUrl for slot ${externalPort}.\n`);
