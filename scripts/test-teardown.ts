@@ -8,7 +8,8 @@
 // Base-dir is KEPT by default so re-reviewing the same branch keeps the user
 // paired (30-day session). --purge only when the branch is abandoned/merged.
 
-import { parseArgs } from "node:util";
+import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
 
 import {
   assertNotProd,
@@ -72,13 +73,22 @@ function removeWorktree(claim: Claim | null): void {
     );
     return;
   }
-  const removal = runCapture("git", [
+  const commonDirResult = runCapture("git", [
     "-C",
     claim.worktreePath,
-    "worktree",
-    "remove",
-    claim.worktreePath,
+    "rev-parse",
+    "--git-common-dir",
   ]);
+  if (commonDirResult.status !== 0) {
+    process.stderr.write(
+      `[test-teardown] --remove-worktree: cannot resolve main repository for ${claim.worktreePath}; skipping.\n`,
+    );
+    return;
+  }
+  const mainRepo = NodePath.dirname(
+    NodePath.resolve(claim.worktreePath, commonDirResult.stdout.trim()),
+  );
+  const removal = runCapture("git", ["-C", mainRepo, "worktree", "remove", claim.worktreePath]);
   if (removal.status !== 0) {
     process.stderr.write(`[test-teardown] git worktree remove failed: ${removal.stderr.trim()}\n`);
     return;
@@ -87,7 +97,7 @@ function removeWorktree(claim: Claim | null): void {
 }
 
 function main(): void {
-  const { values } = parseArgs({
+  const { values } = NodeUtil.parseArgs({
     options: {
       port: { type: "string" },
       branch: { type: "string" },
