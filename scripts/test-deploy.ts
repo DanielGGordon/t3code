@@ -33,6 +33,7 @@ import {
   runCapture,
   seedBaseDir,
   serverBinFor,
+  spawnClaimHeartbeat,
   testUrlFor,
   unitForExternal,
   updateClaim,
@@ -150,7 +151,9 @@ function printPrCommentSection(comment: CommentOutcome): void {
   process.stdout.write("\n---- MANDATORY: PR comment ----\n");
   switch (comment.kind) {
     case "posted":
-      process.stdout.write("Posted the test-deployment link as a PR comment (via `gh pr comment`).\n");
+      process.stdout.write(
+        "Posted the test-deployment link as a PR comment (via `gh pr comment`).\n",
+      );
       return;
     case "command":
       process.stdout.write(
@@ -243,10 +246,16 @@ function main(): void {
   // The only branch that must never be test-deployed is `main` itself — that
   // would be a prod-shaped deploy of the branch prod already tracks.
   if (branch === "main" || branch === "master") {
-    throw new Error(`Refusing to test-deploy '${branch}': that is the prod branch, not a feature branch.`);
+    throw new Error(
+      `Refusing to test-deploy '${branch}': that is the prod branch, not a feature branch.`,
+    );
   }
 
-  const { claim: initialClaim, reused, reclaimedFrom } = claimSlot({
+  const {
+    claim: initialClaim,
+    reused,
+    reclaimedFrom,
+  } = claimSlot({
     branch,
     worktreePath,
     agentNote: note,
@@ -272,10 +281,18 @@ function main(): void {
     const seedResult = seedBaseDir(externalPort, seedMode);
     process.stdout.write(`[test-deploy] base-dir: ${seedResult}\n`);
 
+    // Keep the claim's claimedAt fresh while the synchronous build blocks the
+    // event loop, so a concurrent agent never sees this slot as stale mid-build.
+    const stopHeartbeat = spawnClaimHeartbeat(externalPort);
+
     // Build the web dist in the worktree (server serves apps/web/dist).
-    const build = runCapture("vp", ["run", "--filter", "@t3tools/web", "build"]);
-    if (build.status !== 0) {
-      throw new Error(`web build failed: ${build.stderr.trim() || build.stdout.trim()}`);
+    try {
+      const build = runCapture("vp", ["run", "--filter", "@t3tools/web", "build"]);
+      if (build.status !== 0) {
+        throw new Error(`web build failed: ${build.stderr.trim() || build.stdout.trim()}`);
+      }
+    } finally {
+      stopHeartbeat();
     }
     process.stdout.write("[test-deploy] web build ok\n");
 
@@ -312,7 +329,9 @@ function main(): void {
           "(unit not active and/or port not listening).",
       );
     }
-    process.stdout.write(`[test-deploy] ${unit} active and listening on 127.0.0.1:${initialClaim.loopbackPort}\n`);
+    process.stdout.write(
+      `[test-deploy] ${unit} active and listening on 127.0.0.1:${initialClaim.loopbackPort}\n`,
+    );
 
     const pid = readMainPid(unit);
     let claim = updateClaim(externalPort, { pid });
@@ -329,7 +348,9 @@ function main(): void {
     // the handoff steers to the SSH-tunnel flow instead of a dead URL.
     let pairedUrl: string | null = null;
     if (degraded) {
-      process.stdout.write("[test-deploy] NOTE: external path unreachable; handing off in degraded (tunnel) mode.\n");
+      process.stdout.write(
+        "[test-deploy] NOTE: external path unreachable; handing off in degraded (tunnel) mode.\n",
+      );
     } else {
       pairedUrl = mintPairingLink({
         worktreePath,

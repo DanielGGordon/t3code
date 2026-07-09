@@ -42,7 +42,9 @@ function resolvePortFromBranch(branch: string): number {
 
 function removeWorktree(claim: Claim | null): void {
   if (!claim || claim.worktreePath.length === 0) {
-    process.stderr.write("[test-teardown] --remove-worktree: no worktree path on claim; skipping.\n");
+    process.stderr.write(
+      "[test-teardown] --remove-worktree: no worktree path on claim; skipping.\n",
+    );
     return;
   }
   // Hard prod guard: a claim's worktreePath is trusted input (it can be wrong
@@ -70,7 +72,13 @@ function removeWorktree(claim: Claim | null): void {
     );
     return;
   }
-  const removal = runCapture("git", ["worktree", "remove", claim.worktreePath]);
+  const removal = runCapture("git", [
+    "-C",
+    claim.worktreePath,
+    "worktree",
+    "remove",
+    claim.worktreePath,
+  ]);
   if (removal.status !== 0) {
     process.stderr.write(`[test-teardown] git worktree remove failed: ${removal.stderr.trim()}\n`);
     return;
@@ -145,9 +153,13 @@ function main(): void {
 
   if (values.purge) {
     purgeBaseDir(externalPort);
-    process.stdout.write(`[test-teardown] purged base-dir for slot ${externalPort} (session dropped)\n`);
+    process.stdout.write(
+      `[test-teardown] purged base-dir for slot ${externalPort} (session dropped)\n`,
+    );
   } else {
-    process.stdout.write(`[test-teardown] KEPT base-dir for slot ${externalPort} (session preserved)\n`);
+    process.stdout.write(
+      `[test-teardown] KEPT base-dir for slot ${externalPort} (session preserved)\n`,
+    );
   }
 
   if (values["remove-worktree"]) {

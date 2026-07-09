@@ -13,7 +13,7 @@
 //   - dir     /home/dgordon/projects/meta/t3code-v2
 //   - userdata /home/dgordon/.t3/userdata
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   cpSync,
@@ -98,11 +98,7 @@ export class ForbiddenProdTargetError extends Error {
   }
 }
 
-export function assertNotProd(
-  externalPort: number,
-  loopbackPort: number,
-  unit: string,
-): void {
+export function assertNotProd(externalPort: number, loopbackPort: number, unit: string): void {
   if (externalPort === FORBIDDEN_EXTERNAL_PORT) {
     throw new ForbiddenProdTargetError(`external port ${FORBIDDEN_EXTERNAL_PORT}`);
   }
@@ -259,7 +255,10 @@ export function listClaimedPorts(): number[] {
   for (const entry of entries) {
     const match = /^(\d+)\.json$/.exec(entry);
     if (match && match[1] !== undefined) {
-      ports.push(Number.parseInt(match[1], 10));
+      const port = Number.parseInt(match[1], 10);
+      if (isValidExternalPort(port)) {
+        ports.push(port);
+      }
     }
   }
   return ports.sort((a, b) => a - b);
@@ -519,9 +518,7 @@ export function acquireReclaimLock(): () => void {
     }
   }
 
-  throw new Error(
-    `Reclaim lock held by another agent (${lockDir}). Retry test-deploy shortly.`,
-  );
+  throw new Error(`Reclaim lock held by another agent (${lockDir}). Retry test-deploy shortly.`);
 }
 
 function forceBreakLock(lockDir: string): void {
@@ -914,7 +911,10 @@ export function postPrComment(prUrl: string, body: string): { ok: boolean; detai
   if (result.status === 0) {
     return { ok: true, detail: result.stdout.trim() };
   }
-  return { ok: false, detail: (result.stderr.trim() || result.stdout.trim() || "gh exited non-zero") };
+  return {
+    ok: false,
+    detail: result.stderr.trim() || result.stdout.trim() || "gh exited non-zero",
+  };
 }
 
 /**
@@ -949,4 +949,46 @@ export function probeExternal(externalPort: number): string | null {
     return code;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Claim heartbeat (keeps claimedAt fresh during long synchronous operations)
+// ---------------------------------------------------------------------------
+
+/**
+ * Spawn a detached background process that periodically refreshes a claim's
+ * `claimedAt` timestamp. Returns a stop function that kills the heartbeat.
+ *
+ * The web build runs under `spawnSync` which blocks the Node event loop, so
+ * `setInterval` cannot fire in the main process. A detached child process
+ * sidesteps that: it runs its own event loop independently, keeping the claim
+ * fresh so `computeSlotState` never sees it as stale mid-build.
+ */
+export function spawnClaimHeartbeat(
+  externalPort: number,
+  intervalMs: number = 5 * 60_000,
+): () => void {
+  const claimPath = claimPathFor(externalPort);
+  const script =
+    `const fs=require("fs");` +
+    `const p=${JSON.stringify(claimPath)};` +
+    `setInterval(()=>{try{` +
+    `const c=JSON.parse(fs.readFileSync(p,"utf8"));` +
+    `c.claimedAt=new Date().toISOString();` +
+    `const t=p+".hb."+process.pid;` +
+    `fs.writeFileSync(t,JSON.stringify(c,null,2)+"\\n",{mode:384});` +
+    `fs.renameSync(t,p)` +
+    `}catch{}},${intervalMs})`;
+  const child = spawn(process.execPath, ["-e", script], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return () => {
+    try {
+      child.kill();
+    } catch {
+      // Process may have already exited.
+    }
+  };
 }
