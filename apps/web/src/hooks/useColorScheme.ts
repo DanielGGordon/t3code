@@ -77,6 +77,17 @@ if (typeof document !== "undefined" && hasSchemeStorage()) {
   applyColorScheme(getStored());
 }
 
+// Global cross-tab listener so scheme changes propagate even when no component
+// subscribes to `useColorScheme` (e.g. chat tabs that only mount `useTheme`).
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      applyColorScheme(getStored(), true);
+      emitChange();
+    }
+  });
+}
+
 function getSnapshot(): ColorScheme {
   if (!hasSchemeStorage()) return DEFAULT_COLOR_SCHEME;
   const scheme = getStored();
@@ -93,18 +104,8 @@ function subscribe(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   listeners.push(listener);
 
-  // Sync scheme changes made in other tabs.
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) {
-      applyColorScheme(getStored(), true);
-      emitChange();
-    }
-  };
-  window.addEventListener("storage", handleStorage);
-
   return () => {
     listeners = listeners.filter((l) => l !== listener);
-    window.removeEventListener("storage", handleStorage);
   };
 }
 
