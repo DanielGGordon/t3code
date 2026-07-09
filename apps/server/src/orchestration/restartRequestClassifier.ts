@@ -30,16 +30,28 @@ const REQUEST_PATTERNS: ReadonlyArray<RegExp> = [
     `\\byou(?:'ll|'d| will| would| may need to| might need to| need to| should| have to)\\s+(?:to\\s+)?(?:manually\\s+)?${RESTART_VERB}\\b`,
     "i",
   ),
-  new RegExp(`\\b(?:need|needs|requires?)\\s+(?:a\\s+|to\\s+be\\s+|to\\s+|manual\\s+)?${RESTART_VERB}`, "i"),
-  new RegExp(`\\b(?:go ahead and|you can now|now)\\s+${RESTART_VERB}\\s+(?:the\\s+|your\\s+)?${TARGET}\\b`, "i"),
+  new RegExp(
+    `\\b(?:need|needs|requires?)\\s+(?:a\\s+|to\\s+be\\s+|to\\s+|manual\\s+)?${RESTART_VERB}`,
+    "i",
+  ),
+  new RegExp(
+    `\\b(?:go ahead and|you can now|now)\\s+${RESTART_VERB}\\s+(?:the\\s+|your\\s+)?${TARGET}\\b`,
+    "i",
+  ),
   new RegExp(`\\b${RESTART_VERB}\\s+(?:the\\s+|your\\s+|this\\s+)?${TARGET}\\b`, "i"),
 ];
 
 // Guards against past-tense ("I restarted it") and negated ("no need to
 // restart") mentions that should not raise the flag.
 const NEGATION_PATTERNS: ReadonlyArray<RegExp> = [
-  new RegExp(`\\b(?:no|not|don'?t|doesn'?t|didn'?t|without|never|avoid|skip)\\b[^.?!\\n]*\\b${RESTART_VERB}`, "i"),
-  new RegExp(`\\b(?:i|we|i've|we've|already|just|have|has|having)\\s+(?:already\\s+)?(?:restarted|rebooted|bounced|relaunched)\\b`, "i"),
+  new RegExp(
+    `\\b(?:no|not|don'?t|doesn'?t|didn'?t|without|never|avoid|skip)\\b[^.?!,;\\n]*\\b${RESTART_VERB}`,
+    "i",
+  ),
+  new RegExp(
+    `\\b(?:i|we|i've|we've|already|just|have|has|having)\\s+(?:already\\s+)?(?:restarted|rebooted|bounced|relaunched)\\b`,
+    "i",
+  ),
 ];
 
 const REASON_PATTERN = new RegExp(

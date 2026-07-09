@@ -22,6 +22,15 @@ describe("classifyRestartRequest", () => {
     expect(classifyRestartRequest("You need to restart the backend now.").reason).toBe("backend");
   });
 
+  it("matches when negation appears in a separate clause from the restart verb", () => {
+    for (const text of [
+      "Not sure what went wrong, but please restart the server.",
+      "I didn't change the config; restart the backend to pick up the fix.",
+    ]) {
+      expect(classifyRestartRequest(text).matched, text).toBe(true);
+    }
+  });
+
   it("ignores past-tense and negated mentions", () => {
     for (const text of [
       "I restarted the server for you, everything is back up.",
