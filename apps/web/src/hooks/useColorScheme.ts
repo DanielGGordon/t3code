@@ -50,17 +50,26 @@ function getStored(): ColorScheme {
   return isColorScheme(raw) ? raw : DEFAULT_COLOR_SCHEME;
 }
 
-function applyColorScheme(scheme: ColorScheme) {
+function applyColorScheme(scheme: ColorScheme, suppressTransitions = false) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  if (suppressTransitions) {
+    root.classList.add("no-transitions");
+  }
   if (scheme === "default") {
     delete root.dataset.scheme;
   } else {
     root.dataset.scheme = scheme;
   }
-  // The chrome/background surface color depends on the active palette, so keep
-  // the native window chrome and the theme-color meta tag in sync.
   syncBrowserChromeTheme();
+  if (suppressTransitions) {
+    // Force a reflow so the no-transitions class takes effect before removal
+    // oxlint-disable-next-line no-unused-expressions
+    root.offsetHeight;
+    requestAnimationFrame(() => {
+      root.classList.remove("no-transitions");
+    });
+  }
 }
 
 // Apply immediately on module load to prevent a flash of the default palette.
@@ -87,7 +96,7 @@ function subscribe(listener: () => void): () => void {
   // Sync scheme changes made in other tabs.
   const handleStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) {
-      applyColorScheme(getStored());
+      applyColorScheme(getStored(), true);
       emitChange();
     }
   };
@@ -105,7 +114,7 @@ export function useColorScheme() {
   const setColorScheme = useCallback((next: ColorScheme) => {
     if (!hasSchemeStorage()) return;
     localStorage.setItem(STORAGE_KEY, next);
-    applyColorScheme(next);
+    applyColorScheme(next, true);
     emitChange();
   }, []);
 
