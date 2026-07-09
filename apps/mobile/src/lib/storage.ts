@@ -1,9 +1,8 @@
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SecureStore from "expo-secure-store";
-import { EnvironmentId, OrchestrationShellSnapshot } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 
 import {
   isRelayManagedConnection,
@@ -14,38 +13,85 @@ import {
 const CONNECTIONS_KEY = "t3code.connections";
 const PREFERENCES_KEY = "t3code.preferences";
 const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
-const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
-const SHELL_SNAPSHOT_CACHE_DIRECTORY = "shell-snapshots";
+const AGENT_AWARENESS_REGISTRATION_KEY = "t3code.agent-awareness.registration";
+const MobileStorageKey = Schema.Literals([
+  CONNECTIONS_KEY,
+  PREFERENCES_KEY,
+  AGENT_AWARENESS_DEVICE_ID_KEY,
+  AGENT_AWARENESS_REGISTRATION_KEY,
+]);
+type MobileStorageKeyValue = typeof MobileStorageKey.Type;
 
-export interface CachedShellSnapshot {
-  readonly schemaVersion: typeof SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION;
-  readonly environmentId: EnvironmentId;
-  readonly snapshotReceivedAt: string;
-  readonly snapshot: OrchestrationShellSnapshot;
+export class MobileSecureStorageError extends Schema.TaggedErrorClass<MobileSecureStorageError>()(
+  "MobileSecureStorageError",
+  {
+    operation: Schema.Literals(["read", "write", "generate-device-id"]),
+    key: MobileStorageKey,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Mobile secure storage operation ${this.operation} failed for key ${this.key}.`;
+  }
 }
 
-export interface MobilePreferences {
+export class MobileStorageDecodeError extends Schema.TaggedErrorClass<MobileStorageDecodeError>()(
+  "MobileStorageDecodeError",
+  {
+    key: MobileStorageKey,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to decode mobile storage value for key ${this.key}.`;
+  }
+}
+
+export class MobileStorageEncodeError extends Schema.TaggedErrorClass<MobileStorageEncodeError>()(
+  "MobileStorageEncodeError",
+  {
+    key: MobileStorageKey,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to encode mobile storage value for key ${this.key}.`;
+  }
+}
+
+export interface Preferences {
   readonly liveActivitiesEnabled?: boolean;
-  readonly terminalFontSize?: number;
+  readonly baseFontSize?: number;
+  /** Terminal font size override; null/absent means derived from baseFontSize. */
+  readonly terminalFontSize?: number | null;
+  /** Legacy key predating baseFontSize; read once for migration. */
+  readonly markdownFontSize?: number;
+  /** Code/diff font size override; null/absent means derived from baseFontSize. */
+  readonly codeFontSize?: number | null;
+  readonly codeWordBreak?: boolean;
+  /** Home-screen project groups the user collapsed, by group key. */
+  readonly collapsedProjectGroups?: readonly string[];
+  /** Cloud account ids that opted out of the T3 Connect onboarding sheet. */
+  readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
 }
 
-const CachedShellSnapshotSchema = Schema.Struct({
-  schemaVersion: Schema.Literal(SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION),
-  environmentId: EnvironmentId,
-  snapshotReceivedAt: Schema.String,
-  snapshot: OrchestrationShellSnapshot,
-});
-const decodeCachedShellSnapshot = Schema.decodeUnknownOption(CachedShellSnapshotSchema);
-
-async function readStorageItem(key: string): Promise<string | null> {
-  return await SecureStore.getItemAsync(key);
+async function readStorageItem(key: MobileStorageKeyValue): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key);
+  } catch (cause) {
+    throw new MobileSecureStorageError({ operation: "read", key, cause });
+  }
 }
 
-async function writeStorageItem(key: string, value: string): Promise<void> {
-  await SecureStore.setItemAsync(key, value);
+async function writeStorageItem(key: MobileStorageKeyValue, value: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(key, value);
+  } catch (cause) {
+    throw new MobileSecureStorageError({ operation: "write", key, cause });
+  }
 }
 
-async function readJsonStorageItem<T>(key: string): Promise<T | null> {
+async function readJsonStorageItem<T>(key: MobileStorageKeyValue): Promise<T | null> {
   const raw = (await readStorageItem(key)) ?? "";
   if (!raw.trim()) {
     return null;
@@ -53,80 +99,23 @@ async function readJsonStorageItem<T>(key: string): Promise<T | null> {
 
   try {
     return JSON.parse(raw) as T;
-  } catch {
+  } catch (cause) {
+    console.warn(
+      "[mobile-storage] ignored invalid JSON",
+      new MobileStorageDecodeError({ key, cause }),
+    );
     return null;
   }
 }
 
-function cachedShellSnapshotFileName(environmentId: EnvironmentId): string {
-  return `${encodeURIComponent(environmentId)}.json`;
-}
-
-async function getShellSnapshotCacheDirectory() {
-  const { Directory, Paths } = await import("expo-file-system");
-  const directory = new Directory(Paths.document, SHELL_SNAPSHOT_CACHE_DIRECTORY);
-  directory.create({ idempotent: true, intermediates: true });
-  return directory;
-}
-
-export async function loadCachedShellSnapshot(
-  environmentId: EnvironmentId,
-): Promise<CachedShellSnapshot | null> {
+async function writeJsonStorageItem(key: MobileStorageKeyValue, value: unknown) {
+  let encoded: string;
   try {
-    const { File } = await import("expo-file-system");
-    const directory = await getShellSnapshotCacheDirectory();
-    const file = new File(directory, cachedShellSnapshotFileName(environmentId));
-    if (!file.exists) {
-      return null;
-    }
-
-    const parsed = JSON.parse(await file.text()) as unknown;
-    const decoded = decodeCachedShellSnapshot(parsed);
-    if (Option.isNone(decoded) || decoded.value.environmentId !== environmentId) {
-      return null;
-    }
-
-    return decoded.value;
-  } catch {
-    return null;
+    encoded = JSON.stringify(value);
+  } catch (cause) {
+    throw new MobileStorageEncodeError({ key, cause });
   }
-}
-
-export async function saveCachedShellSnapshot(
-  environmentId: EnvironmentId,
-  snapshot: OrchestrationShellSnapshot,
-): Promise<void> {
-  try {
-    const { File } = await import("expo-file-system");
-    const directory = await getShellSnapshotCacheDirectory();
-    const file = new File(directory, cachedShellSnapshotFileName(environmentId));
-    const document: CachedShellSnapshot = {
-      schemaVersion: SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION,
-      environmentId,
-      snapshotReceivedAt: new Date().toISOString(),
-      snapshot,
-    };
-
-    if (!file.exists) {
-      file.create({ intermediates: true, overwrite: true });
-    }
-    file.write(JSON.stringify(document));
-  } catch {
-    // Cache persistence is best-effort and should never block live data.
-  }
-}
-
-export async function clearCachedShellSnapshot(environmentId: EnvironmentId): Promise<void> {
-  try {
-    const { File } = await import("expo-file-system");
-    const directory = await getShellSnapshotCacheDirectory();
-    const file = new File(directory, cachedShellSnapshotFileName(environmentId));
-    if (file.exists) {
-      file.delete();
-    }
-  } catch {
-    // Ignore cache cleanup failures.
-  }
+  await writeStorageItem(key, encoded);
 }
 
 export async function loadSavedConnections(): Promise<ReadonlyArray<SavedRemoteConnection>> {
@@ -157,7 +146,7 @@ export async function saveConnection(connection: SavedRemoteConnection): Promise
       )
     : pipe(current, Arr.append(stableConnection));
 
-  await writeStorageItem(CONNECTIONS_KEY, JSON.stringify({ connections: next }));
+  await writeJsonStorageItem(CONNECTIONS_KEY, { connections: next });
 }
 
 export async function clearSavedConnection(environmentId: EnvironmentId): Promise<void> {
@@ -166,40 +155,80 @@ export async function clearSavedConnection(environmentId: EnvironmentId): Promis
     current,
     Arr.filter((entry) => entry.environmentId !== environmentId),
   );
-  await writeStorageItem(CONNECTIONS_KEY, JSON.stringify({ connections: next }));
+  await writeJsonStorageItem(CONNECTIONS_KEY, { connections: next });
 }
 
-export async function loadPreferences(): Promise<MobilePreferences> {
-  const parsed = await readJsonStorageItem<MobilePreferences>(PREFERENCES_KEY);
+export async function loadPreferences(): Promise<Preferences> {
+  const parsed = await readJsonStorageItem<Preferences>(PREFERENCES_KEY);
   if (!parsed || typeof parsed !== "object") {
     return {};
   }
 
   const preferences: {
     liveActivitiesEnabled?: boolean;
-    terminalFontSize?: number;
+    baseFontSize?: number;
+    terminalFontSize?: number | null;
+    markdownFontSize?: number;
+    codeFontSize?: number | null;
+    codeWordBreak?: boolean;
+    collapsedProjectGroups?: readonly string[];
+    connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
   }
-  if (typeof parsed.terminalFontSize === "number") {
+  if (typeof parsed.baseFontSize === "number") {
+    preferences.baseFontSize = parsed.baseFontSize;
+  }
+  if (typeof parsed.terminalFontSize === "number" || parsed.terminalFontSize === null) {
     preferences.terminalFontSize = parsed.terminalFontSize;
+  }
+  if (typeof parsed.markdownFontSize === "number") {
+    preferences.markdownFontSize = parsed.markdownFontSize;
+  }
+  if (typeof parsed.codeFontSize === "number" || parsed.codeFontSize === null) {
+    preferences.codeFontSize = parsed.codeFontSize;
+  }
+  if (typeof parsed.codeWordBreak === "boolean") {
+    preferences.codeWordBreak = parsed.codeWordBreak;
+  }
+  if (Array.isArray(parsed.collapsedProjectGroups)) {
+    preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
+      (key): key is string => typeof key === "string",
+    );
+  }
+  if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
+    preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
+      (account): account is string => typeof account === "string",
+    );
   }
 
   return preferences;
 }
 
-export async function savePreferencesPatch(
-  patch: Partial<MobilePreferences>,
-): Promise<MobilePreferences> {
-  const current = await loadPreferences();
-  const next: MobilePreferences = {
-    ...current,
-    ...patch,
-  };
-  await writeStorageItem(PREFERENCES_KEY, JSON.stringify(next));
-  return next;
+// Preference writes are read-modify-write over one JSON blob; concurrent
+// writers would drop each other's fields, so all writes are serialized here.
+let preferencesWriteQueue: Promise<unknown> = Promise.resolve();
+
+export async function updatePreferences(
+  update: (current: Preferences) => Partial<Preferences>,
+): Promise<Preferences> {
+  const task = preferencesWriteQueue.then(async () => {
+    const current = await loadPreferences();
+    const next: Preferences = {
+      ...current,
+      ...update(current),
+    };
+    await writeJsonStorageItem(PREFERENCES_KEY, next);
+    return next;
+  });
+  preferencesWriteQueue = task.catch(() => undefined);
+  return task;
+}
+
+export async function savePreferencesPatch(patch: Partial<Preferences>): Promise<Preferences> {
+  return updatePreferences(() => patch);
 }
 
 export async function loadOrCreateAgentAwarenessDeviceId(): Promise<string> {
@@ -208,8 +237,15 @@ export async function loadOrCreateAgentAwarenessDeviceId(): Promise<string> {
     return existing;
   }
 
-  const { uuidv4 } = await import("./uuid");
-  const deviceId = uuidv4();
+  const deviceId = await import("./uuid")
+    .then(({ uuidv4 }) => uuidv4())
+    .catch((cause) => {
+      throw new MobileSecureStorageError({
+        operation: "generate-device-id",
+        key: AGENT_AWARENESS_DEVICE_ID_KEY,
+        cause,
+      });
+    });
   await writeStorageItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId);
   return deviceId;
 }
@@ -217,4 +253,47 @@ export async function loadOrCreateAgentAwarenessDeviceId(): Promise<string> {
 export async function loadAgentAwarenessDeviceId(): Promise<string | null> {
   const existing = await readStorageItem(AGENT_AWARENESS_DEVICE_ID_KEY);
   return existing?.trim() ? existing : null;
+}
+
+export interface AgentAwarenessRegistrationRecord {
+  readonly identity: string;
+  readonly signature: string;
+  // Last push-to-start token the relay accepted. Registrations triggered
+  // without a token event merge it back in so token absence never reads as a
+  // change (which would defeat the register-once skip every launch).
+  readonly pushToStartToken?: string;
+}
+
+// Remembers the account identity and payload signature the relay last accepted
+// so the app does not re-register on every launch while nothing has changed.
+// Cleared only on sign-out.
+export async function loadAgentAwarenessRegistrationRecord(): Promise<AgentAwarenessRegistrationRecord | null> {
+  const parsed = await readJsonStorageItem<AgentAwarenessRegistrationRecord>(
+    AGENT_AWARENESS_REGISTRATION_KEY,
+  );
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof parsed.identity !== "string" ||
+    typeof parsed.signature !== "string"
+  ) {
+    return null;
+  }
+  return {
+    identity: parsed.identity,
+    signature: parsed.signature,
+    ...(typeof parsed.pushToStartToken === "string" && parsed.pushToStartToken
+      ? { pushToStartToken: parsed.pushToStartToken }
+      : {}),
+  };
+}
+
+export async function saveAgentAwarenessRegistrationRecord(
+  record: AgentAwarenessRegistrationRecord,
+): Promise<void> {
+  await writeJsonStorageItem(AGENT_AWARENESS_REGISTRATION_KEY, record);
+}
+
+export async function clearAgentAwarenessRegistrationRecord(): Promise<void> {
+  await writeStorageItem(AGENT_AWARENESS_REGISTRATION_KEY, "");
 }

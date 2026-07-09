@@ -47,6 +47,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count,
           pending_user_input_count,
           has_actionable_proposed_plan,
+          requesting_restart,
+          restart_request_reason,
           deleted_at
         )
         VALUES (
@@ -66,6 +68,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
           ${row.hasActionableProposedPlan},
+          ${row.requestingRestart},
+          ${row.restartRequestReason},
           ${row.deletedAt}
         )
         ON CONFLICT (thread_id)
@@ -85,6 +89,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
           has_actionable_proposed_plan = excluded.has_actionable_proposed_plan,
+          requesting_restart = excluded.requesting_restart,
+          restart_request_reason = excluded.restart_request_reason,
           deleted_at = excluded.deleted_at
       `,
   });
@@ -111,6 +117,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          requesting_restart AS "requestingRestart",
+          restart_request_reason AS "restartRequestReason",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -139,6 +147,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          requesting_restart AS "requestingRestart",
+          restart_request_reason AS "restartRequestReason",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE project_id = ${projectId}

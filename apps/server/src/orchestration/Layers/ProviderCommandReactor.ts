@@ -31,6 +31,7 @@ import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -55,6 +56,17 @@ type ProviderIntentEvent = Extract<
       | "thread.session-stop-requested";
   }
 >;
+
+// Internal work item enqueued when a runtime completion event may have made a
+// thread with a deferred session recycle idle. Serialized through the same
+// drainable worker as intent events so flushes cannot race turn starts.
+type PendingRecycleFlushEvent = {
+  readonly type: "internal.flush-pending-recycle";
+  readonly threadId: ThreadId;
+  readonly occurredAt: string;
+};
+
+type ReactorWorkItem = ProviderIntentEvent | PendingRecycleFlushEvent;
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -140,9 +152,19 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
 function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = findProviderAdapterRequestError(cause);
   if (error) {
-    return error.detail.toLowerCase().includes("unknown pending user-input request");
+    const detail = error.detail.toLowerCase();
+    return (
+      detail.includes("unknown pending user-input request") ||
+      detail.includes("unknown pending user input request") ||
+      detail.includes("unknown pending codex user input request")
+    );
   }
-  return Cause.pretty(cause).toLowerCase().includes("unknown pending user-input request");
+  const message = Cause.pretty(cause).toLowerCase();
+  return (
+    message.includes("unknown pending user-input request") ||
+    message.includes("unknown pending user input request") ||
+    message.includes("unknown pending codex user input request")
+  );
 }
 
 function stalePendingRequestDetail(
@@ -180,6 +202,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
@@ -200,7 +223,19 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // Selection the current provider process was actually started/recycled
+  // with. Written only after a successful session (re)start and on no-restart
+  // turn starts, so a deferred recycle keeps re-detecting the mismatch.
   const threadModelSelections = new Map<string, ModelSelection>();
+
+  // Selection the live provider process should be recycled to, recorded when a
+  // restart-worthy change arrived while the session was busy. In-memory only
+  // (like threadModelSelections); a server restart loses it harmlessly because
+  // the next turn-start re-detects the mismatch against an empty cache.
+  const pendingSessionRecycles = new Map<
+    string,
+    { readonly modelSelection: ModelSelection; readonly requestedAt: string }
+  >();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -305,6 +340,38 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
+  const rejectStartedThreadModelChangeIfRequired = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly currentModelSelection: ModelSelection;
+    readonly requestedModelSelection: ModelSelection | undefined;
+  }) {
+    const requestedModelSelection = input.requestedModelSelection;
+    if (
+      requestedModelSelection === undefined ||
+      (input.currentModelSelection.instanceId === requestedModelSelection.instanceId &&
+        input.currentModelSelection.model === requestedModelSelection.model)
+    ) {
+      return;
+    }
+    const providers = yield* providerRegistry.getProviders;
+    const requiresNewThread =
+      providers.find((snapshot) => snapshot.instanceId === input.currentModelSelection.instanceId)
+        ?.requiresNewThreadForModelChange === true ||
+      providers.find((snapshot) => snapshot.instanceId === requestedModelSelection.instanceId)
+        ?.requiresNewThreadForModelChange === true;
+    if (!requiresNewThread) {
+      return;
+    }
+    return yield* new ProviderAdapterRequestError({
+      provider: providerErrorLabelFromInstanceHint({
+        instanceId: String(requestedModelSelection.instanceId),
+        modelSelectionInstanceId: String(input.currentModelSelection.instanceId),
+      }),
+      method: "thread.turn.start",
+      detail: `Thread '${input.threadId}' cannot switch models after the conversation has started. Start a new thread to use '${requestedModelSelection.model}'.`,
+    });
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -384,6 +451,20 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    if (thread.session !== null) {
+      yield* rejectStartedThreadModelChangeIfRequired({
+        threadId,
+        currentModelSelection:
+          activeSession?.model !== undefined
+            ? {
+                ...thread.modelSelection,
+                instanceId: currentInstanceId,
+                model: activeSession.model,
+              }
+            : thread.modelSelection,
+        requestedModelSelection,
+      });
+    }
     if (
       thread.session !== null &&
       requestedModelSelection !== undefined &&
@@ -480,12 +561,67 @@ const make = Effect.gen(function* () {
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
       ) {
+        if (requestedModelSelection !== undefined) {
+          threadModelSelections.set(threadId, requestedModelSelection);
+          // Explicitly requesting the process's current selection again
+          // cancels a recycle deferred while the session was busy. A request
+          // without a model selection says nothing about the deferral, so it
+          // stays pending.
+          pendingSessionRecycles.delete(threadId);
+        }
         return existingSessionThreadId;
       }
 
       const resumeCursor = shouldRestartForModelChange
         ? undefined
         : (activeSession?.resumeCursor ?? undefined);
+      // Restarting replaces the provider process, which terminates any
+      // in-flight turn and any agent-spawned background tasks still running
+      // between user turns. Model-selection-only restarts are deferred while
+      // the session is busy; other restarts stay immediate but observable.
+      const restartActivity = yield* providerService.getSessionActivity(threadId);
+      const turnInFlight =
+        activeSession?.status === "running" ||
+        activeSession?.activeTurnId != null ||
+        thread.session?.activeTurnId != null;
+      const modelSelectionOnlyRestart =
+        (shouldRestartForModelChange || shouldRestartForModelSelectionChange) &&
+        !runtimeModeChanged &&
+        !cwdChanged &&
+        !instanceChanged;
+      if (modelSelectionOnlyRestart && (turnInFlight || restartActivity.liveTaskCount > 0)) {
+        // threadModelSelections is intentionally not updated, so the mismatch
+        // survives to the next turn start. The model part of the selection
+        // still applies per turn via the adapter's in-session switch;
+        // spawn-time options (e.g. Claude effort) wait for the recycle.
+        pendingSessionRecycles.set(threadId, {
+          modelSelection: desiredModelSelection,
+          requestedAt: createdAt,
+        });
+        yield* Effect.logInfo(
+          "provider command reactor deferring provider session recycle for model change",
+          {
+            threadId,
+            turnInFlight,
+            liveTaskCount: restartActivity.liveTaskCount,
+          },
+        );
+        return existingSessionThreadId;
+      }
+      if (restartActivity.liveTaskCount > 0) {
+        yield* Effect.logWarning(
+          "provider command reactor restarting provider session with live background tasks",
+          {
+            threadId,
+            liveTaskCount: restartActivity.liveTaskCount,
+            runtimeModeChanged,
+            cwdChanged,
+            instanceChanged,
+            shouldRestartForModelChange,
+            shouldRestartForModelSelectionChange,
+          },
+        );
+      }
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
         existingSessionThreadId,
@@ -517,12 +653,87 @@ const make = Effect.gen(function* () {
         cwd: restartedSession.cwd,
       });
       yield* bindSessionToThread(restartedSession);
+      threadModelSelections.set(threadId, desiredModelSelection);
+      pendingSessionRecycles.delete(threadId);
       return restartedSession.threadId;
     }
 
     const startedSession = yield* startProviderSession(undefined);
     yield* bindSessionToThread(startedSession);
+    threadModelSelections.set(threadId, desiredModelSelection);
+    pendingSessionRecycles.delete(threadId);
     return startedSession.threadId;
+  });
+
+  const flushPendingRecycle = Effect.fn("flushPendingRecycle")(function* (
+    event: PendingRecycleFlushEvent,
+  ) {
+    const pending = pendingSessionRecycles.get(event.threadId);
+    if (!pending) {
+      return;
+    }
+    const thread = yield* resolveThread(event.threadId);
+    if (!thread || !thread.session || thread.session.status === "stopped") {
+      pendingSessionRecycles.delete(event.threadId);
+      return;
+    }
+    const activeSession = yield* providerService
+      .listSessions()
+      .pipe(
+        Effect.map((sessions) => sessions.find((session) => session.threadId === event.threadId)),
+      );
+    if (!activeSession) {
+      pendingSessionRecycles.delete(event.threadId);
+      return;
+    }
+    if (Equal.equals(pending.modelSelection, threadModelSelections.get(event.threadId))) {
+      // A revert to the process's current selection landed meanwhile.
+      pendingSessionRecycles.delete(event.threadId);
+      return;
+    }
+    const activity = yield* providerService.getSessionActivity(event.threadId);
+    if (
+      activeSession.status === "running" ||
+      activeSession.activeTurnId != null ||
+      thread.session.activeTurnId != null ||
+      activity.liveTaskCount > 0
+    ) {
+      // Still busy; a later completion event re-triggers the flush, as does
+      // the `thread.session-set` event that clears the projection's active
+      // turn when this check only failed because ingestion had not caught up
+      // with a completion yet.
+      yield* Effect.logDebug(
+        "provider command reactor skipped pending session recycle flush while busy",
+        {
+          threadId: event.threadId,
+          liveTaskCount: activity.liveTaskCount,
+        },
+      );
+      return;
+    }
+    if (!pendingSessionRecycles.has(event.threadId)) {
+      return;
+    }
+    yield* Effect.logInfo("provider command reactor flushing pending session recycle", {
+      threadId: event.threadId,
+      requestedAt: pending.requestedAt,
+    });
+    yield* ensureSessionForThread(event.threadId, event.occurredAt, {
+      modelSelection: pending.modelSelection,
+    }).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning(
+          "provider command reactor failed to flush pending session recycle",
+          {
+            threadId: event.threadId,
+            cause: Cause.pretty(cause),
+          },
+        );
+      }),
+    );
   });
 
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
@@ -544,9 +755,6 @@ const make = Effect.gen(function* () {
       input.createdAt,
       input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
     );
-    if (input.modelSelection !== undefined) {
-      threadModelSelections.set(input.threadId, input.modelSelection);
-    }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
@@ -925,6 +1133,7 @@ const make = Effect.gen(function* () {
     if (thread.session && thread.session.status !== "stopped") {
       yield* providerService.stopSession({ threadId: thread.id });
     }
+    pendingSessionRecycles.delete(thread.id);
 
     yield* setThreadSession({
       threadId: thread.id,
@@ -944,9 +1153,15 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processDomainEvent = Effect.fn("processDomainEvent")(function* (
-    event: ProviderIntentEvent,
-  ) {
+  const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: ReactorWorkItem) {
+    if (event.type === "internal.flush-pending-recycle") {
+      yield* Effect.annotateCurrentSpan({
+        "orchestration.event_type": event.type,
+        "orchestration.thread_id": event.threadId,
+      });
+      yield* flushPendingRecycle(event);
+      return;
+    }
     yield* Effect.annotateCurrentSpan({
       "orchestration.event_type": event.type,
       "orchestration.thread_id": event.payload.threadId,
@@ -961,7 +1176,11 @@ const make = Effect.gen(function* () {
         if (!thread?.session || thread.session.status === "stopped") {
           return;
         }
-        const cachedModelSelection = threadModelSelections.get(event.payload.threadId);
+        // Prefer a pending deferred selection so a forced runtime-mode
+        // restart lands the pending model/effort instead of the old one.
+        const cachedModelSelection =
+          pendingSessionRecycles.get(event.payload.threadId)?.modelSelection ??
+          threadModelSelections.get(event.payload.threadId);
         yield* ensureSessionForThread(
           event.payload.threadId,
           event.occurredAt,
@@ -987,7 +1206,7 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const processDomainEventSafely = (event: ProviderIntentEvent) =>
+  const processDomainEventSafely = (event: ReactorWorkItem) =>
     processDomainEvent(event).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
@@ -1014,10 +1233,53 @@ const make = Effect.gen(function* () {
       ) {
         return yield* worker.enqueue(event);
       }
+      // A runtime completion event can reach the flush below before ingestion
+      // clears `thread.session.activeTurnId`, making the flush skip as "still
+      // busy" with no later completion event to retry it. The engine projects
+      // events before publishing them, so a `thread.session-set` event with a
+      // cleared active turn is the deterministic "projection caught up" signal
+      // that re-triggers the flush.
+      if (
+        event.type === "thread.session-set" &&
+        event.payload.session.activeTurnId === null &&
+        pendingSessionRecycles.has(event.payload.threadId)
+      ) {
+        return yield* worker.enqueue({
+          type: "internal.flush-pending-recycle",
+          threadId: event.payload.threadId,
+          occurredAt: event.occurredAt,
+        });
+      }
     });
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
+    );
+
+    // Idle detection for deferred session recycles: completion events mean a
+    // busy thread may have gone idle, so enqueue a flush check through the
+    // serial worker. Session exits invalidate any pending recycle outright.
+    yield* Effect.forkScoped(
+      Stream.runForEach(
+        providerService.streamEvents.pipe(
+          Stream.filter(
+            (event) =>
+              event.type === "turn.completed" ||
+              event.type === "task.completed" ||
+              event.type === "session.exited",
+          ),
+        ),
+        (event) =>
+          event.type === "session.exited"
+            ? Effect.sync(() => pendingSessionRecycles.delete(event.threadId))
+            : pendingSessionRecycles.has(event.threadId)
+              ? worker.enqueue({
+                  type: "internal.flush-pending-recycle",
+                  threadId: event.threadId,
+                  occurredAt: event.createdAt,
+                })
+              : Effect.void,
+      ),
     );
   });
 

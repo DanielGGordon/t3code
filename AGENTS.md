@@ -32,6 +32,24 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
 
+## Claude Transcript Import (15-minute timer on the dancode host)
+
+A systemd **user** timer, `t3-claude-import.timer`, runs every 15 minutes on the host that serves
+T3 (`journalctl --user -u t3-claude-import.service` for logs). It executes
+`~/projects/meta/t3-ops/import-all-claude.sh`, which runs `t3 import sync` from the deployed
+checkout at `~/projects/meta/t3code-v2` to mirror every Claude Code transcript under
+`~/.claude/projects` into T3 as backdated, resumable threads (thread id `claude-import-<sessionId>`).
+The sweep logic lives in `apps/server/src/cli/import.ts` and `apps/server/src/import/syncPlan.ts`.
+When debugging duplicate or missing conversations, look here first. Key invariants: transcripts of
+sessions T3 itself spawned are skipped (`skipped-owned` — session id found in another thread's
+`provider_session_runtime` resume cursor; `skipped-worktree` — transcript cwd inside the T3
+worktrees dir; `skipped-copy` — a forkSession copy whose message uuids largely already live on
+another thread), and deleted imported threads stay deleted via the event-log tombstone.
+
+## Finishing a feature: MANDATORY test-deploy + PR flow
+
+When a feature or bugfix is complete in a `t3code/*` worktree, do NOT merge to `main`. Follow **[docs/test-deployments.md](docs/test-deployments.md)**: open a PR, deploy the branch to a test port from the pool (`node scripts/test-deploy.ts --pr <url> --note "<desc>" --comment`), and comment the test URL on the PR so the user can jump straight into the running instance. Prod (external `7443` / loopback `3773` / unit `t3code.service`) is only redeployed from `main` after the user approves the PR — and `t3code.service` is never restarted without explicit user approval in the conversation. The scripts refuse all prod targets; never work around the guard.
+
 ## Reference Repos
 
 - Open-source Codex repo: https://github.com/openai/codex

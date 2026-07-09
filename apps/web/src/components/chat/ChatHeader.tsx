@@ -5,18 +5,34 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { type HeaderControlVisibility } from "@t3tools/contracts/settings";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
-import { Badge } from "../ui/badge";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import { RotateCcwIcon } from "lucide-react";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import ProjectScriptsControl, {
+  type NewProjectScriptInput,
+  type ProjectScriptActionResult,
+} from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
-import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { cn } from "~/lib/utils";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import {
+  HeaderUsageStats,
+  HeaderUsageStatsMenu,
+  resolveScopedWeeklyLabel,
+  selectHeaderUsageStats,
+  selectHeaderUsageStatsVisibility,
+} from "./HeaderUsageStats";
+import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
+import { TokenUsageBadge } from "./TokenUsageBadge";
+import type { ContextWindowSnapshot } from "~/lib/contextWindow";
+import { useClaudeAccountUsage } from "../../hooks/useClaudeAccountUsage";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -24,24 +40,33 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
-  isGitRepo: boolean;
+  contextWindow: ContextWindowSnapshot | null;
   openInCwd: string | null;
-  activeProjectScripts: ProjectScript[] | undefined;
+  activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
-  terminalAvailable: boolean;
-  terminalOpen: boolean;
-  terminalToggleShortcutLabel: string | null;
-  diffToggleShortcutLabel: string | null;
+  rightPanelOpen: boolean;
   gitCwd: string | null;
-  diffOpen: boolean;
+  restartRequested: boolean;
+  onToggleRestartRequest: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
-  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
-  onDeleteProjectScript: (scriptId: string) => Promise<void>;
-  onToggleTerminal: () => void;
-  onToggleDiff: () => void;
+  onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
+  onUpdateProjectScript: (
+    scriptId: string,
+    input: NewProjectScriptInput,
+  ) => Promise<ProjectScriptActionResult>;
+  onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
+}
+
+export function resolveHeaderControlVisibility(
+  visibility: HeaderControlVisibility,
+  isMobile: boolean,
+): boolean {
+  if (visibility === "auto") {
+    return !isMobile;
+  }
+  return visibility === "show";
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -62,58 +87,97 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
-  isGitRepo,
+  contextWindow,
   openInCwd,
   activeProjectScripts,
   preferredScriptId,
   keybindings,
   availableEditors,
-  terminalAvailable,
-  terminalOpen,
-  terminalToggleShortcutLabel,
-  diffToggleShortcutLabel,
+  rightPanelOpen,
   gitCwd,
-  diffOpen,
+  restartRequested,
+  onToggleRestartRequest,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
-  onToggleTerminal,
-  onToggleDiff,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const showOpenInPicker = shouldShowOpenInPicker({
-    activeProjectName,
-    activeThreadEnvironmentId,
-    primaryEnvironmentId,
+  const claudeAccountUsage = useClaudeAccountUsage();
+  const isMobile = useIsMobile();
+  const headerControlVisibility = useClientSettings((settings) => ({
+    gitActions: settings.headerGitActionsVisibility,
+    openInEditor: settings.headerOpenInEditorVisibility,
+    projectScripts: settings.headerProjectScriptsVisibility,
+  }));
+  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
+  const updateClientSettings = useUpdateClientSettings();
+  // The usage RPC reads the primary server's host credentials, so only surface
+  // Claude account stats for threads that actually run there (same gate as
+  // ClaudeAccountUsageBadge below).
+  const claudeUsageForThread =
+    activeThreadEnvironmentId === primaryEnvironmentId ? claudeAccountUsage : null;
+  const usageStats = selectHeaderUsageStats({
+    visibility: usageStatsVisibility,
+    contextWindow,
+    claudeUsage: claudeUsageForThread,
   });
-
+  const showGitActions = resolveHeaderControlVisibility(
+    headerControlVisibility.gitActions,
+    isMobile,
+  );
+  const showOpenInEditor = resolveHeaderControlVisibility(
+    headerControlVisibility.openInEditor,
+    isMobile,
+  );
+  const showProjectScripts = resolveHeaderControlVisibility(
+    headerControlVisibility.projectScripts,
+    isMobile,
+  );
+  const showOpenInPicker =
+    showOpenInEditor &&
+    shouldShowOpenInPicker({
+      activeProjectName,
+      activeThreadEnvironmentId,
+      primaryEnvironmentId,
+    });
   return (
-    <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden sm:flex-1 sm:flex-nowrap sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <h2
-          className="min-w-0 flex-1 basis-40 truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
-        {activeProjectName && (
-          <Badge
-            variant="outline"
-            className="min-w-0 max-w-full shrink overflow-hidden sm:max-w-56"
-          >
-            <span className="min-w-0 truncate">{activeProjectName}</span>
-          </Badge>
-        )}
-        {activeProjectName && !isGitRepo && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-            No Git
-          </Badge>
-        )}
+    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <h2
+                aria-label={activeThreadTitle}
+                className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+              >
+                {activeThreadTitle}
+              </h2>
+            }
+          />
+          <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
+        </Tooltip>
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
-        {activeProjectScripts && (
+      <HeaderUsageStats stats={usageStats} />
+      <div
+        data-chat-header-actions
+        className={cn(
+          "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
+          rightPanelOpen ? "pr-0" : "pr-16",
+        )}
+      >
+        {contextWindow && <TokenUsageBadge usage={contextWindow} />}
+        {/* The usage RPC reads the primary server's host credentials, so only
+            show it for threads that actually run there. */}
+        {claudeAccountUsage && activeThreadEnvironmentId === primaryEnvironmentId && (
+          <ClaudeAccountUsageBadge usage={claudeAccountUsage} />
+        )}
+        <HeaderUsageStatsMenu
+          visibility={usageStatsVisibility}
+          scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
+          onPatch={updateClientSettings}
+        />
+        {showProjectScripts && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
             keybindings={keybindings}
@@ -126,12 +190,13 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {showOpenInPicker && (
           <OpenInPicker
+            environmentId={activeThreadEnvironmentId}
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
+        {showGitActions && activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
@@ -142,48 +207,21 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipTrigger
             render={
               <Toggle
-                className="shrink-0"
-                pressed={terminalOpen}
-                onPressedChange={onToggleTerminal}
-                aria-label="Toggle terminal drawer"
+                className="shrink-0 data-[pressed]:bg-rose-500/15 data-[pressed]:text-rose-600 dark:data-[pressed]:text-rose-300"
+                pressed={restartRequested}
+                onPressedChange={onToggleRestartRequest}
+                aria-label="Flag this chat as needing a service restart"
                 variant="outline"
                 size="xs"
-                disabled={!terminalAvailable}
               >
-                <TerminalSquareIcon className="size-3" />
+                <RotateCcwIcon className="size-3" />
               </Toggle>
             }
           />
           <TooltipPopup side="bottom">
-            {!terminalAvailable
-              ? "Terminal is unavailable until this thread has an active project."
-              : terminalToggleShortcutLabel
-                ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
-                : "Toggle terminal drawer"}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
-                variant="outline"
-                size="xs"
-                disabled={!isGitRepo && !diffOpen}
-              >
-                <DiffIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!isGitRepo && !diffOpen
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
+            {restartRequested
+              ? "This chat is flagged as needing a service restart — click to clear"
+              : "Flag this chat as needing a service restart"}
           </TooltipPopup>
         </Tooltip>
       </div>

@@ -129,3 +129,22 @@ export const ProviderEvent = Schema.Struct({
   payload: Schema.optional(Schema.Unknown),
 });
 export type ProviderEvent = typeof ProviderEvent.Type;
+
+// Account-level Claude plan usage, sourced from the (unofficial) Anthropic
+// OAuth usage endpoint. Field set is intentionally minimal and tolerant —
+// the upstream response shape is undocumented and churns.
+export const ClaudeAccountUsageLimit = Schema.Struct({
+  kind: TrimmedNonEmptyString,
+  percent: Schema.Finite,
+  severity: Schema.optional(Schema.String),
+  resetsAt: Schema.optional(IsoDateTime),
+  scopeLabel: Schema.optional(Schema.String),
+  isActive: Schema.optional(Schema.Boolean),
+});
+export type ClaudeAccountUsageLimit = typeof ClaudeAccountUsageLimit.Type;
+
+export const ClaudeAccountUsage = Schema.Struct({
+  limits: Schema.Array(ClaudeAccountUsageLimit),
+  fetchedAt: IsoDateTime,
+});
+export type ClaudeAccountUsage = typeof ClaudeAccountUsage.Type;

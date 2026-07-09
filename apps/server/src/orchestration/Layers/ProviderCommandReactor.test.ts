@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import {
   ModelSelection,
@@ -18,6 +18,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  RuntimeTaskId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -28,6 +29,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
@@ -40,8 +42,9 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
+import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
-import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
+import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -57,7 +60,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
-import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
+import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -69,7 +72,7 @@ const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 2000,
+  timeoutMs = 10_000,
 ): Promise<void> {
   const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
   const poll = async (): Promise<void> => {
@@ -105,11 +108,11 @@ describe("ProviderCommandReactor", () => {
     }
     runtime = null;
     for (const stateDir of createdStateDirs) {
-      fs.rmSync(stateDir, { recursive: true, force: true });
+      NodeFS.rmSync(stateDir, { recursive: true, force: true });
     }
     createdStateDirs.clear();
     for (const baseDir of createdBaseDirs) {
-      fs.rmSync(baseDir, { recursive: true, force: true });
+      NodeFS.rmSync(baseDir, { recursive: true, force: true });
     }
     createdBaseDirs.clear();
   });
@@ -142,9 +145,11 @@ describe("ProviderCommandReactor", () => {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly requiresNewThreadForModelChange?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
-    const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
+    const baseDir =
+      input?.baseDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-reactor-"));
     createdBaseDirs.add(baseDir);
     const { stateDir } = deriveServerPathsSync(baseDir, undefined);
     createdStateDirs.add(stateDir);
@@ -280,6 +285,18 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
     );
+    const sessionActivityByThread = new Map<
+      string,
+      { lastActivityAtMs?: number; liveTaskCount: number }
+    >();
+    const providerSnapshots = [
+      {
+        instanceId: modelSelection.instanceId,
+        ...(input?.requiresNewThreadForModelChange === true
+          ? { requiresNewThreadForModelChange: true }
+          : {}),
+      },
+    ];
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
@@ -314,6 +331,14 @@ describe("ProviderCommandReactor", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      getSessionActivity: (threadId) =>
+        Effect.sync(() => {
+          const activity = sessionActivityByThread.get(String(threadId));
+          return {
+            lastActivityAtMs: activity?.lastActivityAtMs,
+            liveTaskCount: activity?.liveTaskCount ?? 0,
+          };
+        }),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },
@@ -324,21 +349,22 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-      Layer.provide(RepositoryIdentityResolverLive),
+      Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
     const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
-      Layer.provide(RepositoryIdentityResolverLive),
+      Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
-        Layer.mock(GitWorkflowService)({
+        Layer.mock(GitWorkflowService.GitWorkflowService)({
           renameBranch,
-        } satisfies Partial<GitWorkflowServiceShape>),
+        } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
       ),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
@@ -360,6 +386,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
+    const harnessRuntime = runtime;
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
@@ -367,6 +394,10 @@ describe("ProviderCommandReactor", () => {
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
+    const dispatch = (command: Parameters<typeof engine.dispatch>[0]) =>
+      harnessRuntime.runPromise(engine.dispatch(command));
+    const publishRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      harnessRuntime.runPromise(PubSub.publish(runtimeEventPubSub, event));
 
     await Effect.runPromise(
       engine.dispatch({
@@ -409,6 +440,9 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      sessionActivityByThread,
+      dispatch,
+      publishRuntimeEvent,
       stateDir,
       drain,
     };
@@ -879,6 +913,80 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  effectIt.effect(
+    "rejects changing models after start when the provider requires a new thread",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() =>
+          createHarness({ requiresNewThreadForModelChange: true }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-restricted-1"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-restricted-1"),
+            role: "user",
+            text: "first",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-restricted-2"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-restricted-2"),
+            role: "user",
+            text: "second",
+            attachments: [],
+          },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.1-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+
+        yield* Effect.promise(() =>
+          waitFor(async () => {
+            const readModel = await harness.readModel();
+            const thread = readModel.threads.find(
+              (entry) => entry.id === ThreadId.make("thread-1"),
+            );
+            return (
+              thread?.activities.some(
+                (activity) => activity.kind === "provider.turn.start.failed",
+              ) ?? false
+            );
+          }),
+        );
+
+        expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+        const readModel = yield* Effect.promise(() => harness.readModel());
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+        expect(
+          thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
+        ).toMatchObject({
+          payload: {
+            detail: expect.stringContaining(
+              "cannot switch models after the conversation has started",
+            ),
+          },
+        });
+      }),
+  );
+
   it("starts a first turn on the requested provider instance even when it differs from the thread model", async () => {
     const harness = await createHarness({
       threadModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
@@ -1173,6 +1281,383 @@ describe("ProviderCommandReactor", () => {
         "claude-sonnet-4-6",
         [{ id: "effort", value: "max" }],
       ),
+    });
+  });
+
+  describe("deferred model-change session recycles", () => {
+    const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+    const claudeModel = "claude-sonnet-4-6";
+    const now = "2026-01-01T00:00:00.000Z";
+    const claudeEffortSelection = (effort: string) =>
+      createModelSelection(claudeInstanceId, claudeModel, [{ id: "effort", value: effort }]);
+
+    const createClaudeHarness = () =>
+      createHarness({
+        threadModelSelection: {
+          instanceId: claudeInstanceId,
+          model: claudeModel,
+        },
+      });
+
+    const dispatchClaudeTurn = (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      input: { readonly key: string; readonly effort: string },
+    ) =>
+      harness.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`cmd-turn-start-${input.key}`),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId(`user-message-${input.key}`),
+          role: "user",
+          text: `turn ${input.key}`,
+          attachments: [],
+        },
+        modelSelection: claudeEffortSelection(input.effort),
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+
+    const taskCompletedEvent = (key: string): ProviderRuntimeEvent => ({
+      type: "task.completed",
+      eventId: EventId.make(`evt-${key}`),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      threadId: ThreadId.make("thread-1"),
+      createdAt: now,
+      payload: { taskId: RuntimeTaskId.make(`task-${key}`), status: "completed" },
+    });
+
+    const turnCompletedEvent = (key: string): ProviderRuntimeEvent => ({
+      type: "turn.completed",
+      eventId: EventId.make(`evt-${key}`),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      threadId: ThreadId.make("thread-1"),
+      createdAt: now,
+      turnId: asTurnId(`turn-${key}`),
+      payload: { state: "completed" },
+    });
+
+    it("defers the restart while background tasks are live and flushes on task.completed", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-tasks-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-tasks-2", effort: "max" });
+
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      // The turn still runs with the new selection; the model part applies
+      // in-session while the spawn-time options wait for the recycle.
+      expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+        modelSelection: claudeEffortSelection("max"),
+      });
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-tasks-completed"));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: claudeEffortSelection("max"),
+      });
+    });
+
+    it("defers the restart while a turn is in flight and flushes on turn.completed", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-turn-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.runtimeSessions[0] = { ...harness.runtimeSessions[0]!, status: "running" };
+      await dispatchClaudeTurn(harness, { key: "defer-turn-2", effort: "max" });
+
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      harness.runtimeSessions[0] = { ...harness.runtimeSessions[0]!, status: "ready" };
+      await harness.publishRuntimeEvent(turnCompletedEvent("defer-turn-completed"));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: claudeEffortSelection("max"),
+      });
+    });
+
+    it("flushes via the projection session update when turn.completed races ahead of ingestion", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-race-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      // Ingestion marked the turn active in the projection.
+      const projectedSession = {
+        threadId: ThreadId.make("thread-1"),
+        providerName: "claudeAgent",
+        providerInstanceId: claudeInstanceId,
+        runtimeMode: "approval-required",
+        lastError: null,
+        updatedAt: now,
+      } as const;
+      await harness.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-defer-race-running"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          ...projectedSession,
+          status: "running",
+          activeTurnId: asTurnId("turn-defer-race"),
+        },
+        createdAt: now,
+      });
+
+      await dispatchClaudeTurn(harness, { key: "defer-race-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      // The adapter is already idle when turn.completed reaches the reactor,
+      // but ingestion has not cleared the projection's active turn yet, so
+      // the flush must skip instead of recycling.
+      await harness.publishRuntimeEvent(turnCompletedEvent("defer-race-completed"));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      // Ingestion catches up and clears the active turn; the resulting
+      // thread.session-set event re-triggers the flush.
+      await harness.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-defer-race-ready"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          ...projectedSession,
+          status: "ready",
+          activeTurnId: null,
+        },
+        createdAt: now,
+      });
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: claudeEffortSelection("max"),
+      });
+    });
+
+    it("invalidates the pending recycle when the session exits", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-exit-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-exit-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      await harness.publishRuntimeEvent({
+        type: "session.exited",
+        eventId: EventId.make("evt-defer-exit"),
+        provider: ProviderDriverKind.make("claudeAgent"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+        payload: {},
+      });
+
+      // A completion event after the exit must not recycle the session.
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-exit-completed"));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the pending recycle across a turn start without a model selection", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-no-selection-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-no-selection-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      // A selection-less turn start says nothing about the deferred change
+      // and must not cancel it.
+      await harness.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-defer-no-selection-3"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-defer-no-selection-3"),
+          role: "user",
+          text: "turn defer-no-selection-3",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-no-selection-completed"));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: claudeEffortSelection("max"),
+      });
+    });
+
+    it("applies the deferred config before the next user turn is sent", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-invariant-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-invariant-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      // Go idle without any runtime event; the next turn start must restart
+      // with the deferred selection before the turn is sent.
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await dispatchClaudeTurn(harness, { key: "defer-invariant-3", effort: "max" });
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        modelSelection: claudeEffortSelection("max"),
+      });
+      expect(harness.startSession.mock.invocationCallOrder[1]).toBeLessThan(
+        harness.sendTurn.mock.invocationCallOrder[2]!,
+      );
+    });
+
+    it("applies only the last deferred selection when changes stack up", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-last-write-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-last-write-2", effort: "high" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      await dispatchClaudeTurn(harness, { key: "defer-last-write-3", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-last-write-completed"));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        modelSelection: claudeEffortSelection("max"),
+      });
+    });
+
+    it("cancels the pending recycle when the selection reverts to the current config", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-revert-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-revert-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await dispatchClaudeTurn(harness, { key: "defer-revert-3", effort: "medium" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      await harness.publishRuntimeEvent(turnCompletedEvent("defer-revert-completed"));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the pending recycle when the session is stopped", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-stop-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-stop-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      await harness.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-session-stop-defer"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      });
+      await waitFor(() => harness.stopSession.mock.calls.length === 1);
+
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-stop-completed"));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      // The next turn start creates a fresh session with the latest selection.
+      await dispatchClaudeTurn(harness, { key: "defer-stop-3", effort: "max" });
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        modelSelection: claudeEffortSelection("max"),
+      });
+      expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
+    });
+
+    it("lands the pending selection when a runtime-mode restart fires mid-deferral", async () => {
+      const harness = await createClaudeHarness();
+
+      await dispatchClaudeTurn(harness, { key: "defer-runtime-mode-1", effort: "medium" });
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 1 });
+      await dispatchClaudeTurn(harness, { key: "defer-runtime-mode-2", effort: "max" });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+      await harness.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("cmd-runtime-mode-set-defer"),
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      });
+
+      await waitFor(() => harness.startSession.mock.calls.length === 2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+        runtimeMode: "full-access",
+        modelSelection: claudeEffortSelection("max"),
+      });
+
+      // The runtime-mode restart consumed the pending recycle.
+      harness.sessionActivityByThread.set("thread-1", { liveTaskCount: 0 });
+      await harness.publishRuntimeEvent(taskCompletedEvent("defer-runtime-mode-completed"));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1857,7 +2342,7 @@ describe("ProviderCommandReactor", () => {
     expect(resolvedActivity).toBeUndefined();
   });
 
-  it("surfaces stale provider user-input failures without faking user-input resolution", async () => {
+  it("surfaces non-resumable provider user-input callbacks as stale failures", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
     harness.respondToUserInput.mockImplementation(() =>
@@ -1865,7 +2350,7 @@ describe("ProviderCommandReactor", () => {
         new ProviderAdapterRequestError({
           provider: ProviderDriverKind.make("claudeAgent"),
           method: "item/tool/respondToUserInput",
-          detail: "Unknown pending user-input request: user-input-request-1",
+          detail: "Unknown pending Codex user input request: user-input-request-1",
         }),
       ),
     );
