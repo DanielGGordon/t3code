@@ -330,6 +330,11 @@ interface SidebarThreadRowProps {
   projectLabel?: string | null;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
+  /**
+   * True when another chat in the same project is asking for a restart, so this
+   * (non-requesting) row gets a subtle marker steering the user away from it.
+   */
+  siblingRestartPending: boolean;
   jumpLabel: string | null;
   appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
@@ -389,6 +394,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     openPrLink,
     thread,
     projectLabel,
+    siblingRestartPending,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
@@ -693,7 +699,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-        })} relative isolate ${projectLabel ? "h-auto min-h-11 items-start py-1" : ""}`}
+        })} relative isolate ${projectLabel ? "h-auto min-h-11 items-start py-1" : ""}${
+          siblingRestartPending ? " border-l-2 border-l-rose-400/70 dark:border-l-rose-300/50" : ""
+        }`}
+        title={
+          siblingRestartPending
+            ? "Another chat in this project is requesting a service restart"
+            : undefined
+        }
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
@@ -705,52 +718,52 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           }`}
         >
           <div className="flex min-w-0 items-center gap-1.5">
-          {prStatus && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={prStatus.tooltip}
-                    className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
-                    onClick={handlePrClick}
-                  >
-                    <ChangeRequestStatusIcon className="size-3" />
-                  </button>
-                }
+            {prStatus && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={prStatus.tooltip}
+                      className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
+                      onClick={handlePrClick}
+                    >
+                      <ChangeRequestStatusIcon className="size-3" />
+                    </button>
+                  }
+                />
+                <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
+              </Tooltip>
+            )}
+            {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+            {renamingThreadKey === threadKey ? (
+              <input
+                ref={handleRenameInputRef}
+                className="min-w-0 flex-1 truncate text-base sm:text-xs bg-transparent outline-none border border-ring rounded px-0.5"
+                value={renamingTitle}
+                onChange={handleRenameInputChange}
+                onKeyDown={handleRenameInputKeyDown}
+                onBlur={handleRenameInputBlur}
+                onClick={handleRenameInputClick}
+                onDoubleClick={handleRenameInputClick}
               />
-              <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
-            </Tooltip>
-          )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
-          {renamingThreadKey === threadKey ? (
-            <input
-              ref={handleRenameInputRef}
-              className="min-w-0 flex-1 truncate text-base sm:text-xs bg-transparent outline-none border border-ring rounded px-0.5"
-              value={renamingTitle}
-              onChange={handleRenameInputChange}
-              onKeyDown={handleRenameInputKeyDown}
-              onBlur={handleRenameInputBlur}
-              onClick={handleRenameInputClick}
-              onDoubleClick={handleRenameInputClick}
-            />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    className="min-w-0 flex-1 truncate text-xs"
-                    data-testid={`thread-title-${thread.id}`}
-                  >
-                    {thread.title}
-                  </span>
-                }
-              />
-              <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
-                {thread.title}
-              </TooltipPopup>
-            </Tooltip>
-          )}
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className="min-w-0 flex-1 truncate text-xs"
+                      data-testid={`thread-title-${thread.id}`}
+                    >
+                      {thread.title}
+                    </span>
+                  }
+                />
+                <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+                  {thread.title}
+                </TooltipPopup>
+              </Tooltip>
+            )}
           </div>
           {projectLabel ? (
             <span className="min-w-0 truncate text-[10px] font-medium text-primary/70">
@@ -916,6 +929,7 @@ interface SidebarProjectThreadListProps {
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadSummary[];
+  projectRestartPending: boolean;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -967,6 +981,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hiddenThreadStatus,
     orderedProjectThreadKeys,
     renderedThreads,
+    projectRestartPending,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1024,6 +1039,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
+              siblingRestartPending={projectRestartPending && !thread.requestingRestart}
               jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
               appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
               renamingThreadKey={renamingThreadKey}
@@ -1479,6 +1495,10 @@ const SidebarFlatThreadList = memo(function SidebarFlatThreadList(
     ],
   );
 
+  const restartPendingProjectIds = new Set(
+    threads.filter((thread) => thread.requestingRestart).map((thread) => thread.projectId),
+  );
+
   if (threads.length === 0) {
     return (
       <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">No chats yet</div>
@@ -1500,6 +1520,9 @@ const SidebarFlatThreadList = memo(function SidebarFlatThreadList(
             projectLabel={projectLabelByThreadKey.get(threadKey) ?? null}
             orderedProjectThreadKeys={orderedThreadKeys}
             isActive={activeRouteThreadKey === threadKey}
+            siblingRestartPending={
+              restartPendingProjectIds.has(thread.projectId) && !thread.requestingRestart
+            }
             jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
             appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
             renamingThreadKey={renamingThreadKey}
@@ -1744,6 +1767,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       visibleProjectThreads,
     };
   }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
+
+  const projectRestartPending = useMemo(
+    () => projectThreads.some((thread) => thread.requestingRestart),
+    [projectThreads],
+  );
+
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
     if (!activeThreadKey || projectExpanded) {
@@ -2778,6 +2807,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
+        projectRestartPending={projectRestartPending}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -3891,9 +3921,7 @@ export default function Sidebar() {
   );
   const flatOrderedThreadKeys = useMemo(
     () =>
-      flatThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
+      flatThreads.map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
     [flatThreads],
   );
   const projectLabelByThreadKey = useMemo(() => {

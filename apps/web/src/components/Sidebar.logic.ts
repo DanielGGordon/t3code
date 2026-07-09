@@ -28,6 +28,7 @@ export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
   label:
+    | "Restart Requested"
     | "Working"
     | "Connecting"
     | "Completed"
@@ -40,6 +41,7 @@ export interface ThreadStatusPill {
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
+  "Restart Requested": 6,
   "Pending Approval": 5,
   "Awaiting Input": 4,
   Working: 3,
@@ -55,6 +57,7 @@ type ThreadStatusInput = Pick<
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
+  | "requestingRestart"
   | "session"
 > & {
   lastVisitedAt?: string | undefined;
@@ -364,6 +367,15 @@ export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
   const { thread } = input;
+
+  if (thread.requestingRestart) {
+    return {
+      label: "Restart Requested",
+      colorClass: "text-rose-600 dark:text-rose-300/90",
+      dotClass: "bg-rose-500 dark:bg-rose-300/90",
+      pulse: true,
+    };
+  }
 
   if (thread.hasPendingApprovals) {
     return {

@@ -407,6 +407,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  requestingRestart: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  restartRequestReason: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -571,6 +575,24 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Source of a restart-request signal: `auto` when the detection reactor
+ * classified an assistant message as asking the human to restart the
+ * server/service, `manual` when a human toggled the flag on a chat.
+ */
+export const RestartRequestSource = Schema.Literals(["auto", "manual"]);
+export type RestartRequestSource = typeof RestartRequestSource.Type;
+
+const ThreadRestartRequestSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.restart-request.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requesting: Schema.Boolean,
+  source: RestartRequestSource,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -689,6 +711,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadRestartRequestSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -710,6 +733,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadRestartRequestSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -825,6 +849,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
+  "thread.restart-request-changed",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -921,6 +946,14 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadRestartRequestChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  requesting: Schema.Boolean,
+  source: RestartRequestSource,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
 
@@ -1082,6 +1115,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.interaction-mode-set"),
     payload: ThreadInteractionModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.restart-request-changed"),
+    payload: ThreadRestartRequestChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

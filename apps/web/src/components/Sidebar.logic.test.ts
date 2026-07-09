@@ -96,6 +96,7 @@ describe("hasUnseenCompletion", () => {
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
         hasPendingUserInput: false,
+        requestingRestart: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
@@ -110,6 +111,7 @@ describe("hasUnseenCompletion", () => {
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
         hasPendingUserInput: false,
+        requestingRestart: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
         lastVisitedAt: undefined,
@@ -569,6 +571,7 @@ describe("resolveThreadStatusPill", () => {
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
+    requestingRestart: false,
     interactionMode: "plan" as const,
     latestTurn: null,
     lastVisitedAt: undefined,
@@ -583,6 +586,19 @@ describe("resolveThreadStatusPill", () => {
       updatedAt: "2026-03-09T10:00:00.000Z",
     },
   };
+
+  it("shows restart requested above every other status", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          requestingRestart: true,
+          hasPendingApprovals: true,
+          hasPendingUserInput: true,
+        },
+      }),
+    ).toMatchObject({ label: "Restart Requested", pulse: true });
+  });
 
   it("shows pending approval before all other statuses", () => {
     expect(

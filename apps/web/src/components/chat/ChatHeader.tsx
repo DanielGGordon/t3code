@@ -10,6 +10,8 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { RotateCcwIcon } from "lucide-react";
+import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
@@ -46,6 +48,8 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  restartRequested: boolean;
+  onToggleRestartRequest: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -91,6 +95,8 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  restartRequested,
+  onToggleRestartRequest,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -197,6 +203,27 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0 data-[pressed]:bg-rose-500/15 data-[pressed]:text-rose-600 dark:data-[pressed]:text-rose-300"
+                pressed={restartRequested}
+                onPressedChange={onToggleRestartRequest}
+                aria-label="Flag this chat as needing a service restart"
+                variant="outline"
+                size="xs"
+              >
+                <RotateCcwIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {restartRequested
+              ? "This chat is flagged as needing a service restart — click to clear"
+              : "Flag this chat as needing a service restart"}
+          </TooltipPopup>
+        </Tooltip>
       </div>
     </div>
   );
