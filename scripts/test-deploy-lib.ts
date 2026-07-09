@@ -330,8 +330,9 @@ export interface SlotProbe {
 export function runCapture(
   cmd: string,
   args: readonly string[],
+  opts?: { cwd?: string },
 ): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync(cmd, args, { encoding: "utf8" });
+  const result = spawnSync(cmd, args, { encoding: "utf8", ...opts });
   return {
     status: result.status ?? (result.error ? 127 : 0),
     stdout: result.stdout ?? "",
@@ -674,8 +675,12 @@ export function reclaimStaleSlot(
         continue;
       }
 
-      if (computeSlotState(read.claim, deps.probe) === "stale") {
-        deps.stopUnit(read.claim.unit);
+      // Override unit/loopbackPort with filename-derived values so probing
+      // and stopping always target the slot's canonical unit, never an
+      // unvalidated value from the JSON (which could name prod).
+      const safeClaim: Claim = { ...read.claim, unit, loopbackPort, externalPort };
+      if (computeSlotState(safeClaim, deps.probe) === "stale") {
+        deps.stopUnit(unit);
         const claim = buildClaim(externalPort, input);
         writeClaimAtomic(claim); // overwrite the stale file in place
         return { claim, reclaimedFrom: externalPort };

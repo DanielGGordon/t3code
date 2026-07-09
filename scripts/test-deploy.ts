@@ -287,7 +287,9 @@ function main(): void {
 
     // Build the web dist in the worktree (server serves apps/web/dist).
     try {
-      const build = runCapture("vp", ["run", "--filter", "@t3tools/web", "build"]);
+      const build = runCapture("vp", ["run", "--filter", "@t3tools/web", "build"], {
+        cwd: worktreePath,
+      });
       if (build.status !== 0) {
         throw new Error(`web build failed: ${build.stderr.trim() || build.stdout.trim()}`);
       }
