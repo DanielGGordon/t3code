@@ -31,6 +31,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
+import { COLOR_SCHEME_OPTIONS, useColorScheme } from "../../hooks/useColorScheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
@@ -381,6 +382,7 @@ function AboutVersionSection() {
 
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
+  const { colorScheme, setColorScheme } = useColorScheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
 
@@ -392,6 +394,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(colorScheme !== "default" ? ["Color scheme"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -429,6 +432,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
     ],
     [
+      colorScheme,
       isGitWritingModelDirty,
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
@@ -456,6 +460,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
+    setColorScheme("default");
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
@@ -471,7 +476,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     });
     onRestored?.();
-  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
+  }, [changedSettingLabels, onRestored, setColorScheme, setTheme, updateSettings]);
 
   return {
     changedSettingLabels,
@@ -481,6 +486,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 
 export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
+  const { colorScheme, setColorScheme } = useColorScheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
@@ -543,6 +549,41 @@ export function GeneralSettingsPanel() {
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 {THEME_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Color scheme"
+          description="Apply a developer color palette. Each scheme has its own light and dark variant."
+          resetAction={
+            colorScheme !== "default" ? (
+              <SettingResetButton label="color scheme" onClick={() => setColorScheme("default")} />
+            ) : null
+          }
+          control={
+            <Select
+              value={colorScheme}
+              onValueChange={(value) => {
+                const match = COLOR_SCHEME_OPTIONS.find((option) => option.value === value);
+                if (match) {
+                  setColorScheme(match.value);
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Color scheme preference">
+                <SelectValue>
+                  {COLOR_SCHEME_OPTIONS.find((option) => option.value === colorScheme)?.label ??
+                    "Default"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {COLOR_SCHEME_OPTIONS.map((option) => (
                   <SelectItem hideIndicator key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

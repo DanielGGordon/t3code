@@ -144,6 +144,303 @@
   }
 }
 
+/* ------------------------------------------------------------------------- */
+/* Named color schemes                                                        */
+/*                                                                            */
+/* Each scheme is an independent axis from the light/dark preference: it      */
+/* redefines the same semantic tokens as the default :root block above, once  */
+/* for its light palette and once (via @variant dark) for its dark palette.   */
+/* Selected by `data-scheme` on <html> (see hooks/useColorScheme.ts); the     */
+/* default scheme sets no attribute and falls through to :root above.         */
+/* Every token is fully specified in both light and dark to avoid cascade     */
+/* ties with the default dark block.                                          */
+/* ------------------------------------------------------------------------- */
+
+/* Solarized -- Ethan Schoonover's canonical light/dark palette */
+:root[data-scheme="solarized"] {
+  --background: #fdf6e3;
+  --foreground: #586e75;
+  --card: #fbf1d9;
+  --card-foreground: #586e75;
+  --popover: #fbf1d9;
+  --popover-foreground: #586e75;
+  --primary: #268bd2;
+  --primary-foreground: #fdf6e3;
+  --secondary: #eee8d5;
+  --secondary-foreground: #586e75;
+  --muted: #eee8d5;
+  --muted-foreground: #657b83;
+  --accent: #eee8d5;
+  --accent-foreground: #586e75;
+  --destructive: #dc322f;
+  --destructive-foreground: #b52b28;
+  --border: #e6dfc8;
+  --input: #ddd6be;
+  --ring: #268bd2;
+  --info: #268bd2;
+  --info-foreground: #1e6fa8;
+  --success: #859900;
+  --success-foreground: #6b7c00;
+  --warning: #b58900;
+  --warning-foreground: #8f6d00;
+
+  @variant dark {
+    --background: #002b36;
+    --foreground: #93a1a1;
+    --card: #073642;
+    --card-foreground: #93a1a1;
+    --popover: #073642;
+    --popover-foreground: #93a1a1;
+    --primary: #268bd2;
+    --primary-foreground: #fdf6e3;
+    --secondary: #073642;
+    --secondary-foreground: #93a1a1;
+    --muted: #073642;
+    --muted-foreground: #657b83;
+    --accent: #073642;
+    --accent-foreground: #93a1a1;
+    --destructive: #dc322f;
+    --destructive-foreground: #e56b68;
+    --border: #0a3d49;
+    --input: #0d4a58;
+    --ring: #268bd2;
+    --info: #268bd2;
+    --info-foreground: #4fa3dc;
+    --success: #859900;
+    --success-foreground: #a3b300;
+    --warning: #b58900;
+    --warning-foreground: #cba53a;
+  }
+}
+
+/* Dracula -- dark, with its official light counterpart "Alucard" */
+:root[data-scheme="dracula"] {
+  --background: #fffbeb;
+  --foreground: #1f1f1f;
+  --card: #fdf7e0;
+  --card-foreground: #1f1f1f;
+  --popover: #fdf7e0;
+  --popover-foreground: #1f1f1f;
+  --primary: #644ac9;
+  --primary-foreground: #ffffff;
+  --secondary: #f2ecd0;
+  --secondary-foreground: #1f1f1f;
+  --muted: #f2ecd0;
+  --muted-foreground: #6c664b;
+  --accent: #f2ecd0;
+  --accent-foreground: #1f1f1f;
+  --destructive: #cb3a2a;
+  --destructive-foreground: #a52d20;
+  --border: #e6dfc0;
+  --input: #ddd4b2;
+  --ring: #644ac9;
+  --info: #036a96;
+  --info-foreground: #025a80;
+  --success: #14710a;
+  --success-foreground: #105c08;
+  --warning: #846e15;
+  --warning-foreground: #6b5a11;
+
+  @variant dark {
+    --background: #282a36;
+    --foreground: #f8f8f2;
+    --card: #343746;
+    --card-foreground: #f8f8f2;
+    --popover: #343746;
+    --popover-foreground: #f8f8f2;
+    --primary: #bd93f9;
+    --primary-foreground: #282a36;
+    --secondary: #44475a;
+    --secondary-foreground: #f8f8f2;
+    --muted: #44475a;
+    --muted-foreground: #7e88bd;
+    --accent: #44475a;
+    --accent-foreground: #f8f8f2;
+    --destructive: #ff5555;
+    --destructive-foreground: #ff8080;
+    --border: #44475a;
+    --input: #4d5066;
+    --ring: #bd93f9;
+    --info: #8be9fd;
+    --info-foreground: #8be9fd;
+    --success: #50fa7b;
+    --success-foreground: #50fa7b;
+    --warning: #f1fa8c;
+    --warning-foreground: #f1fa8c;
+  }
+}
+
+/* Gruvbox -- retro warm, canonical light/dark (medium contrast) */
+:root[data-scheme="gruvbox"] {
+  --background: #fbf1c7;
+  --foreground: #3c3836;
+  --card: #f4e8be;
+  --card-foreground: #3c3836;
+  --popover: #f4e8be;
+  --popover-foreground: #3c3836;
+  --primary: #d65d0e;
+  --primary-foreground: #fbf1c7;
+  --secondary: #ebdbb2;
+  --secondary-foreground: #3c3836;
+  --muted: #ebdbb2;
+  --muted-foreground: #7c6f64;
+  --accent: #ebdbb2;
+  --accent-foreground: #3c3836;
+  --destructive: #cc241d;
+  --destructive-foreground: #9d0006;
+  --border: #e3d3a3;
+  --input: #d5c4a1;
+  --ring: #d65d0e;
+  --info: #076678;
+  --info-foreground: #076678;
+  --success: #79740e;
+  --success-foreground: #79740e;
+  --warning: #b57614;
+  --warning-foreground: #8f5d0f;
+
+  @variant dark {
+    --background: #282828;
+    --foreground: #ebdbb2;
+    --card: #32302f;
+    --card-foreground: #ebdbb2;
+    --popover: #32302f;
+    --popover-foreground: #ebdbb2;
+    --primary: #fe8019;
+    --primary-foreground: #282828;
+    --secondary: #3c3836;
+    --secondary-foreground: #ebdbb2;
+    --muted: #3c3836;
+    --muted-foreground: #a89984;
+    --accent: #3c3836;
+    --accent-foreground: #ebdbb2;
+    --destructive: #fb4934;
+    --destructive-foreground: #fb4934;
+    --border: #3c3836;
+    --input: #504945;
+    --ring: #fe8019;
+    --info: #83a598;
+    --info-foreground: #83a598;
+    --success: #b8bb26;
+    --success-foreground: #b8bb26;
+    --warning: #fabd2f;
+    --warning-foreground: #fabd2f;
+  }
+}
+
+/* Catppuccin -- Latte (light) / Mocha (dark) */
+:root[data-scheme="catppuccin"] {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --card: #e6e9ef;
+  --card-foreground: #4c4f69;
+  --popover: #e6e9ef;
+  --popover-foreground: #4c4f69;
+  --primary: #8839ef;
+  --primary-foreground: #eff1f5;
+  --secondary: #dce0e8;
+  --secondary-foreground: #4c4f69;
+  --muted: #dce0e8;
+  --muted-foreground: #6c6f85;
+  --accent: #dce0e8;
+  --accent-foreground: #4c4f69;
+  --destructive: #d20f39;
+  --destructive-foreground: #d20f39;
+  --border: #ccd0da;
+  --input: #bcc0cc;
+  --ring: #8839ef;
+  --info: #1e66f5;
+  --info-foreground: #1e66f5;
+  --success: #40a02b;
+  --success-foreground: #40a02b;
+  --warning: #df8e1d;
+  --warning-foreground: #df8e1d;
+
+  @variant dark {
+    --background: #1e1e2e;
+    --foreground: #cdd6f4;
+    --card: #232338;
+    --card-foreground: #cdd6f4;
+    --popover: #232338;
+    --popover-foreground: #cdd6f4;
+    --primary: #cba6f7;
+    --primary-foreground: #1e1e2e;
+    --secondary: #313244;
+    --secondary-foreground: #cdd6f4;
+    --muted: #313244;
+    --muted-foreground: #a6adc8;
+    --accent: #313244;
+    --accent-foreground: #cdd6f4;
+    --destructive: #f38ba8;
+    --destructive-foreground: #f38ba8;
+    --border: #313244;
+    --input: #45475a;
+    --ring: #cba6f7;
+    --info: #89b4fa;
+    --info-foreground: #89b4fa;
+    --success: #a6e3a1;
+    --success-foreground: #a6e3a1;
+    --warning: #f9e2af;
+    --warning-foreground: #f9e2af;
+  }
+}
+
+/* Tokyo Night -- Day (light) / Night (dark) */
+:root[data-scheme="tokyo-night"] {
+  --background: #e1e2e7;
+  --foreground: #3760bf;
+  --card: #e9e9ec;
+  --card-foreground: #3760bf;
+  --popover: #e9e9ec;
+  --popover-foreground: #3760bf;
+  --primary: #2e7de9;
+  --primary-foreground: #ffffff;
+  --secondary: #d0d5e3;
+  --secondary-foreground: #3760bf;
+  --muted: #d0d5e3;
+  --muted-foreground: #6a7395;
+  --accent: #d0d5e3;
+  --accent-foreground: #3760bf;
+  --destructive: #f52a65;
+  --destructive-foreground: #c31f4e;
+  --border: #c4c8da;
+  --input: #b7bcce;
+  --ring: #2e7de9;
+  --info: #007197;
+  --info-foreground: #007197;
+  --success: #587539;
+  --success-foreground: #587539;
+  --warning: #8c6c3e;
+  --warning-foreground: #8c6c3e;
+
+  @variant dark {
+    --background: #1a1b26;
+    --foreground: #c0caf5;
+    --card: #1f2335;
+    --card-foreground: #c0caf5;
+    --popover: #1f2335;
+    --popover-foreground: #c0caf5;
+    --primary: #7aa2f7;
+    --primary-foreground: #1a1b26;
+    --secondary: #292e42;
+    --secondary-foreground: #c0caf5;
+    --muted: #292e42;
+    --muted-foreground: #7982a9;
+    --accent: #292e42;
+    --accent-foreground: #c0caf5;
+    --destructive: #f7768e;
+    --destructive-foreground: #f7768e;
+    --border: #292e42;
+    --input: #3b4261;
+    --ring: #7aa2f7;
+    --info: #7dcfff;
+    --info-foreground: #7dcfff;
+    --success: #9ece6a;
+    --success-foreground: #9ece6a;
+    --warning: #e0af68;
+    --warning-foreground: #e0af68;
+  }
+}
+
 body {
   font-family:
     "DM Sans",
