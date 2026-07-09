@@ -1361,36 +1361,71 @@ label:has(> select#reasoning-effort) select {
   --diffs-fg-number-deletion-override: var(--diff-remove);
 }
 
-/* File explorer theme inversion: FileBrowserPanel sets
- * `data-file-explorer-inverted` on its root when the user flips the explorer to
- * the opposite mode via the header SunMoon toggle. The Solarized layer only
+/* File viewer theme inversion: FilePreviewPanel sets
+ * `data-file-viewer-inverted` on its content viewport when the user flips the
+ * viewer to the opposite Solarized mode. The Solarized layer above only
  * re-values the semantic tokens at :root (`@variant dark` compiles to
  * `:root:is(.dark, .dark *)`, which a subtree attribute cannot satisfy), so the
- * tokens the explorer surfaces consume — the panel background, header text,
- * borders, and button hover — are re-declared here with the opposite mode's
- * Solarized values. The @pierre/trees rows follow via `--trees-fg-override:
- * var(--foreground)` (set inline) and their currentColor-derived hover/selected
- * tints. Values mirror the solarized scheme block above. */
-[data-file-explorer-inverted] {
+ * tokens consumed inside the viewport — the loading/error states and the
+ * local-comment annotation cards — are re-declared here with swapped values.
+ * The code surface itself is themed by @pierre/diffs from the solarized-dark/
+ * solarized-light shiki theme passed in FilePreviewPanel. Tokens identical in
+ * both Solarized modes (accents, --muted-foreground, --ring) are omitted. */
+[data-file-viewer-inverted] {
   /* Solarized Dark values — the app is in light mode. */
   color-scheme: dark;
-  --background: #002b36;
-  --foreground: #93a1a1;
-  --muted-foreground: #657b83;
-  --accent: #073642;
-  --accent-foreground: #93a1a1;
-  --border: #0a3d49;
+  --background: #002b36; /* base03 */
+  --foreground: #839496; /* base0 */
+  --accent: #073642; /* base02 */
+  --accent-foreground: #93a1a1; /* base1 */
+  --primary-foreground: #002b36;
+  --border: color-mix(in srgb, #586e75 55%, transparent);
+  --input: color-mix(in srgb, #586e75 65%, transparent);
   background-color: var(--background);
 }
 
-.dark [data-file-explorer-inverted] {
+.dark [data-file-viewer-inverted] {
   /* Solarized Light values — the app is in dark mode. */
   color-scheme: light;
-  --background: #fdf6e3;
-  --foreground: #586e75;
-  --muted-foreground: #657b83;
-  --accent: #eee8d5;
-  --accent-foreground: #586e75;
-  --border: #e6dfc8;
+  --background: #fdf6e3; /* base3 */
+  --foreground: #657b83; /* base00 */
+  --accent: #eee8d5; /* base2 */
+  --accent-foreground: #586e75; /* base01 */
+  --primary-foreground: #fdf6e3;
+  --border: color-mix(in srgb, #93a1a1 45%, transparent);
+  --input: color-mix(in srgb, #93a1a1 35%, transparent);
   background-color: var(--background);
+}
+
+/* Scrollbar thumbs inside the inverted viewport mirror the app-level
+ * Solarized scrollbar tinting for the opposite mode. */
+[data-file-viewer-inverted] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #93a1a1 22%, transparent);
+}
+
+[data-file-viewer-inverted] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, #93a1a1 34%, transparent);
+}
+
+.dark [data-file-viewer-inverted] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #586e75 30%, transparent);
+}
+
+.dark [data-file-viewer-inverted] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, #586e75 45%, transparent);
+}
+
+/* Tailwind `dark:` utilities still match inside the inverted viewport (the
+ * dark variant tests `<html>.dark`, not the subtree), so mode-conditional
+ * surfaces would follow the app instead of the viewport. The one visible
+ * case is the local-comment Textarea wrapper: give it the dark treatment
+ * when a light app hosts a dark viewport, and re-assert the light solid
+ * surface when a dark app hosts a light viewport. */
+[data-file-viewer-inverted] [data-slot="textarea-control"] {
+  background-color: color-mix(in oklab, var(--input) 32%, transparent);
+}
+
+.dark [data-file-viewer-inverted] [data-slot="textarea-control"] {
+  background-color: var(--background);
+  background-clip: padding-box;
 }
