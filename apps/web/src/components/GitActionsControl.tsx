@@ -45,6 +45,7 @@ import {
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
+  resolveThreadBranchMetadataPatch,
   resolveQuickAction,
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
@@ -1038,7 +1039,9 @@ export default function GitActionsControl({
           environmentId: activeThreadRef.environmentId,
           input: {
             threadId: activeThreadRef.threadId,
-            branch,
+            // Carry expectedBranch so a stale git-status sync can't regress a
+            // freshly-generated branch back to a temporary worktree branch (upstream #3822).
+            ...resolveThreadBranchMetadataPatch(branch, activeServerThread.branch),
             worktreePath,
           },
         });
