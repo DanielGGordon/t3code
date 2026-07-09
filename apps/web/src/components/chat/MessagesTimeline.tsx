@@ -448,10 +448,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
+  // The horizontal inset lives on each row (not on the scroll container) so the
+  // padded gutter beside the centered column still belongs to this row's box.
+  // LegendList positions rows absolutely; a caret/selection press landing in a
+  // gutter that belongs to the scroll container instead of a row resolves to the
+  // wrong (distant) message, which made the left edge of lines unselectable.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
-        <TimelineRowContent row={item} />
+      <div className="w-full px-3 sm:px-5">
+        <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+          <TimelineRowContent row={item} />
+        </div>
       </div>
     ),
     [],
@@ -498,7 +505,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               size: false,
             }}
             onScroll={handleScroll}
-            className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5"
+            // Keep the scroll container horizontally fixed: LegendList otherwise
+            // emits an inline `overflowX: auto` (its default scroll indicator),
+            // which overrides `overflow-x-hidden` and lets a stray horizontal
+            // scroll axis hijack left-edge text selection. The horizontal inset
+            // lives on each row (see renderItem) rather than here so the gutter
+            // beside the centered column still belongs to a row's box.
+            showsHorizontalScrollIndicator={false}
+            className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]"
             ListHeaderComponent={TIMELINE_LIST_HEADER}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
