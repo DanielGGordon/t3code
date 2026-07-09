@@ -1360,3 +1360,37 @@ label:has(> select#reasoning-effort) select {
   --diffs-fg-number-addition-override: var(--diff-add);
   --diffs-fg-number-deletion-override: var(--diff-remove);
 }
+
+/* File explorer theme inversion: FileBrowserPanel sets
+ * `data-file-explorer-inverted` on its root when the user flips the explorer to
+ * the opposite mode via the header SunMoon toggle. The Solarized layer only
+ * re-values the semantic tokens at :root (`@variant dark` compiles to
+ * `:root:is(.dark, .dark *)`, which a subtree attribute cannot satisfy), so the
+ * tokens the explorer surfaces consume — the panel background, header text,
+ * borders, and button hover — are re-declared here with the opposite mode's
+ * Solarized values. The @pierre/trees rows follow via `--trees-fg-override:
+ * var(--foreground)` (set inline) and their currentColor-derived hover/selected
+ * tints. Values mirror the solarized scheme block above. */
+[data-file-explorer-inverted] {
+  /* Solarized Dark values — the app is in light mode. */
+  color-scheme: dark;
+  --background: #002b36;
+  --foreground: #93a1a1;
+  --muted-foreground: #657b83;
+  --accent: #073642;
+  --accent-foreground: #93a1a1;
+  --border: #0a3d49;
+  background-color: var(--background);
+}
+
+.dark [data-file-explorer-inverted] {
+  /* Solarized Light values — the app is in dark mode. */
+  color-scheme: light;
+  --background: #fdf6e3;
+  --foreground: #586e75;
+  --muted-foreground: #657b83;
+  --accent: #eee8d5;
+  --accent-foreground: #586e75;
+  --border: #e6dfc8;
+  background-color: var(--background);
+}
