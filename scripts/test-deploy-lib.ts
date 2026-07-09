@@ -1030,6 +1030,18 @@ export function serverBinFor(worktreePath: string): string {
   return join(worktreePath, "apps", "server", "src", "bin.ts");
 }
 
+/**
+ * Absolute path to the worktree-local `vp` (vite-plus) CLI. `vp` is only ever
+ * installed into a project's own `node_modules/.bin` (never a global/mise bin),
+ * so invoking it by bare name via `spawnSync` fails with ENOENT unless the
+ * caller's shell happens to have that exact worktree's `node_modules/.bin` on
+ * PATH — not a safe assumption for an agent-invoked script. Resolve the
+ * absolute path instead, exactly like `serverBinFor`/`MISE_BIN` above.
+ */
+export function vpBinFor(worktreePath: string): string {
+  return join(worktreePath, "node_modules", ".bin", "vp");
+}
+
 export interface PairingRequest {
   readonly worktreePath: string;
   readonly baseDir: string;

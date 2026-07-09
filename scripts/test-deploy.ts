@@ -39,6 +39,7 @@ import {
   testUrlFor,
   unitForExternal,
   updateClaim,
+  vpBinFor,
   worktreeMigrationCount,
   type Claim,
   type ResolvedTemplate,
@@ -375,9 +376,13 @@ function main(): void {
     // event loop, so a concurrent agent never sees this slot as stale mid-build.
     const stopHeartbeat = spawnClaimHeartbeat(externalPort);
 
-    // Build the web dist in the worktree (server serves apps/web/dist).
+    // Build the web dist in the worktree (server serves apps/web/dist). Resolve
+    // vp's absolute worktree-local path rather than relying on PATH (see
+    // vpBinFor) — a bare "vp" ENOENTs unless the caller's shell happens to have
+    // this exact worktree's node_modules/.bin on PATH. The shim is executable
+    // with its own shebang, so it is run directly (not via `node`).
     try {
-      const build = runCapture("vp", ["run", "--filter", "@t3tools/web", "build"], {
+      const build = runCapture(vpBinFor(worktreePath), ["run", "--filter", "@t3tools/web", "build"], {
         cwd: worktreePath,
       });
       if (build.status !== 0) {
