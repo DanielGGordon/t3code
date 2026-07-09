@@ -711,6 +711,9 @@ const make = Effect.gen(function* () {
       );
       return;
     }
+    if (!pendingSessionRecycles.has(event.threadId)) {
+      return;
+    }
     yield* Effect.logInfo("provider command reactor flushing pending session recycle", {
       threadId: event.threadId,
       requestedAt: pending.requestedAt,
