@@ -310,6 +310,63 @@ it.live("raises and auto-clears the restart-request flag on the thread shell", (
   ),
 );
 
+it.live("auto-detects a restart request in a streamed assistant message", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      const turnResponse: TestTurnResponse = {
+        events: [
+          {
+            type: "turn.started",
+            ...runtimeBase("evt-restart-detect-1", "2026-05-01T10:00:00.000Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+          },
+          {
+            type: "message.delta",
+            ...runtimeBase("evt-restart-detect-2", "2026-05-01T10:00:00.100Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            // The signal lives in the streamed text; the completion event's
+            // payload text is empty, so this exercises the projected-text path.
+            delta: "All set. Please restart the dev server so the change takes effect.\n",
+          },
+          {
+            type: "turn.completed",
+            ...runtimeBase("evt-restart-detect-3", "2026-05-01T10:00:00.200Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            status: "completed",
+          },
+        ],
+      };
+
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession(turnResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-restart-detect",
+        messageId: "msg-user-restart-detect",
+        text: "make the change",
+      });
+
+      // The reactor classifies the finalized (projected) assistant text and
+      // raises the flag asynchronously — wait for its domain event.
+      yield* harness.waitForDomainEvent(
+        (event) =>
+          event.type === "thread.restart-request-changed" && event.payload.requesting === true,
+      );
+
+      const shell = yield* harness.snapshotQuery.getThreadShellById(THREAD_ID);
+      assert.equal(Option.isSome(shell), true);
+      if (Option.isSome(shell)) {
+        assert.equal(shell.value.requestingRestart, true);
+        assert.equal(shell.value.restartRequestReason, "dev server");
+      }
+    }),
+  ),
+);
+
 it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
   "keeps the same Codex provider thread across runtime mode switches",
   () =>

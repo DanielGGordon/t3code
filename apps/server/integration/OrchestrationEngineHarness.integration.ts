@@ -58,7 +58,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
-import { RestartRequestReactor } from "../src/orchestration/Services/RestartRequestReactor.ts";
+import { RestartRequestReactorLive } from "../src/orchestration/Layers/RestartRequestReactor.ts";
 import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -361,11 +361,15 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
+      // Real restart-request reactor so tests exercise the actual
+      // classify-projected-text → raise-flag path. Self-contains its deps
+      // (engine + snapshot query via runtimeServicesLayer, which itself needs
+      // VcsProcess); shared layer refs are memoized within the build.
       Layer.provideMerge(
-        Layer.succeed(RestartRequestReactor, {
-          start: () => Effect.void,
-          drain: Effect.void,
-        }),
+        RestartRequestReactorLive.pipe(
+          Layer.provideMerge(runtimeServicesLayer),
+          Layer.provideMerge(VcsProcess.layer),
+        ),
       ),
       Layer.provideMerge(
         Layer.succeed(ThreadDeletionReactor, {
