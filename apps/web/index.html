@@ -13,10 +13,15 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
       (() => {
-        const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#161616";
+        const SCHEME_BG = {
+          default: ["#ffffff", "#161616"],
+          solarized: ["#fdf6e3", "#002b36"],
+          dracula: ["#fffbeb", "#282a36"],
+          gruvbox: ["#fbf1c7", "#282828"],
+          catppuccin: ["#eff1f5", "#1e1e2e"],
+          "tokyo-night": ["#e1e2e7", "#1a1b26"],
+        };
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-        const VALID_SCHEMES = ["solarized", "dracula", "gruvbox", "catppuccin", "tokyo-night"];
         try {
           const storedTheme = window.localStorage.getItem("t3code:theme");
           const theme =
@@ -27,16 +32,17 @@
           const isDark = theme === "dark" || (theme === "system" && prefersDark);
           document.documentElement.classList.toggle("dark", isDark);
           const storedScheme = window.localStorage.getItem("t3code:colorScheme");
-          if (storedScheme && VALID_SCHEMES.indexOf(storedScheme) !== -1) {
+          if (storedScheme && SCHEME_BG[storedScheme]) {
             document.documentElement.dataset.scheme = storedScheme;
           }
-          const chromeColor = isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
+          const colors = SCHEME_BG[storedScheme] || SCHEME_BG.default;
+          const chromeColor = isDark ? colors[1] : colors[0];
           document.documentElement.style.backgroundColor = chromeColor;
           themeColorMeta?.setAttribute("content", chromeColor);
         } catch {
           document.documentElement.classList.add("dark");
-          document.documentElement.style.backgroundColor = DARK_BACKGROUND;
-          themeColorMeta?.setAttribute("content", DARK_BACKGROUND);
+          document.documentElement.style.backgroundColor = SCHEME_BG.default[1];
+          themeColorMeta?.setAttribute("content", SCHEME_BG.default[1]);
         }
       })();
     </script>
@@ -50,7 +56,7 @@
       }
 
       body {
-        background: #ffffff;
+        background-color: inherit;
         color: #262626;
         font-family:
           "DM Sans",
@@ -62,7 +68,6 @@
       }
 
       html.dark body {
-        background: #161616;
         color: #f5f5f5;
       }
 
