@@ -27,6 +27,7 @@ const clientSettings: ClientSettings = {
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
   sidebarThreadPreviewCount: 6,
+  showCodexUsage: true,
   timestampFormat: "24-hour",
 };
 

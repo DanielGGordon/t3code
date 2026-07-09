@@ -16,7 +16,10 @@ import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScr
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
+import { CodexUsageMeter } from "./CodexUsageMeter";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useSettings } from "~/hooks/useSettings";
+import { useCodexUsage } from "~/hooks/useCodexUsage";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -82,6 +85,8 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const showCodexUsage = useSettings((s) => s.showCodexUsage);
+  const codexUsage = useCodexUsage(showCodexUsage);
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -138,6 +143,7 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
+        {showCodexUsage && codexUsage ? <CodexUsageMeter usage={codexUsage} /> : null}
         <Tooltip>
           <TooltipTrigger
             render={

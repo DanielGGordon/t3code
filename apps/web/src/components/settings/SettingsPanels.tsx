@@ -698,6 +698,30 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Codex usage meter"
+          description="Show a Codex subscription usage meter in the chat top bar. Reflects your latest Codex rate-limit usage, including out-of-band codex runs started by agents."
+          resetAction={
+            settings.showCodexUsage !== DEFAULT_UNIFIED_SETTINGS.showCodexUsage ? (
+              <SettingResetButton
+                label="Codex usage meter"
+                onClick={() =>
+                  updateSettings({
+                    showCodexUsage: DEFAULT_UNIFIED_SETTINGS.showCodexUsage,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showCodexUsage}
+              onCheckedChange={(checked) => updateSettings({ showCodexUsage: Boolean(checked) })}
+              aria-label="Show Codex usage meter in the top bar"
+            />
+          }
+        />
+
+        <SettingsRow
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={

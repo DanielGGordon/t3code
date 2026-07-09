@@ -152,6 +152,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       subscribeAuthAccess: vi.fn(() => () => undefined),
       getTraceDiagnostics: vi.fn(),
       getProcessDiagnostics: vi.fn(),
+      getCodexUsage: vi.fn(),
       getProcessResourceHistory: vi.fn(),
       signalProcess: vi.fn(),
     },
