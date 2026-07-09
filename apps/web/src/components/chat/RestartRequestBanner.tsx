@@ -18,7 +18,9 @@ function readDismissals(): string[] {
     const raw = globalThis.localStorage?.getItem(DISMISSAL_STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string")
+      : [];
   } catch {
     return [];
   }
@@ -50,14 +52,12 @@ export const RestartRequestBanner = memo(function RestartRequestBanner({
   threadId: ThreadId;
   projectId: ProjectId;
 }) {
-  const currentShell = useThreadShell(useMemo(
-    () => scopeThreadRef(environmentId, threadId),
-    [environmentId, threadId],
-  ));
-  const siblingShells = useThreadShellsForProjectRefs(useMemo(
-    () => [scopeProjectRef(environmentId, projectId)],
-    [environmentId, projectId],
-  ));
+  const currentShell = useThreadShell(
+    useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
+  );
+  const siblingShells = useThreadShellsForProjectRefs(
+    useMemo(() => [scopeProjectRef(environmentId, projectId)], [environmentId, projectId]),
+  );
   const requestingSibling = siblingShells.find(
     (sibling) => sibling.id !== threadId && sibling.requestingRestart,
   );

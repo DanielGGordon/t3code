@@ -382,9 +382,13 @@ function main(): void {
     // this exact worktree's node_modules/.bin on PATH. The shim is executable
     // with its own shebang, so it is run directly (not via `node`).
     try {
-      const build = runCapture(vpBinFor(worktreePath), ["run", "--filter", "@t3tools/web", "build"], {
-        cwd: worktreePath,
-      });
+      const build = runCapture(
+        vpBinFor(worktreePath),
+        ["run", "--filter", "@t3tools/web", "build"],
+        {
+          cwd: worktreePath,
+        },
+      );
       if (build.status !== 0) {
         throw new Error(`web build failed: ${build.stderr.trim() || build.stdout.trim()}`);
       }

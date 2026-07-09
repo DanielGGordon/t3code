@@ -287,15 +287,15 @@ export function pruneCuratedDb(db: DatabaseSync, kept: KeptSets): void {
   db.exec(
     `DELETE FROM orchestration_command_receipts WHERE aggregate_id NOT IN (SELECT id FROM _kept_streams);`,
   );
-  db.exec(`DELETE FROM projection_projects WHERE project_id NOT IN (SELECT id FROM _kept_projects);`);
+  db.exec(
+    `DELETE FROM projection_projects WHERE project_id NOT IN (SELECT id FROM _kept_projects);`,
+  );
   db.exec(`DELETE FROM projection_threads WHERE thread_id NOT IN (SELECT id FROM _kept_threads);`);
   for (const table of PER_THREAD_TABLES) {
     db.exec(`DELETE FROM ${table} WHERE thread_id NOT IN (SELECT id FROM _kept_threads);`);
   }
 
-  db.exec(
-    `DROP TABLE _kept_projects; DROP TABLE _kept_threads; DROP TABLE _kept_streams;`,
-  );
+  db.exec(`DROP TABLE _kept_projects; DROP TABLE _kept_threads; DROP TABLE _kept_streams;`);
 }
 
 /**
@@ -321,9 +321,10 @@ export function stripSensitive(db: DatabaseSync): void {
  * test worktree — the projector re-derives titles/paths from those events.
  */
 export function renameCuratedTitles(db: DatabaseSync): void {
-  db.prepare(
-    `UPDATE projection_projects SET title = ? || title WHERE title NOT LIKE ?`,
-  ).run(COPYOF_PREFIX, `${COPYOF_PREFIX}%`);
+  db.prepare(`UPDATE projection_projects SET title = ? || title WHERE title NOT LIKE ?`).run(
+    COPYOF_PREFIX,
+    `${COPYOF_PREFIX}%`,
+  );
   db.prepare(
     `UPDATE projection_threads SET title = ? || title WHERE title IS NOT NULL AND title <> '' AND title NOT LIKE ?`,
   ).run(COPYOF_PREFIX, `${COPYOF_PREFIX}%`);
@@ -779,7 +780,10 @@ export async function runRefresh(opts: RefreshOptions): Promise<SeedManifest> {
     let dbSchemaVersion: number;
     try {
       // 3. Schema-drift guard.
-      dbSchemaVersion = scalar(db, "SELECT COALESCE(MAX(migration_id), 0) FROM effect_sql_migrations");
+      dbSchemaVersion = scalar(
+        db,
+        "SELECT COALESCE(MAX(migration_id), 0) FROM effect_sql_migrations",
+      );
       if (dbSchemaVersion > PRUNE_SCHEMA_VERSION) {
         throw new Error(
           `prod DB is at schema ${dbSchemaVersion}, prune list authored for ${PRUNE_SCHEMA_VERSION}; ` +
@@ -900,7 +904,7 @@ export async function runRefresh(opts: RefreshOptions): Promise<SeedManifest> {
     }
     const shrink =
       manifest.prodDbBytes > 0
-        ? ` (${(manifest.templateDbBytes / manifest.prodDbBytes * 100).toFixed(1)}% of prod)`
+        ? ` (${((manifest.templateDbBytes / manifest.prodDbBytes) * 100).toFixed(1)}% of prod)`
         : "";
     process.stdout.write(
       `  db: ${manifest.templateDbBytes} bytes${shrink}; prod: ${manifest.prodDbBytes} bytes\n` +

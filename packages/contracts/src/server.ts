@@ -329,6 +329,39 @@ export const ServerProcessDiagnosticsResult = Schema.Struct({
 });
 export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type;
 
+// ── Codex subscription usage ──────────────────────────────────────────
+//
+// Snapshot of the Codex CLI's subscription rate-limit windows, read from the
+// newest `~/.codex/sessions/**/rollout-*.jsonl` `token_count` event. Reflects
+// usage as of the last time the `codex` binary actually ran on the server host
+// (including out-of-band `codex exec` subprocesses started by agents). Passive
+// read only — the server never calls the Codex API to refresh this.
+export const CodexUsageWindow = Schema.Struct({
+  // Percent of this window consumed (0–100).
+  usedPercent: Schema.Number,
+  // Unix epoch seconds when this window rolls over, or null if unknown.
+  resetsAt: Schema.NullOr(Schema.Number),
+  // Rolling window length in minutes (e.g. 300 = 5h, 10080 = 7d), or null.
+  windowMinutes: Schema.NullOr(Schema.Number),
+});
+export type CodexUsageWindow = typeof CodexUsageWindow.Type;
+
+export const CodexUsageSnapshot = Schema.Struct({
+  // Subscription plan (e.g. "plus", "pro"), or null when unknown.
+  planType: Schema.NullOr(Schema.String),
+  // Primary window — typically the 5-hour limit ("Codex usage %").
+  primary: Schema.NullOr(CodexUsageWindow),
+  // Secondary window — typically the weekly limit.
+  secondary: Schema.NullOr(CodexUsageWindow),
+  // Unix epoch seconds of the source rollout file's mtime (data freshness).
+  capturedAt: Schema.Number,
+});
+export type CodexUsageSnapshot = typeof CodexUsageSnapshot.Type;
+
+// Null when no Codex session has ever produced a rate-limit snapshot.
+export const CodexUsageResult = Schema.NullOr(CodexUsageSnapshot);
+export type CodexUsageResult = typeof CodexUsageResult.Type;
+
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,

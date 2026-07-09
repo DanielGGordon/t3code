@@ -16,12 +16,12 @@ This is the full reference. `AGENTS.md` carries only a short pointer to this fil
 
 Each slot is one external HTTPS port fronted by Caddy plus one loopback port that `t3 serve` binds on `127.0.0.1`. Conversion: `loopback = external - 3670`.
 
-| slot | external (Caddy TLS) | loopback (t3 serve) | test URL |
-|---|---|---|---|
-| 0 | 7444 | 3774 | https://15.204.108.12:7444 |
-| 1 | 7445 | 3775 | https://15.204.108.12:7445 |
-| … | … | … | … |
-| 9 | 7453 | 3783 | https://15.204.108.12:7453 |
+| slot | external (Caddy TLS) | loopback (t3 serve) | test URL                   |
+| ---- | -------------------- | ------------------- | -------------------------- |
+| 0    | 7444                 | 3774                | https://15.204.108.12:7444 |
+| 1    | 7445                 | 3775                | https://15.204.108.12:7445 |
+| …    | …                    | …                   | …                          |
+| 9    | 7453                 | 3783                | https://15.204.108.12:7453 |
 
 **Hard-forbidden values (asserted in every script):** external `7443`, loopback `3773`, unit `t3code.service`.
 
@@ -48,7 +48,7 @@ The comment body (rendered on the PR) reads:
 
 > ## Test deployment
 >
-> **[Open the test instance](https://15.204.108.12:&lt;port&gt;/pair#token=…)** — https://15.204.108.12:&lt;port&gt;/pair#token=…
+> **[Open the test instance](https://15.204.108.12:<port>/pair#token=…)** — https://15.204.108.12:&lt;port&gt;/pair#token=…
 >
 > That link pairs you and logs you in on this port for 30 days. It is single-use and expires in ~1h. To mint a fresh pairing link: `node scripts/test-status.ts --pair <port>`
 
@@ -235,7 +235,7 @@ touch ~/.t3-test-deploy/caddy-bootstrapped
 ```
 
 > **Why step 4 matters (marker semantics):** `probeExternal` curls the box's own
-> public IP *from the box*, so it only proves local Caddy is proxying — it
+> public IP _from the box_, so it only proves local Caddy is proxying — it
 > **cannot** prove the OVH firewall is actually open to the outside (loopback →
 > own-public-IP bypasses that filter). The `caddy-bootstrapped` marker is an
 > operator assertion that inbound `7444–7453` is genuinely reachable. If you

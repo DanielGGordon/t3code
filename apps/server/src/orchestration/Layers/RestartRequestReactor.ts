@@ -22,7 +22,9 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
  * Only completed assistant messages carry a full-text signal worth
  * classifying. Streaming deltas and user messages are ignored.
  */
-const isClassifiableAssistantMessage = (event: OrchestrationEvent): event is ThreadMessageSentEvent =>
+const isClassifiableAssistantMessage = (
+  event: OrchestrationEvent,
+): event is ThreadMessageSentEvent =>
   event.type === "thread.message-sent" &&
   event.payload.role === "assistant" &&
   event.payload.streaming === false;

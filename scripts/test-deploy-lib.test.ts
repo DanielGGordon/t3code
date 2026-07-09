@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,8 +93,14 @@ describe("pool math + guards", () => {
   });
 
   it("assertNotProd throws on every forbidden target", () => {
-    assert.throws(() => assertNotProd(7443, 3774, "t3-test-7444.service"), ForbiddenProdTargetError);
-    assert.throws(() => assertNotProd(7444, 3773, "t3-test-7444.service"), ForbiddenProdTargetError);
+    assert.throws(
+      () => assertNotProd(7443, 3774, "t3-test-7444.service"),
+      ForbiddenProdTargetError,
+    );
+    assert.throws(
+      () => assertNotProd(7444, 3773, "t3-test-7444.service"),
+      ForbiddenProdTargetError,
+    );
     assert.throws(() => assertNotProd(7444, 3774, "t3code.service"), ForbiddenProdTargetError);
     // Valid slot does not throw.
     assertNotProd(7444, 3774, "t3-test-7444.service");
@@ -142,7 +156,10 @@ describe("registry bootstrap + atomic claim", () => {
 describe("claimSlot behavior", () => {
   it("fast-path claims the lowest free slot", () => {
     const stopped: string[] = [];
-    const result = claimSlot({ branch: "t3code/one", worktreePath: "/tmp/wt" }, fakeDeps({}, stopped));
+    const result = claimSlot(
+      { branch: "t3code/one", worktreePath: "/tmp/wt" },
+      fakeDeps({}, stopped),
+    );
     assert.equal(result.claim.externalPort, 7444);
     assert.isFalse(result.reused);
     assert.isNull(result.reclaimedFrom);
@@ -150,8 +167,14 @@ describe("claimSlot behavior", () => {
 
   it("reuses the same slot for a redeploy of the same branch", () => {
     const stopped: string[] = [];
-    const first = claimSlot({ branch: "t3code/dup", worktreePath: "/tmp/wt" }, fakeDeps({}, stopped));
-    const second = claimSlot({ branch: "t3code/dup", worktreePath: "/tmp/wt" }, fakeDeps({}, stopped));
+    const first = claimSlot(
+      { branch: "t3code/dup", worktreePath: "/tmp/wt" },
+      fakeDeps({}, stopped),
+    );
+    const second = claimSlot(
+      { branch: "t3code/dup", worktreePath: "/tmp/wt" },
+      fakeDeps({}, stopped),
+    );
     assert.equal(second.claim.externalPort, first.claim.externalPort);
     assert.isTrue(second.reused);
   });
@@ -162,7 +185,8 @@ describe("claimSlot behavior", () => {
       claimSlot({ branch: `t3code/b${i}`, worktreePath: "/tmp/wt" }, fakeDeps({}, stopped));
     }
     assert.throws(
-      () => claimSlot({ branch: "t3code/overflow", worktreePath: "/tmp/wt" }, fakeDeps({}, stopped)),
+      () =>
+        claimSlot({ branch: "t3code/overflow", worktreePath: "/tmp/wt" }, fakeDeps({}, stopped)),
       PoolExhaustedError,
     );
   });
@@ -255,7 +279,7 @@ describe("staleness", () => {
 describe("seedBaseDir", () => {
   function makeProdUserdata(): string {
     const prod = mkdtempSync(join(tmpdir(), "t3-prod-userdata-"));
-    writeFileSync(join(prod, "settings.json"), "{\"a\":1}");
+    writeFileSync(join(prod, "settings.json"), '{"a":1}');
     writeFileSync(join(prod, "environment-id"), "prod-env-id");
     writeFileSync(join(prod, "state.sqlite"), "PRODDB");
     mkdirSync(join(prod, "secrets"));
@@ -382,13 +406,16 @@ describe("attachment segment helpers", () => {
 describe("parsePairingUrl", () => {
   it("reads a url field", () => {
     assert.equal(
-      parsePairingUrl("{\"url\":\"https://15.204.108.12:7444/pair#token=abc\"}", "https://15.204.108.12:7444"),
+      parsePairingUrl(
+        '{"url":"https://15.204.108.12:7444/pair#token=abc"}',
+        "https://15.204.108.12:7444",
+      ),
       "https://15.204.108.12:7444/pair#token=abc",
     );
   });
   it("builds from a bare token", () => {
     assert.equal(
-      parsePairingUrl("{\"token\":\"xyz\"}", "http://127.0.0.1:8080"),
+      parsePairingUrl('{"token":"xyz"}', "http://127.0.0.1:8080"),
       "http://127.0.0.1:8080/pair#token=xyz",
     );
   });
@@ -430,7 +457,10 @@ describe("PR comment (spec ADDENDUM)", () => {
       "https://github.com/DanielGGordon/t3code/pull/9",
       "--body",
     ]);
-    const line = ghCommentCommandLine("https://github.com/DanielGGordon/t3code/pull/9", "it's a test");
+    const line = ghCommentCommandLine(
+      "https://github.com/DanielGGordon/t3code/pull/9",
+      "it's a test",
+    );
     // Single-quoted body with an escaped embedded apostrophe.
     assert.include(line, "gh pr comment https://github.com/DanielGGordon/t3code/pull/9 --body '");
     assert.include(line, "'\\''");

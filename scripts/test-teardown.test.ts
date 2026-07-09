@@ -20,7 +20,11 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function seedClaim(externalPort: number, branch: string, worktreePath = "/tmp/does-not-exist"): void {
+function seedClaim(
+  externalPort: number,
+  branch: string,
+  worktreePath = "/tmp/does-not-exist",
+): void {
   const claim = {
     schemaVersion: 1,
     externalPort,

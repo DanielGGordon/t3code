@@ -33,6 +33,7 @@ import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
 import { TokenUsageBadge } from "./TokenUsageBadge";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
 import { useClaudeAccountUsage } from "../../hooks/useClaudeAccountUsage";
+import { useCodexUsage } from "../../hooks/useCodexUsage";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -104,23 +105,29 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const claudeAccountUsage = useClaudeAccountUsage();
+  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
+  const codexUsage = useCodexUsage(usageStatsVisibility.codex);
   const isMobile = useIsMobile();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
     openInEditor: settings.headerOpenInEditorVisibility,
     projectScripts: settings.headerProjectScriptsVisibility,
   }));
-  const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
   const updateClientSettings = useUpdateClientSettings();
   // The usage RPC reads the primary server's host credentials, so only surface
   // Claude account stats for threads that actually run there (same gate as
   // ClaudeAccountUsageBadge below).
   const claudeUsageForThread =
     activeThreadEnvironmentId === primaryEnvironmentId ? claudeAccountUsage : null;
+  // Codex usage is read from the primary host's ~/.codex, so only surface it
+  // for threads that actually run there (same gate as Claude account usage).
+  const codexUsageForThread =
+    activeThreadEnvironmentId === primaryEnvironmentId ? codexUsage : null;
   const usageStats = selectHeaderUsageStats({
     visibility: usageStatsVisibility,
     contextWindow,
     claudeUsage: claudeUsageForThread,
+    codexUsage: codexUsageForThread,
   });
   const showGitActions = resolveHeaderControlVisibility(
     headerControlVisibility.gitActions,

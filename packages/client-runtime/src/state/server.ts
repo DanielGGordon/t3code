@@ -150,6 +150,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetClaudeAccountUsage,
       staleTimeMs: 60_000,
     }),
+    codexUsage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:codex-usage",
+      tag: WS_METHODS.serverGetCodexUsage,
+      staleTimeMs: 60_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

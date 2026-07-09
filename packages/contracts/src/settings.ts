@@ -87,6 +87,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   // Large usage readouts rendered in the chat header's middle area on wide
   // viewports. All default off; toggled per device from the header menu.
+  headerUsageCodexVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageContextVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageScopedWeeklyVisible: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
@@ -583,6 +584,7 @@ export const ClientSettingsPatch = Schema.Struct({
   headerGitActionsVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerOpenInEditorVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerProjectScriptsVisibility: Schema.optionalKey(HeaderControlVisibility),
+  headerUsageCodexVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageContextVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageScopedWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSessionVisible: Schema.optionalKey(Schema.Boolean),

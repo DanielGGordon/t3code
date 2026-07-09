@@ -89,11 +89,9 @@ function nextSeq(): number {
 
 function seedData(db: DatabaseSync, spec: FixtureSpec): void {
   seq = 0;
-  db.prepare("INSERT INTO effect_sql_migrations(migration_id, created_at, name) VALUES (?,?,?)").run(
-    spec.schemaVersion,
-    "2026-01-01T00:00:00.000Z",
-    `m${spec.schemaVersion}`,
-  );
+  db.prepare(
+    "INSERT INTO effect_sql_migrations(migration_id, created_at, name) VALUES (?,?,?)",
+  ).run(spec.schemaVersion, "2026-01-01T00:00:00.000Z", `m${spec.schemaVersion}`);
 
   const insProject = db.prepare(
     "INSERT INTO projection_projects(project_id, title, workspace_root, updated_at, deleted_at) VALUES (?,?,?,?,NULL)",
@@ -101,13 +99,25 @@ function seedData(db: DatabaseSync, spec: FixtureSpec): void {
   const insThread = db.prepare(
     "INSERT INTO projection_threads(thread_id, project_id, title, worktree_path, updated_at, deleted_at, archived_at) VALUES (?,?,?,?,?,NULL,NULL)",
   );
-  const insMsg = db.prepare("INSERT INTO projection_thread_messages(message_id, thread_id, text) VALUES (?,?,?)");
-  const insAct = db.prepare("INSERT INTO projection_thread_activities(activity_id, thread_id, sequence) VALUES (?,?,?)");
+  const insMsg = db.prepare(
+    "INSERT INTO projection_thread_messages(message_id, thread_id, text) VALUES (?,?,?)",
+  );
+  const insAct = db.prepare(
+    "INSERT INTO projection_thread_activities(activity_id, thread_id, sequence) VALUES (?,?,?)",
+  );
   const insTurn = db.prepare("INSERT INTO projection_turns(thread_id, turn_id) VALUES (?,?)");
-  const insSess = db.prepare("INSERT INTO projection_thread_sessions(thread_id, status) VALUES (?,?)");
-  const insRuntime = db.prepare("INSERT INTO provider_session_runtime(thread_id, resume_cursor_json) VALUES (?,?)");
-  const insEvent = db.prepare("INSERT INTO orchestration_events(sequence, stream_id, event_type, payload_json) VALUES (?,?,?,?)");
-  const insReceipt = db.prepare("INSERT INTO orchestration_command_receipts(command_id, aggregate_id, status) VALUES (?,?,?)");
+  const insSess = db.prepare(
+    "INSERT INTO projection_thread_sessions(thread_id, status) VALUES (?,?)",
+  );
+  const insRuntime = db.prepare(
+    "INSERT INTO provider_session_runtime(thread_id, resume_cursor_json) VALUES (?,?)",
+  );
+  const insEvent = db.prepare(
+    "INSERT INTO orchestration_events(sequence, stream_id, event_type, payload_json) VALUES (?,?,?,?)",
+  );
+  const insReceipt = db.prepare(
+    "INSERT INTO orchestration_command_receipts(command_id, aggregate_id, status) VALUES (?,?,?)",
+  );
 
   const projectCount = 4;
   const threadsPer = 3;
@@ -161,16 +171,12 @@ function seedData(db: DatabaseSync, spec: FixtureSpec): void {
     }
   }
 
-  db.prepare("INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES (?,?,?)").run(
-    "threads",
-    projectorMax,
-    "2026-07-09T00:00:00.000Z",
-  );
-  db.prepare("INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES (?,?,?)").run(
-    "projects",
-    projectorMax,
-    "2026-07-09T00:00:00.000Z",
-  );
+  db.prepare(
+    "INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES (?,?,?)",
+  ).run("threads", projectorMax, "2026-07-09T00:00:00.000Z");
+  db.prepare(
+    "INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES (?,?,?)",
+  ).run("projects", projectorMax, "2026-07-09T00:00:00.000Z");
 
   // Live credentials + pairing tokens that MUST be stripped.
   db.prepare("INSERT INTO auth_sessions(session_id, subject, expires_at) VALUES (?,?,?)").run(
@@ -346,7 +352,9 @@ describe("pruneCuratedDb + verify + rename", () => {
     db.exec("BEGIN");
     pruneCuratedDb(db, kept);
     // simulate strip inline (stripSensitive is exercised end-to-end below)
-    db.exec("DELETE FROM auth_sessions; DELETE FROM auth_pairing_links; DELETE FROM provider_session_runtime;");
+    db.exec(
+      "DELETE FROM auth_sessions; DELETE FROM auth_pairing_links; DELETE FROM provider_session_runtime;",
+    );
     renameCuratedTitles(db);
     neutralizeWorkspacePaths(db, sandbox);
     rewriteCuratedEventPayloads(db, sandbox);
@@ -359,16 +367,34 @@ describe("pruneCuratedDb + verify + rename", () => {
     // provider_session_runtime fully cleared.
     assert.equal(count(db, "SELECT COUNT(*) FROM provider_session_runtime"), 0);
     // Every project/thread row is COPYOF-prefixed.
-    assert.equal(count(db, `SELECT COUNT(*) FROM projection_projects WHERE title NOT LIKE '${COPYOF_PREFIX}%'`), 0);
-    assert.equal(count(db, `SELECT COUNT(*) FROM projection_threads WHERE title NOT LIKE '${COPYOF_PREFIX}%'`), 0);
+    assert.equal(
+      count(
+        db,
+        `SELECT COUNT(*) FROM projection_projects WHERE title NOT LIKE '${COPYOF_PREFIX}%'`,
+      ),
+      0,
+    );
+    assert.equal(
+      count(db, `SELECT COUNT(*) FROM projection_threads WHERE title NOT LIKE '${COPYOF_PREFIX}%'`),
+      0,
+    );
 
     // SAFETY: no prod workspace path survives — every workspace_root is redirected
     // to the inert sandbox and every worktree_path is nulled (both in projections
     // and in the source events, so a projection rebuild cannot restore prod paths).
-    assert.equal(count(db, `SELECT COUNT(*) FROM projection_projects WHERE workspace_root <> '${sandbox}'`), 0);
-    assert.equal(count(db, "SELECT COUNT(*) FROM projection_threads WHERE worktree_path IS NOT NULL"), 0);
     assert.equal(
-      count(db, "SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%/home/prod/repos/%'"),
+      count(db, `SELECT COUNT(*) FROM projection_projects WHERE workspace_root <> '${sandbox}'`),
+      0,
+    );
+    assert.equal(
+      count(db, "SELECT COUNT(*) FROM projection_threads WHERE worktree_path IS NOT NULL"),
+      0,
+    );
+    assert.equal(
+      count(
+        db,
+        "SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%/home/prod/repos/%'",
+      ),
       0,
     );
 
@@ -383,7 +409,9 @@ describe("pruneCuratedDb + verify + rename", () => {
     const kept = selectKeptSets(db, DEFAULT_OPTS);
     db.exec("BEGIN");
     pruneCuratedDb(db, kept);
-    db.exec("DELETE FROM auth_sessions; DELETE FROM auth_pairing_links; DELETE FROM provider_session_runtime;");
+    db.exec(
+      "DELETE FROM auth_sessions; DELETE FROM auth_pairing_links; DELETE FROM provider_session_runtime;",
+    );
     renameCuratedTitles(db);
     // Deliberately SKIP neutralizeWorkspacePaths/rewriteCuratedEventPayloads.
     db.exec("COMMIT");
@@ -395,7 +423,9 @@ describe("pruneCuratedDb + verify + rename", () => {
     const db = seededCopy();
     renameCuratedTitles(db);
     renameCuratedTitles(db);
-    const titles = db.prepare("SELECT title FROM projection_projects").all() as unknown as ReadonlyArray<{ title: string }>;
+    const titles = db
+      .prepare("SELECT title FROM projection_projects")
+      .all() as unknown as ReadonlyArray<{ title: string }>;
     for (const { title } of titles) {
       assert.equal(title.startsWith(`${COPYOF_PREFIX}${COPYOF_PREFIX}`), false);
       assert.isTrue(title.startsWith(COPYOF_PREFIX));
@@ -414,7 +444,9 @@ describe("pruneCuratedDb + verify + rename", () => {
     rewriteCuratedEventPayloads(db, sandbox);
     db.exec("COMMIT");
     // Inject an orphan message referencing a dropped thread.
-    db.exec("INSERT INTO projection_thread_messages(message_id, thread_id, text) VALUES ('orphan','thread-4-0','x')");
+    db.exec(
+      "INSERT INTO projection_thread_messages(message_id, thread_id, text) VALUES ('orphan','thread-4-0','x')",
+    );
     assert.throws(() => verifyCuratedDb(db, sandbox), /orphan/);
     db.close();
   });
@@ -437,28 +469,49 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     const template = resolveSeedTemplate();
     assert.isNotNull(template);
     const db = openTemplateDb(template!.dir);
-    assert.equal((db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+    assert.equal(
+      (db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check,
+      "ok",
+    );
     assert.equal(count(db, "SELECT COUNT(*) FROM projection_projects"), 3);
     assert.equal(count(db, "SELECT COUNT(*) FROM projection_threads"), 6);
     assert.equal(count(db, "SELECT COUNT(*) FROM auth_sessions"), 0);
     assert.equal(count(db, "SELECT COUNT(*) FROM auth_pairing_links"), 0);
     assert.equal(count(db, "SELECT COUNT(*) FROM provider_session_runtime"), 0);
-    assert.equal(count(db, `SELECT COUNT(*) FROM projection_projects WHERE title NOT LIKE '${COPYOF_PREFIX}%'`), 0);
+    assert.equal(
+      count(
+        db,
+        `SELECT COUNT(*) FROM projection_projects WHERE title NOT LIKE '${COPYOF_PREFIX}%'`,
+      ),
+      0,
+    );
 
     // SAFETY: the shipped template holds NO prod workspace path — every workspace
     // is redirected to the inert sandbox and every worktree override is nulled, in
     // both the projections and the source events.
     const sandbox = curatedSandboxDir();
-    assert.equal(count(db, `SELECT COUNT(*) FROM projection_projects WHERE workspace_root <> '${sandbox}'`), 0);
-    assert.equal(count(db, "SELECT COUNT(*) FROM projection_threads WHERE worktree_path IS NOT NULL"), 0);
     assert.equal(
-      count(db, "SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%/home/prod/repos/%'"),
+      count(db, `SELECT COUNT(*) FROM projection_projects WHERE workspace_root <> '${sandbox}'`),
+      0,
+    );
+    assert.equal(
+      count(db, "SELECT COUNT(*) FROM projection_threads WHERE worktree_path IS NOT NULL"),
+      0,
+    );
+    assert.equal(
+      count(
+        db,
+        "SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%/home/prod/repos/%'",
+      ),
       0,
     );
     // The COPYOF marker also lives in the events, so it survives a projection
     // rebuild on the test worktree.
     assert.isAbove(
-      count(db, `SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%${COPYOF_PREFIX}%'`),
+      count(
+        db,
+        `SELECT COUNT(*) FROM orchestration_events WHERE payload_json LIKE '%${COPYOF_PREFIX}%'`,
+      ),
       0,
     );
     db.close();
@@ -481,7 +534,9 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     assert.isTrue(existsSync(join(template!.userdata, "settings.json")));
     assert.isTrue(existsSync(join(template!.userdata, "secrets", "openai.bin")));
     const keptSegments = new Set(
-      manifest.keptThreadIds.map((id) => toSafeThreadAttachmentSegment(id)).filter(Boolean) as string[],
+      manifest.keptThreadIds
+        .map((id) => toSafeThreadAttachmentSegment(id))
+        .filter(Boolean) as string[],
     );
     for (const file of readdirSync(join(template!.userdata, "attachments"))) {
       const seg = attachmentFileThreadSegment(file);
@@ -510,8 +565,12 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     mkdirSync(userdata, { recursive: true });
     const db = new DatabaseSync(join(userdata, "state.sqlite"));
     createSchema(db);
-    db.prepare("INSERT INTO effect_sql_migrations(migration_id, created_at, name) VALUES (32,'x','m')").run();
-    db.prepare("INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES ('t',0,'x')").run();
+    db.prepare(
+      "INSERT INTO effect_sql_migrations(migration_id, created_at, name) VALUES (32,'x','m')",
+    ).run();
+    db.prepare(
+      "INSERT INTO projection_state(projector, last_applied_sequence, updated_at) VALUES ('t',0,'x')",
+    ).run();
     db.close();
 
     const manifest = await runRefresh(DEFAULT_OPTS);
@@ -519,7 +578,10 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     const template = resolveSeedTemplate();
     assert.isNotNull(template);
     const tdb = openTemplateDb(template!.dir);
-    assert.equal((tdb.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+    assert.equal(
+      (tdb.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check,
+      "ok",
+    );
     tdb.close();
   });
 });
@@ -560,7 +622,10 @@ describe("attachment segment parity with server helpers", () => {
   // type-checking forbids importing the server module here, so we assert against
   // its verified outputs instead.
   const GOLDEN: ReadonlyArray<{ threadId: string; segment: string }> = [
-    { threadId: "1c9df8e0-1111-2222-3333-444455556666", segment: "1c9df8e0-1111-2222-3333-444455556666" },
+    {
+      threadId: "1c9df8e0-1111-2222-3333-444455556666",
+      segment: "1c9df8e0-1111-2222-3333-444455556666",
+    },
     {
       threadId: "claude-import-1c9df8e0-1111-2222-3333-444455556666",
       segment: "claude-import-1c9df8e0-1111-2222-3333-444455556666",

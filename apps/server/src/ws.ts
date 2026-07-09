@@ -56,6 +56,7 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  CodexSettings,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -97,6 +98,7 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as CodexUsage from "./diagnostics/CodexUsage.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -287,6 +289,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetClaudeAccountUsage, AuthOrchestrationReadScope],
+  [WS_METHODS.serverGetCodexUsage, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpsertKeybinding, AuthOrchestrationOperateScope],
@@ -1326,6 +1329,26 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetCodexUsage]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetCodexUsage,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => {
+                const configs: Array<CodexSettings> = [settings.providers.codex];
+                for (const instance of Object.values(settings.providerInstances)) {
+                  if (instance.driver !== "codex" || instance.config === undefined) continue;
+                  try {
+                    configs.push(Schema.decodeUnknownSync(CodexSettings)(instance.config));
+                  } catch {
+                    /* skip instances whose config doesn't decode */
+                  }
+                }
+                return CodexUsage.readCodexUsage(configs);
+              }),
+              Effect.orElseSucceed(() => null),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,

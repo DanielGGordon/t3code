@@ -1,4 +1,8 @@
-import type { ClaudeAccountUsage, ClaudeAccountUsageLimit } from "@t3tools/contracts";
+import type {
+  ClaudeAccountUsage,
+  ClaudeAccountUsageLimit,
+  CodexUsageResult,
+} from "@t3tools/contracts";
 import type { ClientSettings, ClientSettingsPatch } from "@t3tools/contracts/settings";
 import { ChartNoAxesColumnIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -18,7 +22,13 @@ import {
   formatCostUsd,
 } from "~/lib/contextWindow";
 
-export type HeaderUsageStatId = "context" | "spend" | "session" | "weekly" | "scopedWeekly";
+export type HeaderUsageStatId =
+  | "codex"
+  | "context"
+  | "spend"
+  | "session"
+  | "weekly"
+  | "scopedWeekly";
 
 export type HeaderUsageStatsVisibility = Readonly<Record<HeaderUsageStatId, boolean>>;
 
@@ -37,6 +47,12 @@ interface HeaderUsageStatDefinition {
 }
 
 export const HEADER_USAGE_STAT_DEFINITIONS: ReadonlyArray<HeaderUsageStatDefinition> = [
+  {
+    id: "codex",
+    menuLabel: () => "Codex usage",
+    colorClass: "text-accent-orange",
+    patch: (visible) => ({ headerUsageCodexVisible: visible }),
+  },
   {
     id: "context",
     menuLabel: () => "Context window",
@@ -73,6 +89,7 @@ export function selectHeaderUsageStatsVisibility(
   settings: ClientSettings,
 ): HeaderUsageStatsVisibility {
   return {
+    codex: settings.headerUsageCodexVisible,
     context: settings.headerUsageContextVisible,
     spend: settings.headerUsageSpendVisible,
     session: settings.headerUsageSessionVisible,
@@ -146,6 +163,34 @@ function formatLimitPercent(limit: ClaudeAccountUsageLimit): string {
 }
 
 /**
+ * Hover tooltip for the Codex usage stat: the 5-hour and weekly windows with
+ * their used percentage and reset countdowns. The big readout shows only the
+ * 5h percentage; the rest lives here.
+ */
+function formatCodexUsageTooltip(usage: CodexUsageResult): string {
+  const now = Date.now();
+  const segments: string[] = [];
+  const describe = (
+    label: string,
+    window: { readonly usedPercent: number; readonly resetsAt: number | null } | null,
+  ): void => {
+    if (!window) {
+      return;
+    }
+    const countdown =
+      window.resetsAt !== null
+        ? formatResetCountdown(new Date(window.resetsAt * 1000).toISOString(), now)
+        : null;
+    segments.push(
+      `${label} ${Math.round(window.usedPercent)}%${countdown ? ` · resets in ${countdown}` : ""}`,
+    );
+  };
+  describe("5h", usage?.primary ?? null);
+  describe("Weekly", usage?.secondary ?? null);
+  return segments.join(" · ");
+}
+
+/**
  * Resolve which big usage readouts to render. A stat is included only when it
  * is toggled on AND its data is available — unavailable stats render nothing
  * rather than a placeholder.
@@ -154,14 +199,29 @@ export function selectHeaderUsageStats(input: {
   readonly visibility: HeaderUsageStatsVisibility;
   readonly contextWindow: ContextWindowSnapshot | null;
   readonly claudeUsage: ClaudeAccountUsage | null;
+  readonly codexUsage?: CodexUsageResult;
 }): HeaderUsageStatItem[] {
   const { visibility, contextWindow, claudeUsage } = input;
+  const codexUsage = input.codexUsage ?? null;
   const stats: HeaderUsageStatItem[] = [];
   for (const definition of HEADER_USAGE_STAT_DEFINITIONS) {
     if (!visibility[definition.id]) {
       continue;
     }
     switch (definition.id) {
+      case "codex": {
+        const primary = codexUsage?.primary ?? null;
+        if (primary) {
+          stats.push({
+            id: definition.id,
+            label: "Codex",
+            value: `${Math.round(primary.usedPercent)}%`,
+            colorClass: definition.colorClass,
+            tooltip: formatCodexUsageTooltip(codexUsage),
+          });
+        }
+        break;
+      }
       case "context": {
         if (contextWindow) {
           stats.push({

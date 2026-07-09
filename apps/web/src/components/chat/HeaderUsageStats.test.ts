@@ -44,6 +44,7 @@ const claudeUsage: ClaudeAccountUsage = {
 };
 
 const allVisible: HeaderUsageStatsVisibility = {
+  codex: true,
   context: true,
   spend: true,
   session: true,
@@ -54,6 +55,7 @@ const allVisible: HeaderUsageStatsVisibility = {
 describe("selectHeaderUsageStatsVisibility", () => {
   it("defaults every stat to hidden", () => {
     expect(selectHeaderUsageStatsVisibility(DEFAULT_CLIENT_SETTINGS)).toEqual({
+      codex: false,
       context: false,
       spend: false,
       session: false,
@@ -205,6 +207,37 @@ describe("selectHeaderUsageStats", () => {
     expect(stats).toEqual([
       expect.objectContaining({ id: "scopedWeekly", label: "Scoped", value: "18%" }),
     ]);
+  });
+
+  it("renders the Codex 5h percentage with a combined 5h + weekly tooltip", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      codexUsage: {
+        planType: "plus",
+        primary: { usedPercent: 11, resetsAt: null, windowMinutes: 300 },
+        secondary: { usedPercent: 2, resetsAt: null, windowMinutes: 10_080 },
+        capturedAt: 1_783_610_399,
+      },
+    });
+
+    const codex = stats.find((stat) => stat.id === "codex");
+    expect(codex?.label).toBe("Codex");
+    expect(codex?.value).toBe("11%");
+    // resetsAt is null in this fixture, so no countdown segments.
+    expect(codex?.tooltip).toBe("5h 11% · Weekly 2%");
+  });
+
+  it("omits the Codex stat when no snapshot is available", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      codexUsage: null,
+    });
+
+    expect(stats.some((stat) => stat.id === "codex")).toBe(false);
   });
 });
 
