@@ -45,6 +45,7 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  CodexSettings,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -1071,7 +1072,18 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             WS_METHODS.serverGetCodexUsage,
             serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) => CodexUsage.readCodexUsage(settings.providers.codex)),
+              Effect.flatMap((settings) => {
+                const configs: Array<CodexSettings> = [settings.providers.codex];
+                for (const instance of Object.values(settings.providerInstances)) {
+                  if (instance.driver !== "codex" || instance.config === undefined) continue;
+                  try {
+                    configs.push(Schema.decodeUnknownSync(CodexSettings)(instance.config));
+                  } catch {
+                    /* skip instances whose config doesn't decode */
+                  }
+                }
+                return CodexUsage.readCodexUsage(configs);
+              }),
               Effect.orElseSucceed(() => null),
             ),
             { "rpc.aggregate": "server" },
