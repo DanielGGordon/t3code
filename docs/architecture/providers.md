@@ -28,3 +28,13 @@ Provider runtime events flow through queue-based workers:
 3. **CheckpointReactor** — captures git checkpoints on turn start/complete, publishes runtime receipts
 
 All three use `DrainableWorker` internally and expose `drain()` for deterministic test synchronization.
+
+## Provider session reaper
+
+`ProviderSessionReaper` periodically sweeps persisted session bindings and stops provider sessions that have been idle past a threshold. A session is spared while the thread has an active turn, while in-process runtime activity is fresher than the persisted binding, or while it has live background tasks (currently Claude-only: `task.started`/`task.completed` are mapped from the Claude SDK's task notifications; other providers always report zero live tasks). Live tasks protect an idle session only up to a hard cap so leaked task bookkeeping cannot keep a session alive forever.
+
+Tuning env vars (all optional, resolved via `ServerConfig`; invalid values fail at startup):
+
+- `T3CODE_SESSION_IDLE_REAP_MS`: idle duration before a session is reap-eligible. Default `1800000` (30 min). Values `<= 0` disable the reaper.
+- `T3CODE_SESSION_REAPER_SWEEP_MS`: sweep interval. Default `300000` (5 min), floored at `1000`.
+- `T3CODE_SESSION_REAPER_TASK_CAP_MS`: maximum idle duration a session with live background tasks is spared. Default `86400000` (24 h).

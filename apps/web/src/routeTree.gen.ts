@@ -17,9 +17,9 @@ import { Route as SettingsSourceControlRouteImport } from './routes/settings.sou
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsFeaturesRouteImport } from './routes/settings.features'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
-import { Route as SettingsCloudRouteImport } from './routes/settings.cloud'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
@@ -63,6 +63,11 @@ const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   path: '/general',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsFeaturesRoute = SettingsFeaturesRouteImport.update({
+  id: '/features',
+  path: '/features',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
   id: '/diagnostics',
   path: '/diagnostics',
@@ -71,11 +76,6 @@ const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
 const SettingsConnectionsRoute = SettingsConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsCloudRoute = SettingsCloudRouteImport.update({
-  id: '/cloud',
-  path: '/cloud',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
@@ -100,9 +100,9 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/features': typeof SettingsFeaturesRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -114,9 +114,9 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/features': typeof SettingsFeaturesRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -131,9 +131,9 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/features': typeof SettingsFeaturesRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
@@ -149,9 +149,9 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/settings/archived'
-    | '/settings/cloud'
     | '/settings/connections'
     | '/settings/diagnostics'
+    | '/settings/features'
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/providers'
@@ -163,9 +163,9 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/settings/archived'
-    | '/settings/cloud'
     | '/settings/connections'
     | '/settings/diagnostics'
+    | '/settings/features'
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/providers'
@@ -179,9 +179,9 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/settings/archived'
-    | '/settings/cloud'
     | '/settings/connections'
     | '/settings/diagnostics'
+    | '/settings/features'
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/providers'
@@ -255,6 +255,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsGeneralRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/features': {
+      id: '/settings/features'
+      path: '/features'
+      fullPath: '/settings/features'
+      preLoaderRoute: typeof SettingsFeaturesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/diagnostics': {
       id: '/settings/diagnostics'
       path: '/diagnostics'
@@ -267,13 +274,6 @@ declare module '@tanstack/react-router' {
       path: '/connections'
       fullPath: '/settings/connections'
       preLoaderRoute: typeof SettingsConnectionsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/cloud': {
-      id: '/settings/cloud'
-      path: '/cloud'
-      fullPath: '/settings/cloud'
-      preLoaderRoute: typeof SettingsCloudRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/archived': {
@@ -316,9 +316,9 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
-  SettingsCloudRoute: typeof SettingsCloudRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
+  SettingsFeaturesRoute: typeof SettingsFeaturesRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
@@ -327,9 +327,9 @@ interface SettingsRouteChildren {
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
-  SettingsCloudRoute: SettingsCloudRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
+  SettingsFeaturesRoute: SettingsFeaturesRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,

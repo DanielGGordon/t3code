@@ -12,6 +12,21 @@ export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
   return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
 }
 
+/* Shiki themes used by the markdown code-block highlighter.
+ * Kept separate from DIFF_THEME_NAMES so the chat code-block palette
+ * tracks the app theme (Solarized) while the diff renderer keeps the
+ * pierre theme that ships with `@pierre/diffs`. */
+export const SHIKI_THEME_NAMES = {
+  light: "solarized-light",
+  dark: "solarized-dark",
+} as const;
+
+export type ShikiThemeName = (typeof SHIKI_THEME_NAMES)[keyof typeof SHIKI_THEME_NAMES];
+
+export function resolveShikiThemeName(theme: "light" | "dark"): ShikiThemeName {
+  return theme === "dark" ? SHIKI_THEME_NAMES.dark : SHIKI_THEME_NAMES.light;
+}
+
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
 const FNV_PRIME_32 = 0x01000193;
 const SECONDARY_HASH_SEED = 0x9e3779b9;
@@ -52,9 +67,45 @@ export type RenderablePatch =
       reason: string;
     };
 
+interface RenderablePatchOptions {
+  /**
+   * Pierre's partial-patch parser keeps hunk render starts in source-file
+   * coordinates. Its virtualizer iterates partial patches as compact rows, so
+   * review diffs need compact render starts while retaining collapsedBefore
+   * for the "N unmodified lines" separator.
+   */
+  compactPartialHunkOffsets?: boolean;
+}
+
+export function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
+  if (!file.isPartial) return file;
+
+  let splitLineStart = 0;
+  let unifiedLineStart = 0;
+  const hunks = file.hunks.map((hunk) => {
+    const compactHunk = {
+      ...hunk,
+      splitLineStart,
+      unifiedLineStart,
+    };
+    splitLineStart += hunk.splitLineCount;
+    unifiedLineStart += hunk.unifiedLineCount;
+    return compactHunk;
+  });
+
+  return {
+    ...file,
+    hunks,
+    splitLineCount: splitLineStart,
+    unifiedLineCount: unifiedLineStart,
+    ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:compact-partial` } : {}),
+  };
+}
+
 export function getRenderablePatch(
   patch: string | undefined,
   cacheScope = "diff-panel",
+  options: RenderablePatchOptions = {},
 ): RenderablePatch | null {
   if (!patch) return null;
   const normalizedPatch = patch.trim();
@@ -65,7 +116,11 @@ export function getRenderablePatch(
       normalizedPatch,
       buildPatchCacheKey(normalizedPatch, cacheScope),
     );
-    const files = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
+    const files = parsedPatches.flatMap((parsedPatch) =>
+      options.compactPartialHunkOffsets
+        ? parsedPatch.files.map(compactPartialHunkOffsets)
+        : parsedPatch.files,
+    );
     if (files.length > 0) {
       return { kind: "files", files };
     }

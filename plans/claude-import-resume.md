@@ -31,6 +31,7 @@ host T3 runs on, so `cwd` namespacing and "agent needs the repo present" both ho
 ## Phase A — Resumable import (tracer bullet first)
 
 ### A0. Tracer bullet: resume ONE hardcoded session end-to-end
+
 Prove the whole resume chain works before generalizing. Manually pick one real
 session id + cwd, hand-create a thread, seed the cursor, open it in T3, send a turn,
 confirm the agent has full context. This validates the riskiest assumptions (cursor
@@ -38,6 +39,7 @@ seeding, `thread.session` status needed for routing, fork behavior) before writi
 any parser.
 
 ### A1. Add `forkSession` (+ `resumeSessionAt`) forwarding to the Claude adapter
+
 - File: `apps/server/src/provider/Layers/ClaudeAdapter.ts`, `queryOptions` block (~2998–3023).
 - Today only `resume`/`sessionId` are forwarded; `resumeSessionAt` is stored in the
   cursor but never passed, and `forkSession` is unused.
@@ -47,6 +49,7 @@ any parser.
 - Decide: always fork on imported-resume, or make it a setting. Default = fork.
 
 ### A2. Add a `thread.message.import` internal command
+
 - Cleaner than reusing `thread.message.assistant.delta` (streaming:true) /
   `.complete` (empty text). New command emits a single `thread.message-sent` with
   `streaming:false`, arbitrary `role` (user/assistant/system), full `text`, and a
@@ -56,6 +59,7 @@ any parser.
   changes (it emits the existing `thread.message-sent` event).
 
 ### A3. Minimal parser module (`reader`)
+
 - Standalone module (portable). For Phase A, extract only what resume + a minimal
   display need:
   - `sessionId` (from filename), `cwd` (from any line's `cwd` field — **do not** decode
@@ -66,6 +70,7 @@ any parser.
     `isVisibleInTranscriptOnly`, and non-conversation line types.
 
 ### A4. The `t3 import claude` CLI subcommand
+
 - File: new `apps/server/src/cli/import.ts`; register in `apps/server/src/bin.ts`
   (subcommands at ~45–51).
 - Steps (all via `orchestrationEngine.dispatch`, in chronological order, deterministic
@@ -83,6 +88,7 @@ any parser.
      `:256`) so the read-model session is routable/recoverable — see Open Question 2.
 
 ### A5. Verify Phase A
+
 - Open the imported thread in T3 → it lists. Send a new turn → agent responds **with
   full original context**, and writes to a **forked** `.jsonl` (original untouched).
 - Re-run the import → idempotent no-op (no duplicate thread/messages).
@@ -91,7 +97,7 @@ any parser.
 
 ## Phase B — Full-faithful display
 
-Flesh out the parser so the imported thread also *reads* perfectly in the UI.
+Flesh out the parser so the imported thread also _reads_ perfectly in the UI.
 
 - **Tree → linear path.** `parentUuid`→`uuid` is a tree with branch points and multiple
   roots (edits/retries/forks/compaction). Walk back from the active leaf (last line /
@@ -133,6 +139,7 @@ Flesh out the parser so the imported thread also *reads* perfectly in the UI.
    and how the new id should be written back into the cursor after the first forked turn.
 
 ## Verification checklist
+
 - [ ] A0 tracer: hand-seeded session resumes with full context.
 - [ ] Imported thread appears with correct title + backdated timestamp.
 - [ ] Continuing the thread: agent has context; original `.jsonl` untouched (forked).

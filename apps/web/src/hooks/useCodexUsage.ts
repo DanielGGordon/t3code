@@ -1,55 +1,34 @@
-import { useEffect, useState } from "react";
 import type { CodexUsageResult } from "@t3tools/contracts";
-import { ensureLocalApi } from "~/localApi";
+import { useEffect } from "react";
 
-// Passive poll cadence. The underlying number only changes when `codex`
-// actually runs, and `used_percent` is coarse, so polling faster wastes work
-// without surfacing anything new.
-const POLL_INTERVAL_MS = 45_000;
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironmentQuery } from "../state/query";
+import { serverEnvironment } from "../state/server";
+
+const REFRESH_INTERVAL_MS = 60_000;
 
 /**
- * Poll the server for the latest Codex subscription usage snapshot.
- *
- * Best-effort: transient RPC failures keep the last known value rather than
- * flashing empty. When `enabled` is false the hook stays idle and never polls,
- * so the meter's setting toggle also gates the network traffic.
+ * Codex CLI subscription rate-limit usage, read passively from the primary
+ * environment host's `~/.codex` rollout files. Null while loading or whenever
+ * no snapshot exists (Codex never ran on the host) — render nothing then.
+ * Refreshes on an interval and when the window regains focus; the read is a
+ * cheap file scan, no Codex API call.
  */
-export function useCodexUsage(enabled: boolean): CodexUsageResult {
-  const [snapshot, setSnapshot] = useState<CodexUsageResult>(null);
+export function useCodexUsage(): CodexUsageResult {
+  const environmentId = usePrimaryEnvironmentId();
+  const query = useEnvironmentQuery(
+    environmentId !== null ? serverEnvironment.codexUsage({ environmentId, input: {} }) : null,
+  );
+  const refresh = query.refresh;
 
   useEffect(() => {
-    if (!enabled) {
-      setSnapshot(null);
-      return;
-    }
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const result = await ensureLocalApi().server.getCodexUsage();
-        if (!cancelled) {
-          setSnapshot(result);
-        }
-      } catch {
-        // Keep the last value; usage is non-critical telemetry.
-      } finally {
-        if (!cancelled) {
-          timer = setTimeout(poll, POLL_INTERVAL_MS);
-        }
-      }
-    };
-
-    void poll();
-
+    const interval = setInterval(refresh, REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", refresh);
     return () => {
-      cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
+      clearInterval(interval);
+      window.removeEventListener("focus", refresh);
     };
-  }, [enabled]);
+  }, [refresh]);
 
-  return snapshot;
+  return query.data;
 }

@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import fs from "node:fs";
-import path from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 import {
   ApprovalRequestId,
@@ -266,6 +266,50 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
   ),
 );
 
+it.live("raises and auto-clears the restart-request flag on the thread shell", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      yield* harness.engine.dispatch({
+        type: "thread.restart-request.set",
+        commandId: CommandId.make("cmd-restart-request-set"),
+        threadId: THREAD_ID,
+        requesting: true,
+        source: "auto",
+        reason: "the dev server",
+        createdAt: nowIso(),
+      });
+
+      const raisedShell = yield* harness.snapshotQuery.getThreadShellById(THREAD_ID);
+      assert.equal(Option.isSome(raisedShell), true);
+      if (Option.isSome(raisedShell)) {
+        assert.equal(raisedShell.value.requestingRestart, true);
+        assert.equal(raisedShell.value.restartRequestReason, "the dev server");
+      }
+
+      // A user message in the requesting chat acknowledges the ask and clears it.
+      yield* harness.engine.dispatch({
+        type: "thread.message.import",
+        commandId: CommandId.make("cmd-restart-request-clear-user-msg"),
+        threadId: THREAD_ID,
+        messageId: asMessageId("msg-user-after-restart"),
+        role: "user",
+        text: "Restarted it, go ahead.",
+        turnId: null,
+        createdAt: nowIso(),
+      });
+
+      const clearedShell = yield* harness.snapshotQuery.getThreadShellById(THREAD_ID);
+      assert.equal(Option.isSome(clearedShell), true);
+      if (Option.isSome(clearedShell)) {
+        assert.equal(clearedShell.value.requestingRestart, false);
+        assert.equal(clearedShell.value.restartRequestReason, null);
+      }
+    }),
+  ),
+);
+
 it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
   "keeps the same Codex provider thread across runtime mode switches",
   () =>
@@ -409,7 +453,7 @@ it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
         ],
         mutateWorkspace: ({ cwd }) =>
           Effect.sync(() => {
-            fs.writeFileSync(path.join(cwd, "README.md"), "v2\n", "utf8");
+            NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v2\n", "utf8");
           }),
       });
 
@@ -456,7 +500,7 @@ it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
         ],
         mutateWorkspace: ({ cwd }) =>
           Effect.sync(() => {
-            fs.writeFileSync(path.join(cwd, "README.md"), "v3\n", "utf8");
+            NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v3\n", "utf8");
           }),
       });
 
@@ -752,7 +796,7 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
         ],
         mutateWorkspace: ({ cwd }) =>
           Effect.sync(() => {
-            fs.writeFileSync(path.join(cwd, "README.md"), "v2\n", "utf8");
+            NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v2\n", "utf8");
           }),
       });
       yield* startTurn({
@@ -811,7 +855,7 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
         ],
         mutateWorkspace: ({ cwd }) =>
           Effect.sync(() => {
-            fs.writeFileSync(path.join(cwd, "README.md"), "v3\n", "utf8");
+            NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v3\n", "utf8");
           }),
       });
       yield* startTurn({
@@ -869,7 +913,10 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
         ),
         true,
       );
-      assert.equal(fs.readFileSync(path.join(harness.workspaceDir, "README.md"), "utf8"), "v2\n");
+      assert.equal(
+        NodeFS.readFileSync(NodePath.join(harness.workspaceDir, "README.md"), "utf8"),
+        "v2\n",
+      );
       assert.equal(
         gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
         false,
@@ -1332,7 +1379,7 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           ],
           mutateWorkspace: ({ cwd }) =>
             Effect.sync(() => {
-              fs.writeFileSync(path.join(cwd, "README.md"), "v2\n", "utf8");
+              NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v2\n", "utf8");
             }),
         });
 
@@ -1390,7 +1437,7 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           ],
           mutateWorkspace: ({ cwd }) =>
             Effect.sync(() => {
-              fs.writeFileSync(path.join(cwd, "README.md"), "v3\n", "utf8");
+              NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v3\n", "utf8");
             }),
         });
 

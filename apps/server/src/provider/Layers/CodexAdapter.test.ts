@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import {
   ApprovalRequestId,
   CodexSettings,
@@ -46,6 +46,7 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
+import { estimateCodexCostUsd } from "./codexPricing.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -250,8 +251,8 @@ validationLayer("CodexAdapterLive validation", (it) => {
         })
         .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.deepStrictEqual(
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.deepStrictEqual(
         result.failure,
         new ProviderAdapterValidationError({
           provider: ProviderDriverKind.make("codex"),
@@ -259,7 +260,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
           issue: "Expected provider 'codex' but received 'claudeAgent'.",
         }),
       );
-      assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
+      NodeAssert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
     }),
   );
   it.effect("maps codex model options before starting a session", () =>
@@ -271,17 +272,17 @@ validationLayer("CodexAdapterLive validation", (it) => {
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
-          { id: "fastMode", value: true },
+          { id: "serviceTier", value: "priority" },
         ]),
         runtimeMode: "full-access",
       });
 
-      assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
         binaryPath: "codex",
         cwd: process.cwd(),
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
-        serviceTier: "fast",
+        serviceTier: "priority",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
@@ -319,10 +320,10 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         })
         .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.equal(result.failure._tag, "ProviderAdapterSessionNotFoundError");
-      assert.equal(result.failure.provider, "codex");
-      assert.equal(result.failure.threadId, "sess-missing");
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.equal(result.failure._tag, "ProviderAdapterSessionNotFoundError");
+      NodeAssert.equal(result.failure.provider, "codex");
+      NodeAssert.equal(result.failure.threadId, "sess-missing");
     }),
   );
 
@@ -335,7 +336,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         runtimeMode: "full-access",
       });
       const runtime = sessionRuntimeFactory.lastRuntime;
-      assert.ok(runtime);
+      NodeAssert.ok(runtime);
       runtime.sendTurnImpl.mockClear();
 
       yield* Effect.ignore(
@@ -344,17 +345,17 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           input: "hello",
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
-            { id: "fastMode", value: true },
+            { id: "serviceTier", value: "priority" },
           ]),
           attachments: [],
         }),
       );
 
-      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
         input: "hello",
         model: "gpt-5.3-codex",
         effort: "high",
-        serviceTier: "fast",
+        serviceTier: "priority",
       });
     }),
   );
@@ -386,7 +387,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         runtimeMode: "full-access",
       });
       const runtime = customRuntimeFactory.lastRuntime;
-      assert.ok(runtime);
+      NodeAssert.ok(runtime);
       runtime.sendTurnImpl.mockClear();
 
       yield* Effect.ignore(
@@ -398,18 +399,18 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             "gpt-5.3-codex",
             [
               { id: "reasoningEffort", value: "high" },
-              { id: "fastMode", value: true },
+              { id: "serviceTier", value: "flex" },
             ],
           ),
           attachments: [],
         }),
       );
 
-      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
         input: "hello",
         model: "gpt-5.3-codex",
         effort: "high",
-        serviceTier: "fast",
+        serviceTier: "flex",
       });
     }).pipe(Effect.provide(customLayer));
   });
@@ -442,7 +443,7 @@ function startLifecycleRuntime() {
       runtimeMode: "full-access",
     });
     const runtime = lifecycleRuntimeFactory.lastRuntime;
-    assert.ok(runtime);
+    NodeAssert.ok(runtime);
     return { adapter, runtime };
   });
 }
@@ -477,17 +478,75 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "item.completed");
+      NodeAssert.equal(firstEvent.value.type, "item.completed");
       if (firstEvent.value.type !== "item.completed") {
         return;
       }
-      assert.equal(firstEvent.value.itemId, "msg_1");
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+      NodeAssert.equal(firstEvent.value.itemId, "msg_1");
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(firstEvent.value.payload.itemType, "assistant_message");
+    }),
+  );
+
+  it.effect("labels MCP lifecycle entries with server and tool names", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-mcp-complete"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("mcp_1"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "mcpToolCall",
+            id: "mcp_1",
+            server: "t3-code",
+            tool: "preview_status",
+            arguments: {},
+            durationMs: 12,
+            error: null,
+            result: { content: [{ type: "text", text: "attached" }] },
+            status: "completed",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.completed") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.payload.itemType, "mcp_tool_call");
+      NodeAssert.equal(firstEvent.value.payload.title, "t3-code · preview_status");
+      NodeAssert.deepStrictEqual(firstEvent.value.payload.data, {
+        completedAtMs: 1_778_000_000_000,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "mcpToolCall",
+          id: "mcp_1",
+          server: "t3-code",
+          tool: "preview_status",
+          arguments: {},
+          durationMs: 12,
+          error: null,
+          result: { content: [{ type: "text", text: "attached" }] },
+          status: "completed",
+        },
+      });
     }),
   );
 
@@ -520,16 +579,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "turn.proposed.completed");
+      NodeAssert.equal(firstEvent.value.type, "turn.proposed.completed");
       if (firstEvent.value.type !== "turn.proposed.completed") {
         return;
       }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.planMarkdown, "## Final plan\n\n- one\n- two");
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(firstEvent.value.payload.planMarkdown, "## Final plan\n\n- one\n- two");
     }),
   );
 
@@ -557,16 +616,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "turn.proposed.delta");
+      NodeAssert.equal(firstEvent.value.type, "turn.proposed.delta");
       if (firstEvent.value.type !== "turn.proposed.delta") {
         return;
       }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.delta, "## Final plan");
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(firstEvent.value.payload.delta, "## Final plan");
     }),
   );
 
@@ -588,16 +647,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "session.exited");
+      NodeAssert.equal(firstEvent.value.type, "session.exited");
       if (firstEvent.value.type !== "session.exited") {
         return;
       }
-      assert.equal(firstEvent.value.threadId, "thread-1");
-      assert.equal(firstEvent.value.payload.reason, "Session stopped");
+      NodeAssert.equal(firstEvent.value.threadId, "thread-1");
+      NodeAssert.equal(firstEvent.value.payload.reason, "Session stopped");
     }),
   );
 
@@ -626,16 +685,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "runtime.warning");
+      NodeAssert.equal(firstEvent.value.type, "runtime.warning");
       if (firstEvent.value.type !== "runtime.warning") {
         return;
       }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.message, "Reconnecting... 2/5");
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(firstEvent.value.payload.message, "Reconnecting... 2/5");
     }),
   );
 
@@ -657,16 +716,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "runtime.warning");
+      NodeAssert.equal(firstEvent.value.type, "runtime.warning");
       if (firstEvent.value.type !== "runtime.warning") {
         return;
       }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(
         firstEvent.value.payload.message,
         "The filename or extension is too long. (os error 206)",
       );
@@ -694,16 +753,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "thread.realtime.started");
+      NodeAssert.equal(firstEvent.value.type, "thread.realtime.started");
       if (firstEvent.value.type !== "thread.realtime.started") {
         return;
       }
-      assert.equal(firstEvent.value.threadId, "thread-1");
-      assert.equal(firstEvent.value.payload.realtimeSessionId, "realtime-session-1");
+      NodeAssert.equal(firstEvent.value.threadId, "thread-1");
+      NodeAssert.equal(firstEvent.value.payload.realtimeSessionId, "realtime-session-1");
     }),
   );
 
@@ -726,17 +785,17 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "runtime.error");
+      NodeAssert.equal(firstEvent.value.type, "runtime.error");
       if (firstEvent.value.type !== "runtime.error") {
         return;
       }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.class, "provider_error");
-      assert.equal(
+      NodeAssert.equal(firstEvent.value.turnId, "turn-1");
+      NodeAssert.equal(firstEvent.value.payload.class, "provider_error");
+      NodeAssert.equal(
         firstEvent.value.payload.message,
         "2026-03-31T18:14:06.833399Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 503 Service Unavailable, url: wss://chatgpt.com/backend-api/codex/responses",
       );
@@ -766,15 +825,15 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "request.resolved");
+      NodeAssert.equal(firstEvent.value.type, "request.resolved");
       if (firstEvent.value.type !== "request.resolved") {
         return;
       }
-      assert.equal(firstEvent.value.payload.requestType, "command_execution_approval");
+      NodeAssert.equal(firstEvent.value.payload.requestType, "command_execution_approval");
     }),
   );
 
@@ -801,15 +860,15 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "request.resolved");
+      NodeAssert.equal(firstEvent.value.type, "request.resolved");
       if (firstEvent.value.type !== "request.resolved") {
         return;
       }
-      assert.equal(firstEvent.value.payload.requestType, "file_read_approval");
+      NodeAssert.equal(firstEvent.value.payload.requestType, "file_read_approval");
     }),
   );
 
@@ -837,15 +896,15 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "user-input.resolved");
+      NodeAssert.equal(firstEvent.value.type, "user-input.resolved");
       if (firstEvent.value.type !== "user-input.resolved") {
         return;
       }
-      assert.deepEqual(firstEvent.value.payload.answers, {
+      NodeAssert.deepEqual(firstEvent.value.payload.answers, {
         scope: [],
       });
     }),
@@ -876,20 +935,20 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       yield* runtime.emit(event);
       const events = Array.from(yield* Fiber.join(eventsFiber));
 
-      assert.equal(events.length, 2);
+      NodeAssert.equal(events.length, 2);
 
       const firstEvent = events[0];
       const secondEvent = events[1];
 
-      assert.equal(firstEvent?.type, "session.state.changed");
+      NodeAssert.equal(firstEvent?.type, "session.state.changed");
       if (firstEvent?.type === "session.state.changed") {
-        assert.equal(firstEvent.payload.state, "error");
-        assert.equal(firstEvent.payload.reason, "Sandbox setup failed");
+        NodeAssert.equal(firstEvent.payload.state, "error");
+        NodeAssert.equal(firstEvent.payload.reason, "Sandbox setup failed");
       }
 
-      assert.equal(secondEvent?.type, "runtime.warning");
+      NodeAssert.equal(secondEvent?.type, "runtime.warning");
       if (secondEvent?.type === "runtime.warning") {
-        assert.equal(secondEvent.payload.message, "Sandbox setup failed");
+        NodeAssert.equal(secondEvent.payload.message, "Sandbox setup failed");
       }
     }),
   );
@@ -948,17 +1007,17 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         } satisfies ProviderEvent);
 
         const events = Array.from(yield* Fiber.join(eventsFiber));
-        assert.equal(events[0]?.type, "user-input.requested");
+        NodeAssert.equal(events[0]?.type, "user-input.requested");
         if (events[0]?.type === "user-input.requested") {
-          assert.equal(events[0].requestId, "req-user-input-1");
-          assert.equal(events[0].payload.questions[0]?.id, "sandbox_mode");
-          assert.equal(events[0].payload.questions[0]?.multiSelect, false);
+          NodeAssert.equal(events[0].requestId, "req-user-input-1");
+          NodeAssert.equal(events[0].payload.questions[0]?.id, "sandbox_mode");
+          NodeAssert.equal(events[0].payload.questions[0]?.multiSelect, false);
         }
 
-        assert.equal(events[1]?.type, "user-input.resolved");
+        NodeAssert.equal(events[1]?.type, "user-input.resolved");
         if (events[1]?.type === "user-input.resolved") {
-          assert.equal(events[1].requestId, "req-user-input-1");
-          assert.deepEqual(events[1].payload.answers, {
+          NodeAssert.equal(events[1].requestId, "req-user-input-1");
+          NodeAssert.deepEqual(events[1].payload.answers, {
             sandbox_mode: "workspace-write",
           });
         }
@@ -1002,16 +1061,16 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       } satisfies ProviderEvent);
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
-      assert.equal(firstEvent._tag, "Some");
+      NodeAssert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "thread.token-usage.updated");
+      NodeAssert.equal(firstEvent.value.type, "thread.token-usage.updated");
       if (firstEvent.value.type !== "thread.token-usage.updated") {
         return;
       }
 
-      assert.deepEqual(firstEvent.value.payload.usage, {
+      NodeAssert.deepEqual(firstEvent.value.payload.usage, {
         usedTokens: 126,
         totalProcessedTokens: 11_839,
         maxTokens: 258_400,
@@ -1024,10 +1083,253 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastCachedInputTokens: 0,
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
+        // No model bound to the session -> tokens accrued unpriced.
+        costUsdIncomplete: true,
         compactsAutomatically: true,
       });
+      // No model bound to the session -> no cost estimate on the snapshot.
+      NodeAssert.ok(!("costUsd" in firstEvent.value.payload.usage));
     }),
   );
+
+  it.effect("prices Codex token usage snapshots when a model is bound to the session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-cost"),
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5-codex", []),
+        runtimeMode: "full-access",
+      });
+      const runtime = lifecycleRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-codex-thread-token-usage-priced"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-cost"),
+        turnId: asTurnId("turn-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/tokenUsage/updated",
+        payload: {
+          threadId: "thread-cost",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              inputTokens: 11_833,
+              cachedInputTokens: 3456,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 11_839,
+            },
+            last: {
+              inputTokens: 120,
+              cachedInputTokens: 0,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 126,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.type, "thread.token-usage.updated");
+      if (firstEvent.value.type !== "thread.token-usage.updated") {
+        return;
+      }
+
+      // First update: the delta from zero is the full cumulative breakdown,
+      // priced at gpt-5.5 list rates:
+      // ((11833 - 3456) * 5 + 3456 * 0.5 + 6 * 30) / 1e6
+      NodeAssert.equal(firstEvent.value.payload.usage.costUsd, 0.043793);
+      NodeAssert.equal(firstEvent.value.payload.usage.totalProcessedTokens, 11_839);
+      // All tokens were priced, so no partial-coverage flag.
+      NodeAssert.ok(!("costUsdIncomplete" in firstEvent.value.payload.usage));
+    }),
+  );
+
+  it.effect(
+    "keeps costUsd monotonic across a mid-session switch to a cheaper model by pricing deltas",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-cost-switch"),
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5", []),
+          runtimeMode: "full-access",
+        });
+        const runtime = lifecycleRuntimeFactory.lastRuntime;
+        NodeAssert.ok(runtime);
+
+        const tokenUsageEvent = (
+          id: string,
+          total: {
+            inputTokens: number;
+            cachedInputTokens: number;
+            outputTokens: number;
+            reasoningOutputTokens: number;
+            totalTokens: number;
+          },
+          last: {
+            inputTokens: number;
+            cachedInputTokens: number;
+            outputTokens: number;
+            reasoningOutputTokens: number;
+            totalTokens: number;
+          },
+        ) =>
+          ({
+            id: asEventId(id),
+            kind: "notification",
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-cost-switch"),
+            turnId: asTurnId("turn-1"),
+            createdAt: "2026-01-01T00:00:00.000Z",
+            method: "thread/tokenUsage/updated",
+            payload: {
+              threadId: "thread-cost-switch",
+              turnId: "turn-1",
+              tokenUsage: { total, last, modelContextWindow: 258_400 },
+            },
+          }) satisfies ProviderEvent;
+
+        // Turn 1 on gpt-5.5: (100k * 5 + 10k * 30) / 1e6 = $0.80.
+        const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+        yield* runtime.emit(
+          tokenUsageEvent(
+            "evt-cost-switch-1",
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+          ),
+        );
+        // Wait for the first snapshot to be priced before switching models so
+        // the two updates are deterministically priced at different rates.
+        const firstEvent = yield* Fiber.join(firstEventFiber);
+        NodeAssert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        NodeAssert.equal(firstEvent.value.type, "thread.token-usage.updated");
+        if (firstEvent.value.type !== "thread.token-usage.updated") {
+          return;
+        }
+        NodeAssert.equal(firstEvent.value.payload.usage.costUsd, 0.8);
+
+        // Switch the next turn to the cheaper gpt-5.4-mini.
+        yield* Effect.ignore(
+          adapter.sendTurn({
+            threadId: asThreadId("thread-cost-switch"),
+            input: "hello",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("codex"),
+              "gpt-5.4-mini",
+              [],
+            ),
+            attachments: [],
+          }),
+        );
+
+        // Turn 2 adds the same token counts again; only the delta is priced,
+        // at gpt-5.4-mini rates: (100k * 0.75 + 10k * 4.5) / 1e6 = $0.12.
+        const secondEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+        yield* runtime.emit(
+          tokenUsageEvent(
+            "evt-cost-switch-2",
+            {
+              inputTokens: 200_000,
+              cachedInputTokens: 0,
+              outputTokens: 20_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 220_000,
+            },
+            {
+              inputTokens: 100_000,
+              cachedInputTokens: 0,
+              outputTokens: 10_000,
+              reasoningOutputTokens: 0,
+              totalTokens: 110_000,
+            },
+          ),
+        );
+
+        const secondEvent = yield* Fiber.join(secondEventFiber);
+        NodeAssert.equal(secondEvent._tag, "Some");
+        if (secondEvent._tag !== "Some") {
+          return;
+        }
+        NodeAssert.equal(secondEvent.value.type, "thread.token-usage.updated");
+        if (secondEvent.value.type !== "thread.token-usage.updated") {
+          return;
+        }
+        // Monotonic running total ($0.80 + $0.12), NOT the whole cumulative
+        // breakdown repriced at mini rates ($0.24), which would decrease and
+        // make the web accumulator bank the pre-switch spend twice.
+        NodeAssert.equal(secondEvent.value.payload.usage.costUsd, 0.92);
+      }),
+  );
+});
+
+it("estimates Codex cost with the cached-input discount", () => {
+  const cost = estimateCodexCostUsd("gpt-5.5-codex", {
+    inputTokens: 1000,
+    cachedInputTokens: 400,
+    outputTokens: 100,
+  });
+  // (600 * 5 + 400 * 0.5 + 100 * 30) / 1e6
+  NodeAssert.equal(cost, 0.0062);
+});
+
+it("clamps uncached input at zero when cached tokens exceed input tokens", () => {
+  const cost = estimateCodexCostUsd("gpt-5.5", {
+    inputTokens: 100,
+    cachedInputTokens: 200,
+    outputTokens: 0,
+  });
+  // (0 * 5 + 200 * 0.5 + 0 * 30) / 1e6
+  NodeAssert.equal(cost, 0.0001);
+});
+
+it("returns undefined for unknown or missing models", () => {
+  const usage = { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 100 };
+  NodeAssert.equal(estimateCodexCostUsd("gpt-6-experimental", usage), undefined);
+  NodeAssert.equal(estimateCodexCostUsd(undefined, usage), undefined);
+});
+
+it("prefers the most specific pricing prefix", () => {
+  const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+  // gpt-5.4-mini rate (0.75/1M input), not the shorter gpt-5.4 prefix (2.5/1M).
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.4-mini-2026-01-01", usage), 0.75);
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.4", usage), 2.5);
+});
+
+it("prices gpt-5.3-codex but keeps the API-unavailable spark preview unpriced", () => {
+  const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.3-codex", usage), 1.75);
+  // gpt-5.3-codex-spark has no published API list price (research preview),
+  // so it must stay unpriced despite sharing the gpt-5.3-codex prefix.
+  NodeAssert.equal(estimateCodexCostUsd("gpt-5.3-codex-spark", usage), undefined);
 });
 
 const scopedLifecycleRuntimeFactory = makeScopedRuntimeFactory();
@@ -1061,15 +1363,15 @@ scopedLifecycleLayer("CodexAdapterLive scoped lifecycle", (it) => {
       });
 
       const runtime = scopedLifecycleRuntimeFactory.lastRuntime;
-      assert.ok(runtime);
+      NodeAssert.ok(runtime);
 
       yield* adapter.stopSession(asThreadId("thread-stop"));
 
-      assert.equal(runtime.closeImpl.mock.calls.length, 1);
-      assert.deepStrictEqual(scopedLifecycleRuntimeFactory.releasedThreadIds, [
+      NodeAssert.equal(runtime.closeImpl.mock.calls.length, 1);
+      NodeAssert.deepStrictEqual(scopedLifecycleRuntimeFactory.releasedThreadIds, [
         asThreadId("thread-stop"),
       ]);
-      assert.equal(yield* adapter.hasSession(asThreadId("thread-stop")), false);
+      NodeAssert.equal(yield* adapter.hasSession(asThreadId("thread-stop")), false);
     }),
   );
 });
@@ -1106,20 +1408,22 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
         })
         .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.equal(result.failure._tag, "ProviderAdapterProcessError");
-      assert.deepStrictEqual(scopedFailureRuntimeFactory.releasedThreadIds, [
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.equal(result.failure._tag, "ProviderAdapterProcessError");
+      NodeAssert.deepStrictEqual(scopedFailureRuntimeFactory.releasedThreadIds, [
         asThreadId("thread-fail"),
       ]);
-      assert.equal(yield* adapter.hasSession(asThreadId("thread-fail")), false);
+      NodeAssert.equal(yield* adapter.hasSession(asThreadId("thread-fail")), false);
     }),
   );
 });
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-codex-adapter-native-log-"));
-    const basePath = path.join(tempDir, "provider-native.ndjson");
+    const tempDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3-codex-adapter-native-log-"),
+    );
+    const basePath = NodePath.join(tempDir, "provider-native.ndjson");
     const runtimeFactory = makeRuntimeFactory();
     const scope = yield* Scope.make("sequential");
     let scopeClosed = false;
@@ -1150,7 +1454,7 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
       });
 
       const runtime = runtimeFactory.lastRuntime;
-      assert.ok(runtime);
+      NodeAssert.ok(runtime);
 
       const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
       yield* runtime.emit({
@@ -1167,15 +1471,15 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
       yield* Scope.close(scope, Exit.void);
       scopeClosed = true;
 
-      const threadLogPath = path.join(tempDir, "thread-logger.log");
-      assert.equal(fs.existsSync(threadLogPath), true);
-      const contents = fs.readFileSync(threadLogPath, "utf8");
-      assert.match(contents, /NTIVE: .*"message":"native flush test"/);
+      const threadLogPath = NodePath.join(tempDir, "thread-logger.log");
+      NodeAssert.equal(NodeFS.existsSync(threadLogPath), true);
+      const contents = NodeFS.readFileSync(threadLogPath, "utf8");
+      NodeAssert.match(contents, /NTIVE: .*"message":"native flush test"/);
     } finally {
       if (!scopeClosed) {
         yield* Scope.close(scope, Exit.void);
       }
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
     }
   }),
 );
