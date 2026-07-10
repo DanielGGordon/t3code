@@ -27,6 +27,8 @@ const clientSettings: ClientSettings = {
   headerUsageScopedWeeklyVisible: false,
   headerUsageSessionVisible: false,
   headerUsageSpendVisible: false,
+  headerUsageStockVisible: false,
+  headerUsageStockSymbol: "SPY",
   headerUsageWeeklyVisible: false,
   providerModelPreferences: {},
   sidebarChatListView: "grouped",

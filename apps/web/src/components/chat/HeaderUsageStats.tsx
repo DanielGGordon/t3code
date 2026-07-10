@@ -2,10 +2,14 @@ import type {
   ClaudeAccountUsage,
   ClaudeAccountUsageLimit,
   CodexUsageResult,
+  StockQuote,
+  StockQuoteResult,
 } from "@t3tools/contracts";
 import type { ClientSettings, ClientSettingsPatch } from "@t3tools/contracts/settings";
 import { ChartNoAxesColumnIcon } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import {
   Menu,
   MenuCheckboxItem,
@@ -24,6 +28,7 @@ import {
 
 export type HeaderUsageStatId =
   | "codex"
+  | "stock"
   | "context"
   | "spend"
   | "session"
@@ -52,6 +57,14 @@ export const HEADER_USAGE_STAT_DEFINITIONS: ReadonlyArray<HeaderUsageStatDefinit
     menuLabel: () => "Codex usage",
     colorClass: "text-accent-orange",
     patch: (visible) => ({ headerUsageCodexVisible: visible }),
+  },
+  {
+    id: "stock",
+    menuLabel: () => "Stock ticker",
+    // Color is chosen per-render from the price direction, so this is only a
+    // neutral fallback (used before a quote loads).
+    colorClass: "text-foreground",
+    patch: (visible) => ({ headerUsageStockVisible: visible }),
   },
   {
     id: "context",
@@ -90,6 +103,7 @@ export function selectHeaderUsageStatsVisibility(
 ): HeaderUsageStatsVisibility {
   return {
     codex: settings.headerUsageCodexVisible,
+    stock: settings.headerUsageStockVisible,
     context: settings.headerUsageContextVisible,
     spend: settings.headerUsageSpendVisible,
     session: settings.headerUsageSessionVisible,
@@ -190,19 +204,61 @@ function formatCodexUsageTooltip(usage: CodexUsageResult): string {
   return segments.join(" · ");
 }
 
+const CURRENCY_PREFIXES: Readonly<Record<string, string>> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+};
+
+/** Compact price readout, e.g. "$612.34" or "1,234.50". */
+function formatStockPrice(quote: StockQuote): string {
+  const formatted = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(quote.price);
+  const prefix = quote.currency ? (CURRENCY_PREFIXES[quote.currency] ?? "") : "";
+  return `${prefix}${formatted}`;
+}
+
+/** Green when up, red when down, muted when the change is unknown. */
+function stockColorClass(quote: StockQuote | null): string {
+  if (!quote || quote.changePercent === null) {
+    return "text-muted-foreground";
+  }
+  return quote.changePercent >= 0 ? "text-accent-green" : "text-accent-red";
+}
+
+/** Hover tooltip: the percent change for the day, or a muted caveat. */
+function formatStockChangeTooltip(quote: StockQuote | null): string {
+  if (!quote) {
+    return "Quote unavailable";
+  }
+  if (quote.changePercent === null) {
+    return "Change unavailable";
+  }
+  const sign = quote.changePercent >= 0 ? "+" : "";
+  return `${sign}${quote.changePercent.toFixed(2)}% today`;
+}
+
 /**
  * Resolve which big usage readouts to render. A stat is included only when it
  * is toggled on AND its data is available — unavailable stats render nothing
- * rather than a placeholder.
+ * rather than a placeholder. The stock ticker is the exception: once toggled on
+ * with a symbol it always renders (a muted "—" until a quote arrives), so it
+ * stays a stable, editable anchor.
  */
 export function selectHeaderUsageStats(input: {
   readonly visibility: HeaderUsageStatsVisibility;
   readonly contextWindow: ContextWindowSnapshot | null;
   readonly claudeUsage: ClaudeAccountUsage | null;
   readonly codexUsage?: CodexUsageResult;
+  readonly stockQuote?: StockQuoteResult;
+  readonly stockSymbol?: string;
 }): HeaderUsageStatItem[] {
   const { visibility, contextWindow, claudeUsage } = input;
   const codexUsage = input.codexUsage ?? null;
+  const stockQuote = input.stockQuote ?? null;
   const stats: HeaderUsageStatItem[] = [];
   for (const definition of HEADER_USAGE_STAT_DEFINITIONS) {
     if (!visibility[definition.id]) {
@@ -218,6 +274,19 @@ export function selectHeaderUsageStats(input: {
             value: `${Math.round(primary.usedPercent)}%`,
             colorClass: definition.colorClass,
             tooltip: formatCodexUsageTooltip(codexUsage),
+          });
+        }
+        break;
+      }
+      case "stock": {
+        const symbol = input.stockSymbol?.trim();
+        if (symbol) {
+          stats.push({
+            id: definition.id,
+            label: stockQuote?.symbol ?? symbol.toUpperCase(),
+            value: stockQuote ? formatStockPrice(stockQuote) : "—",
+            colorClass: stockColorClass(stockQuote),
+            tooltip: formatStockChangeTooltip(stockQuote),
           });
         }
         break;
@@ -340,9 +409,26 @@ export function HeaderUsageStats(props: { stats: ReadonlyArray<HeaderUsageStatIt
 export function HeaderUsageStatsMenu(props: {
   visibility: HeaderUsageStatsVisibility;
   scopedWeeklyLabel: string;
+  stockSymbol: string;
   onPatch: (patch: ClientSettingsPatch) => void;
 }) {
-  const { visibility, scopedWeeklyLabel, onPatch } = props;
+  const { visibility, scopedWeeklyLabel, stockSymbol, onPatch } = props;
+  const [symbolDraft, setSymbolDraft] = useState(stockSymbol);
+  // Keep the draft in sync when the persisted symbol changes elsewhere.
+  useEffect(() => {
+    setSymbolDraft(stockSymbol);
+  }, [stockSymbol]);
+  const commitSymbol = () => {
+    const normalized = symbolDraft.trim().toUpperCase();
+    if (normalized.length === 0) {
+      setSymbolDraft(stockSymbol);
+      return;
+    }
+    setSymbolDraft(normalized);
+    if (normalized !== stockSymbol) {
+      onPatch({ headerUsageStockSymbol: normalized });
+    }
+  };
   return (
     <Menu>
       <Tooltip>
@@ -369,15 +455,48 @@ export function HeaderUsageStatsMenu(props: {
         <MenuGroup>
           <MenuGroupLabel>Header usage stats</MenuGroupLabel>
           {HEADER_USAGE_STAT_DEFINITIONS.map((definition) => (
-            <MenuCheckboxItem
-              key={definition.id}
-              variant="switch"
-              closeOnClick={false}
-              checked={visibility[definition.id]}
-              onCheckedChange={(checked) => onPatch(definition.patch(checked))}
-            >
-              {definition.menuLabel(scopedWeeklyLabel)}
-            </MenuCheckboxItem>
+            <Fragment key={definition.id}>
+              <MenuCheckboxItem
+                variant="switch"
+                closeOnClick={false}
+                checked={visibility[definition.id]}
+                onCheckedChange={(checked) => onPatch(definition.patch(checked))}
+              >
+                {definition.menuLabel(scopedWeeklyLabel)}
+              </MenuCheckboxItem>
+              {definition.id === "stock" && (
+                // Symbol editor for the ticker. It lives in the popup, so guard
+                // against the menu's typeahead/navigation stealing keystrokes.
+                <div
+                  className="px-2 pb-1.5 pt-1"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <Input
+                    size="sm"
+                    value={symbolDraft}
+                    aria-label="Stock ticker symbol"
+                    placeholder="SPY"
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    className="text-xs uppercase tracking-wide"
+                    onChange={(event) => setSymbolDraft(event.target.value)}
+                    onBlur={commitSymbol}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitSymbol();
+                        event.currentTarget.blur();
+                      } else if (event.key === "Escape") {
+                        setSymbolDraft(stockSymbol);
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </Fragment>
           ))}
         </MenuGroup>
       </MenuPopup>

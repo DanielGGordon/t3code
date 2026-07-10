@@ -99,6 +99,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as CodexUsage from "./diagnostics/CodexUsage.ts";
+import * as StockQuote from "./diagnostics/StockQuote.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -290,6 +291,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetClaudeAccountUsage, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetCodexUsage, AuthOrchestrationReadScope],
+  [WS_METHODS.serverGetStockQuote, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpsertKeybinding, AuthOrchestrationOperateScope],
@@ -1347,6 +1349,12 @@ const makeWsRpcLayer = (
               }),
               Effect.orElseSucceed(() => null),
             ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverGetStockQuote]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetStockQuote,
+            StockQuote.readStockQuote(input.symbol),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>

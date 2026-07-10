@@ -94,6 +94,10 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   headerUsageSessionVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageSpendVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // A "for fun" stock/index ticker in the header. Visibility is per device;
+  // the symbol it tracks defaults to SPY and is edited from the header menu.
+  headerUsageStockVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageStockSymbol: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("SPY"))),
   headerUsageWeeklyVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   providerModelPreferences: Schema.Record(
     ProviderInstanceId,
@@ -589,6 +593,8 @@ export const ClientSettingsPatch = Schema.Struct({
   headerUsageScopedWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSessionVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSpendVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageStockVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageStockSymbol: Schema.optionalKey(TrimmedString),
   headerUsageWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   providerModelPreferences: Schema.optionalKey(
     Schema.Record(

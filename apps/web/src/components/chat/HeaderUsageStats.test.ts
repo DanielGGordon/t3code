@@ -45,6 +45,7 @@ const claudeUsage: ClaudeAccountUsage = {
 
 const allVisible: HeaderUsageStatsVisibility = {
   codex: true,
+  stock: true,
   context: true,
   spend: true,
   session: true,
@@ -56,6 +57,7 @@ describe("selectHeaderUsageStatsVisibility", () => {
   it("defaults every stat to hidden", () => {
     expect(selectHeaderUsageStatsVisibility(DEFAULT_CLIENT_SETTINGS)).toEqual({
       codex: false,
+      stock: false,
       context: false,
       spend: false,
       session: false,
@@ -238,6 +240,76 @@ describe("selectHeaderUsageStats", () => {
     });
 
     expect(stats.some((stat) => stat.id === "codex")).toBe(false);
+  });
+
+  it("renders the stock price with a green tint and change tooltip when up", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      stockSymbol: "spy",
+      stockQuote: {
+        symbol: "SPY",
+        price: 612.34,
+        changePercent: 0.42,
+        currency: "USD",
+        capturedAt: 1_783_610_399,
+      },
+    });
+
+    const stock = stats.find((stat) => stat.id === "stock");
+    expect(stock?.label).toBe("SPY");
+    expect(stock?.value).toBe("$612.34");
+    expect(stock?.colorClass).toBe("text-accent-green");
+    expect(stock?.tooltip).toBe("+0.42% today");
+  });
+
+  it("tints the stock stat red when the change is negative", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      stockSymbol: "AAPL",
+      stockQuote: {
+        symbol: "AAPL",
+        price: 210,
+        changePercent: -1.1,
+        currency: "USD",
+        capturedAt: 1_783_610_399,
+      },
+    });
+
+    const stock = stats.find((stat) => stat.id === "stock");
+    expect(stock?.colorClass).toBe("text-accent-red");
+    expect(stock?.tooltip).toBe("-1.10% today");
+  });
+
+  it("shows a muted dash for the stock stat until a quote arrives", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      stockSymbol: "spy",
+      stockQuote: null,
+    });
+
+    const stock = stats.find((stat) => stat.id === "stock");
+    expect(stock?.label).toBe("SPY");
+    expect(stock?.value).toBe("—");
+    expect(stock?.colorClass).toBe("text-muted-foreground");
+    expect(stock?.tooltip).toBe("Quote unavailable");
+  });
+
+  it("omits the stock stat when no symbol is configured", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      stockSymbol: "   ",
+      stockQuote: null,
+    });
+
+    expect(stats.some((stat) => stat.id === "stock")).toBe(false);
   });
 });
 
