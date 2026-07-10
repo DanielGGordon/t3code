@@ -4,12 +4,16 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
-// Free, keyless quote sources. Yahoo's public chart endpoint is the primary
-// source — it returns the last price plus the previous close (so we can derive
-// the percent change) and needs no API key or crumb. Stooq's light CSV endpoint
-// is a fallback for the rare case Yahoo rate-limits or blocks the request; it
-// gives us a price but no reliable percent change, which the UI renders as a
-// muted "—".
+// Free, keyless quote sources, tried in order. Cboe's delayed-quotes endpoint
+// is first because Yahoo and Stooq are IP-blocked from datacenter ranges: from
+// the deployed VPS (an OVH datacenter IP) Yahoo returns HTTP 429 on every
+// request (query1/query2 and the crumb flow) and Stooq returns HTTP 404 for
+// every symbol variant, so both always degraded to "—" in production. Cboe
+// answers HTTP 200 from the same IP and returns the price AND percent change
+// directly. Yahoo (price + derived change) and Stooq (price only) remain as
+// fallbacks — they still work from residential/desktop IPs and cover indices,
+// crypto and FX symbols that Cboe (US equities/ETFs) does not.
+const CBOE_QUOTE_BASE = "https://cdn.cboe.com/api/global/delayed_quotes/quotes/";
 const YAHOO_CHART_BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
 const STOOQ_CSV_BASE = "https://stooq.com/q/l/";
 const QUOTE_FETCH_TIMEOUT = "8 seconds";
@@ -46,6 +50,32 @@ const SYMBOL_PATTERN = /^[A-Z0-9.^=-]{1,15}$/;
 export function normalizeSymbol(symbol: string): string | null {
   const trimmed = symbol.trim().toUpperCase();
   return SYMBOL_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Parse Cboe's delayed-quotes payload into a quote. The shape is
+ * `{ timestamp, data: { symbol, current_price, price_change,
+ * price_change_percent, open, high, low, close } }`. It gives both the price
+ * and the percent change directly. Returns null on anything unexpected so a
+ * churned response degrades to "unavailable" rather than throwing. Cboe covers
+ * US equities/ETFs; quotes are USD.
+ */
+export function parseCboe(body: unknown, capturedAt: number): StockQuote | null {
+  const data = asRecord(asRecord(body)?.data);
+  if (data === null) {
+    return null;
+  }
+  const price = asFiniteNumber(data.current_price);
+  if (price === null) {
+    return null;
+  }
+  return {
+    symbol: asString(data.symbol) ?? "",
+    price,
+    changePercent: asFiniteNumber(data.price_change_percent),
+    currency: "USD",
+    capturedAt,
+  };
 }
 
 /**
@@ -117,6 +147,32 @@ export function parseStooqCsv(csv: string, capturedAt: number): StockQuote | nul
 function toStooqSymbol(symbol: string): string {
   return symbol.includes(".") ? symbol.toLowerCase() : `${symbol.toLowerCase()}.us`;
 }
+
+const fetchFromCboe = (
+  symbol: string,
+  capturedAt: number,
+): Effect.Effect<StockQuote | null, never, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+    const body = yield* HttpClientRequest.get(
+      `${CBOE_QUOTE_BASE}${encodeURIComponent(symbol)}.json`,
+    ).pipe(
+      HttpClientRequest.setHeaders({ "User-Agent": USER_AGENT, Accept: "application/json" }),
+      httpClient.execute,
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Unknown)),
+      Effect.timeout(QUOTE_FETCH_TIMEOUT),
+    );
+    const quote = parseCboe(body, capturedAt);
+    // Prefer the requested symbol when Cboe echoes an empty/odd data.symbol.
+    return quote === null ? null : { ...quote, symbol: quote.symbol || symbol };
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logDebug("stock quote fetch failed", { symbol, source: "cboe", cause }).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
 
 const fetchFromYahoo = (
   symbol: string,
@@ -197,7 +253,7 @@ function writeCache(symbol: string, entry: CacheEntry): void {
 
 /**
  * Fetch a delayed quote for `symbol`, cached process-wide for
- * {@link QUOTE_CACHE_TTL_MS}. Tries Yahoo first, then Stooq. Never fails:
+ * {@link QUOTE_CACHE_TTL_MS}. Tries Cboe, then Yahoo, then Stooq. Never fails:
  * returns null (rendered as a muted dash) when the symbol is empty/malformed or
  * every source is unavailable. The read is best-effort telemetry.
  *
@@ -230,10 +286,16 @@ export const readStockQuote = (
     // ──────────────────────────────────────────────────────────────
 
     const capturedAt = Math.floor(nowMs / 1000);
-    // Yahoo first (gives a percent change); on any failure or empty parse, fall
-    // back to Stooq. Both self-recover errors to null, so a failing Yahoo never
-    // skips the Stooq attempt.
-    const freshQuote = yield* fetchFromYahoo(normalized, capturedAt).pipe(
+    // Cboe first (works from datacenter IPs and gives price + percent change);
+    // then Yahoo (price + derived change), then Stooq (price only). Each source
+    // self-recovers errors/empty parses to null, so a failing source always
+    // falls through to the next one.
+    const freshQuote = yield* fetchFromCboe(normalized, capturedAt).pipe(
+      Effect.flatMap((quote) =>
+        quote !== null
+          ? Effect.succeed<StockQuote | null>(quote)
+          : fetchFromYahoo(normalized, capturedAt),
+      ),
       Effect.flatMap((quote) =>
         quote !== null
           ? Effect.succeed<StockQuote | null>(quote)
