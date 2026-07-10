@@ -39,7 +39,7 @@ import { join } from "node:path";
 // Pool constants
 // ---------------------------------------------------------------------------
 
-export const HOST = "15.204.108.12";
+export const HOST = process.env.T3_TEST_DEPLOY_HOST ?? "<SERVER_IP>";
 export const SLOT_COUNT = 10;
 export const EXTERNAL_PORT_BASE = 7444; // slots 0..9 -> 7444..7453
 export const LOOPBACK_PORT_BASE = 3774; // slots 0..9 -> 3774..3783
@@ -1172,8 +1172,8 @@ export function buildPrCommentBody(input: PrCommentInput): string {
       "",
       "```bash",
       "# Open the tunnel from your laptop (keep this session open):",
-      `ssh -L 8080:127.0.0.1:${input.loopbackPort} dgordon@15.204.108.12`,
-      "# THEN, inside that SSH session (i.e. on 15.204.108.12, not your laptop),",
+      `ssh -L 8080:127.0.0.1:${input.loopbackPort} dgordon@${HOST}`,
+      `# THEN, inside that SSH session (i.e. on ${HOST}, not your laptop),`,
       "# mint a link whose URL points at your tunnel origin:",
       `node scripts/test-status.ts --pair ${input.externalPort} --base-url http://127.0.0.1:8080`,
       "# finally open the printed http://127.0.0.1:8080/pair#token=... in your local browser",

@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { afterEach, assert, beforeEach, it } from "@effect/vitest";
 
+import { HOST } from "./test-deploy-lib.ts";
+
 const script = join(import.meta.dirname, "test-teardown.ts");
 
 let home = "";
@@ -29,7 +31,7 @@ function seedClaim(
     schemaVersion: 1,
     externalPort,
     loopbackPort: externalPort - 3670,
-    testUrl: `https://15.204.108.12:${externalPort}`,
+    testUrl: `https://${HOST}:${externalPort}`,
     branch,
     worktreePath,
     baseDir: join(home, "base-dirs", String(externalPort)),

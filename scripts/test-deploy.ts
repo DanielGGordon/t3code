@@ -19,6 +19,7 @@ import {
   ghCommentCommandLine,
   gitBranch,
   gitToplevel,
+  HOST,
   loopbackForExternal,
   logPathFor,
   MISE_BIN,
@@ -264,8 +265,8 @@ function printHandoff(handoff: Handoff): void {
       "DEGRADED MODE: external HTTPS port not reachable (Caddy not bootstrapped or OVH port closed).\n" +
         "The instance is running on loopback only; the external URL is NOT reachable — do not paste it.\n" +
         "Hand the user an SSH tunnel and mint the pairing link against the tunnel origin:\n\n" +
-        `  ssh -L 8080:127.0.0.1:${claim.loopbackPort} dgordon@15.204.108.12\n` +
-        "  # THEN, inside that SSH session (on 15.204.108.12, not the laptop), run:\n" +
+        `  ssh -L 8080:127.0.0.1:${claim.loopbackPort} dgordon@${HOST}\n` +
+        `  # THEN, inside that SSH session (on ${HOST}, not the laptop), run:\n` +
         `  node scripts/test-status.ts --pair ${claim.externalPort} --base-url http://127.0.0.1:8080\n` +
         "  # then open the printed http://127.0.0.1:8080/pair#token=... in the local browser\n\n" +
         `PR is here ${prUrl}.\n`,
