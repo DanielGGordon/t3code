@@ -160,6 +160,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetHostStats,
       staleTimeMs: 5_000,
     }),
+    stockQuote: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:stock-quote",
+      tag: WS_METHODS.serverGetStockQuote,
+      staleTimeMs: 15_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

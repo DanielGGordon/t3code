@@ -362,6 +362,37 @@ export type CodexUsageSnapshot = typeof CodexUsageSnapshot.Type;
 export const CodexUsageResult = Schema.NullOr(CodexUsageSnapshot);
 export type CodexUsageResult = typeof CodexUsageResult.Type;
 
+// ── Stock ticker ──────────────────────────────────────────────────────
+//
+// A single delayed stock/index quote for the chat header's "for fun" ticker.
+// Fetched server-side from a free, keyless source (Yahoo Finance's public
+// chart endpoint, with a Stooq CSV fallback) and cached process-wide so the
+// upstream is polled at most once per symbol every few seconds no matter how
+// many clients ask.
+export const StockQuoteInput = Schema.Struct({
+  // Ticker symbol to quote, e.g. "SPY" or "AAPL". Case-insensitive.
+  symbol: Schema.String,
+});
+export type StockQuoteInput = typeof StockQuoteInput.Type;
+
+export const StockQuote = Schema.Struct({
+  // Resolved symbol as reported by the data source (uppercased).
+  symbol: Schema.String,
+  // Latest trade/quote price.
+  price: Schema.Number,
+  // Percent change versus the previous close, or null when unavailable.
+  changePercent: Schema.NullOr(Schema.Number),
+  // ISO 4217 currency code (e.g. "USD"), or null when the source omits it.
+  currency: Schema.NullOr(Schema.String),
+  // Unix epoch seconds when this quote was fetched (data freshness).
+  capturedAt: Schema.Number,
+});
+export type StockQuote = typeof StockQuote.Type;
+
+// Null when the symbol is unknown or every data source failed.
+export const StockQuoteResult = Schema.NullOr(StockQuote);
+export type StockQuoteResult = typeof StockQuoteResult.Type;
+
 // ── Server host load ──────────────────────────────────────────────────
 //
 // Whole-host CPU and memory usage of the machine the T3 server runs on —

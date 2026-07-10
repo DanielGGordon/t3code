@@ -34,6 +34,7 @@ import { TokenUsageBadge } from "./TokenUsageBadge";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
 import { useClaudeAccountUsage } from "../../hooks/useClaudeAccountUsage";
 import { useCodexUsage } from "../../hooks/useCodexUsage";
+import { useStockQuote } from "../../hooks/useStockQuote";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -107,6 +108,8 @@ export const ChatHeader = memo(function ChatHeader({
   const claudeAccountUsage = useClaudeAccountUsage();
   const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
   const codexUsage = useCodexUsage(usageStatsVisibility.codex);
+  const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
+  const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
   const isMobile = useIsMobile();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
@@ -128,6 +131,10 @@ export const ChatHeader = memo(function ChatHeader({
     contextWindow,
     claudeUsage: claudeUsageForThread,
     codexUsage: codexUsageForThread,
+    // A stock quote is a public, host-agnostic value, so it is shown for every
+    // thread (no primary-environment gate like the credential-backed stats).
+    stockQuote,
+    stockSymbol,
   });
   const showGitActions = resolveHeaderControlVisibility(
     headerControlVisibility.gitActions,
@@ -182,6 +189,7 @@ export const ChatHeader = memo(function ChatHeader({
         <HeaderUsageStatsMenu
           visibility={usageStatsVisibility}
           scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
+          stockSymbol={stockSymbol}
           onPatch={updateClientSettings}
         />
         {showProjectScripts && activeProjectScripts && (

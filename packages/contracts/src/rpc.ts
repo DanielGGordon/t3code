@@ -126,6 +126,8 @@ import {
   ServerTraceDiagnosticsResult,
   CodexUsageResult,
   ServerHostStatsResult,
+  StockQuoteInput,
+  StockQuoteResult,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
@@ -216,6 +218,7 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetCodexUsage: "server.getCodexUsage",
   serverGetHostStats: "server.getHostStats",
+  serverGetStockQuote: "server.getStockQuote",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
   serverGetClaudeAccountUsage: "server.getClaudeAccountUsage",
@@ -325,6 +328,12 @@ export const WsServerGetCodexUsageRpc = Rpc.make(WS_METHODS.serverGetCodexUsage,
 export const WsServerGetHostStatsRpc = Rpc.make(WS_METHODS.serverGetHostStats, {
   payload: Schema.Struct({}),
   success: ServerHostStatsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerGetStockQuoteRpc = Rpc.make(WS_METHODS.serverGetStockQuote, {
+  payload: StockQuoteInput,
+  success: StockQuoteResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -720,6 +729,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetCodexUsageRpc,
   WsServerGetHostStatsRpc,
+  WsServerGetStockQuoteRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
   WsServerGetClaudeAccountUsageRpc,
