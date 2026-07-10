@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { assert, it } from "@effect/vitest";
 
+import { HOST } from "./test-deploy-lib.ts";
+
 const script = join(import.meta.dirname, "test-deploy-caddy.ts");
 
 it("prints 10 Caddy blocks for 7444..7453 and never a prod target", () => {
@@ -10,7 +12,7 @@ it("prints 10 Caddy blocks for 7444..7453 and never a prod target", () => {
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
   for (let port = 7444; port <= 7453; port += 1) {
-    assert.include(out, `https://15.204.108.12:${port} {`);
+    assert.include(out, `https://${HOST}:${port} {`);
     assert.include(out, `reverse_proxy 127.0.0.1:${port - 3670} {`);
   }
   // Exactly 10 reverse_proxy blocks.

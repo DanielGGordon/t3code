@@ -29,6 +29,7 @@ import {
   ForbiddenProdTargetError,
   ghCommentArgs,
   ghCommentCommandLine,
+  HOST,
   loopbackForExternal,
   parsePairingUrl,
   PoolExhaustedError,
@@ -89,7 +90,7 @@ describe("pool math + guards", () => {
     assert.equal(loopbackForExternal(7453), 3783);
     assert.equal(externalForLoopback(3774), 7444);
     assert.equal(unitForExternal(7444), "t3-test-7444.service");
-    assert.equal(testUrlFor(7444), "https://15.204.108.12:7444");
+    assert.equal(testUrlFor(7444), `https://${HOST}:7444`);
   });
 
   it("assertNotProd throws on every forbidden target", () => {
@@ -406,11 +407,8 @@ describe("attachment segment helpers", () => {
 describe("parsePairingUrl", () => {
   it("reads a url field", () => {
     assert.equal(
-      parsePairingUrl(
-        '{"url":"https://15.204.108.12:7444/pair#token=abc"}',
-        "https://15.204.108.12:7444",
-      ),
-      "https://15.204.108.12:7444/pair#token=abc",
+      parsePairingUrl(`{"url":"https://${HOST}:7444/pair#token=abc"}`, `https://${HOST}:7444`),
+      `https://${HOST}:7444/pair#token=abc`,
     );
   });
   it("builds from a bare token", () => {
@@ -421,8 +419,8 @@ describe("parsePairingUrl", () => {
   });
   it("falls back to scanning plain text", () => {
     assert.equal(
-      parsePairingUrl("Pair here: https://15.204.108.12:7445/pair#token=q1w2 (5m)", "https://x"),
-      "https://15.204.108.12:7445/pair#token=q1w2",
+      parsePairingUrl(`Pair here: https://${HOST}:7445/pair#token=q1w2 (5m)`, "https://x"),
+      `https://${HOST}:7445/pair#token=q1w2`,
     );
   });
   it("throws when no url is present", () => {
@@ -431,7 +429,7 @@ describe("parsePairingUrl", () => {
 });
 
 describe("PR comment (spec ADDENDUM)", () => {
-  const paired = "https://15.204.108.12:7444/pair#token=abc";
+  const paired = `https://${HOST}:7444/pair#token=abc`;
 
   it("embeds the clickable link + re-mint command when external is live", () => {
     const body = buildPrCommentBody({ externalPort: 7444, loopbackPort: 3774, pairedUrl: paired });
