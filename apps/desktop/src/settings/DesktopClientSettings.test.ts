@@ -30,6 +30,7 @@ const clientSettings: ClientSettings = {
   headerUsageWeeklyVisible: false,
   providerModelPreferences: {},
   sidebarChatListView: "grouped",
+  sidebarHostStatsVisible: false,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",

@@ -210,6 +210,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { useHostStats } from "~/hooks/useHostStats";
 import { primaryServerConfigAtom, primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
@@ -3297,6 +3298,39 @@ function T3Wordmark() {
   );
 }
 
+// Compact "3.2/15.6 GB" style figure for the footer host-stats readout.
+function formatFooterGigabytes(bytes: number): string {
+  const gigabytes = bytes / 1024 ** 3;
+  if (gigabytes >= 100) return String(Math.round(gigabytes));
+  return gigabytes.toFixed(1);
+}
+
+// Ambient CPU/memory telemetry for the T3 server host, shown next to the
+// Settings button when the "Server load" toggle (Settings → Features) is on.
+const SidebarHostStats = memo(function SidebarHostStats() {
+  const visible = useClientSettings((settings) => settings.sidebarHostStatsVisible);
+  const stats = useHostStats(visible);
+  if (!visible || stats === null) {
+    return null;
+  }
+
+  const cpuLabel = `${Math.round(stats.cpuPercent)}%`;
+  const memLabel = `${formatFooterGigabytes(stats.memUsedBytes)}/${formatFooterGigabytes(stats.memTotalBytes)}G`;
+  const coreLabel = stats.cpuCount === 1 ? "1 core" : `${stats.cpuCount} cores`;
+  const detail = `Server load — CPU ${stats.cpuPercent.toFixed(1)}% of ${coreLabel} · memory ${formatFooterGigabytes(stats.memUsedBytes)} of ${formatFooterGigabytes(stats.memTotalBytes)} GB`;
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-[10px] tabular-nums text-muted-foreground/70"
+      title={detail}
+      aria-label={detail}
+    >
+      <span>CPU {cpuLabel}</span>
+      <span>MEM {memLabel}</span>
+    </div>
+  );
+});
+
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -3312,15 +3346,16 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarMenu>
-        <SidebarMenuItem>
+        <SidebarMenuItem className="flex items-center">
           <SidebarMenuButton
             size="sm"
-            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            className="w-auto flex-1 gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
             onClick={handleSettingsClick}
           >
             <SettingsIcon className="size-3.5" />
             <span className="text-xs">Settings</span>
           </SidebarMenuButton>
+          <SidebarHostStats />
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarFooter>

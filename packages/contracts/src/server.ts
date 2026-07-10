@@ -362,6 +362,29 @@ export type CodexUsageSnapshot = typeof CodexUsageSnapshot.Type;
 export const CodexUsageResult = Schema.NullOr(CodexUsageSnapshot);
 export type CodexUsageResult = typeof CodexUsageResult.Type;
 
+// ── Server host load ──────────────────────────────────────────────────
+//
+// Whole-host CPU and memory usage of the machine the T3 server runs on —
+// everything on the box, not just T3-managed processes (contrast with
+// `ServerProcessDiagnosticsResult`, which sums the server's own process
+// tree). Sampled on demand from `os.cpus()` deltas and `/proc/meminfo`
+// (with `os.totalmem`/`os.freemem` as the portable fallback).
+export const ServerHostStatsSnapshot = Schema.Struct({
+  // Percent of total CPU capacity in use across all cores (0–100).
+  cpuPercent: Schema.Number,
+  // Number of logical CPU cores contributing to `cpuPercent`.
+  cpuCount: NonNegativeInt,
+  // Memory in use. On Linux this is total minus MemAvailable, so page
+  // cache the kernel can reclaim does not count as "used".
+  memUsedBytes: NonNegativeInt,
+  memTotalBytes: NonNegativeInt,
+});
+export type ServerHostStatsSnapshot = typeof ServerHostStatsSnapshot.Type;
+
+// Null when the host stats cannot be read (best-effort telemetry).
+export const ServerHostStatsResult = Schema.NullOr(ServerHostStatsSnapshot);
+export type ServerHostStatsResult = typeof ServerHostStatsResult.Type;
+
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,

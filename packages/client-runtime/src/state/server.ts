@@ -155,6 +155,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetCodexUsage,
       staleTimeMs: 60_000,
     }),
+    hostStats: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:host-stats",
+      tag: WS_METHODS.serverGetHostStats,
+      staleTimeMs: 5_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

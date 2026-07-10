@@ -107,6 +107,10 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarChatListView: SidebarChatListView.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_CHAT_LIST_VIEW)),
   ),
+  // Compact CPU/memory readout for the T3 server host, rendered next to the
+  // Settings button in the sidebar footer. Default off; toggled per device
+  // from the Features settings page.
+  sidebarHostStatsVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -604,6 +608,7 @@ export const ClientSettingsPatch = Schema.Struct({
     ),
   ),
   sidebarChatListView: Schema.optionalKey(SidebarChatListView),
+  sidebarHostStatsVisible: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
