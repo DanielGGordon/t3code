@@ -1,4 +1,4 @@
-import { GitBranchIcon, PlayIcon, SquareArrowOutUpRightIcon } from "lucide-react";
+import { ActivityIcon, GitBranchIcon, PlayIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { type ReactNode } from "react";
 import {
   type ClientSettings,
@@ -64,6 +64,7 @@ export function FeaturesSettingsPanel() {
     headerGitActionsVisibility: s.headerGitActionsVisibility,
     headerOpenInEditorVisibility: s.headerOpenInEditorVisibility,
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
+    sidebarHostStatsVisible: s.sidebarHostStatsVisible,
   }));
   const updateSettings = useUpdateClientSettings();
 
@@ -104,6 +105,24 @@ export function FeaturesSettingsPanel() {
             />
           );
         })}
+      </SettingsSection>
+      <SettingsSection title="Sidebar">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <ActivityIcon className="size-3.5" />
+              Server load
+            </span>
+          }
+          description="Show the T3 server host's CPU and memory usage next to Settings at the bottom of the sidebar. Refreshes every few seconds while visible."
+          control={
+            <Switch
+              checked={settings.sidebarHostStatsVisible}
+              onCheckedChange={(checked) => updateSettings({ sidebarHostStatsVisible: checked })}
+              aria-label="Show server load in the sidebar"
+            />
+          }
+        />
       </SettingsSection>
       <p className="px-1 text-xs text-muted-foreground/70">
         Visibility is stored per device. “Auto” shows a control on desktop-width screens and hides

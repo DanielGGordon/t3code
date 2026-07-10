@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish the sideloadable Android APK to the self-hosted download route
-# (Caddy serves /var/lib/t3code-apk at https://15.204.108.12:7443/downloads/).
+# (Caddy serves /var/lib/t3code-apk at https://<SERVER_IP>:7443/downloads/).
 # The previous build is kept alongside as *.previous.apk for rollback.
 #
 # Usage: publish-android-apk.sh [apk-path]
@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APK="${1:-$SCRIPT_DIR/../android/app/build/outputs/apk/release/app-release.apk}"
-HOST="${T3_APK_HOST:-dgordon@15.204.108.12}"
+HOST="${T3_APK_HOST:-dgordon@<SERVER_IP>}"
 DST_DIR="${T3_APK_DST:-/var/lib/t3code-apk}"
 NAME="${T3_APK_NAME:-t3code-android-preview.apk}"
 
@@ -21,4 +21,4 @@ fi
 ssh "$HOST" "cd '$DST_DIR' && if [ -f '$NAME' ]; then cp -f '$NAME' '${NAME%.apk}.previous.apk'; fi"
 scp "$APK" "$HOST:$DST_DIR/$NAME"
 
-echo "Published: https://15.204.108.12:7443/downloads/$NAME"
+echo "Published: https://${HOST#*@}:7443/downloads/$NAME"

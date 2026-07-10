@@ -16,12 +16,12 @@ This is the full reference. `AGENTS.md` carries only a short pointer to this fil
 
 Each slot is one external HTTPS port fronted by Caddy plus one loopback port that `t3 serve` binds on `127.0.0.1`. Conversion: `loopback = external - 3670`.
 
-| slot | external (Caddy TLS) | loopback (t3 serve) | test URL                   |
-| ---- | -------------------- | ------------------- | -------------------------- |
-| 0    | 7444                 | 3774                | https://15.204.108.12:7444 |
-| 1    | 7445                 | 3775                | https://15.204.108.12:7445 |
-| …    | …                    | …                   | …                          |
-| 9    | 7453                 | 3783                | https://15.204.108.12:7453 |
+| slot | external (Caddy TLS) | loopback (t3 serve) | test URL                 |
+| ---- | -------------------- | ------------------- | ------------------------ |
+| 0    | 7444                 | 3774                | https://<SERVER_IP>:7444 |
+| 1    | 7445                 | 3775                | https://<SERVER_IP>:7445 |
+| …    | …                    | …                   | …                        |
+| 9    | 7453                 | 3783                | https://<SERVER_IP>:7453 |
 
 **Hard-forbidden values (asserted in every script):** external `7443`, loopback `3773`, unit `t3code.service`.
 
@@ -48,7 +48,7 @@ The comment body (rendered on the PR) reads:
 
 > ## Test deployment
 >
-> **[Open the test instance](https://15.204.108.12:<port>/pair#token=…)** — https://15.204.108.12:&lt;port&gt;/pair#token=…
+> **[Open the test instance](https://<SERVER_IP>:<port>/pair#token=…)** — https://<SERVER_IP>:&lt;port&gt;/pair#token=…
 >
 > That link pairs you and logs you in on this port for 30 days. It is single-use and expires in ~1h. To mint a fresh pairing link: `node scripts/test-status.ts --pair <port>`
 
@@ -58,7 +58,7 @@ In degraded mode (external port not reachable) the comment instead contains the 
 
 > Ok I finished that feature and pushed it to `<test-url>`. PR is here `<pr-url>`. Try it out and let me know if it is good. If it is, I'll merge the PR to main and re-deploy prod.
 
-`<test-url>` is the full `https://15.204.108.12:<port>/pair#token=…` link `test-deploy` printed. Pairing tokens last ~1 hour; after that (or after a purge), re-mint with `node scripts/test-status.ts --pair <port>`. Once the user pairs, they stay logged in on that port for 30 days — redeploying the same branch to the same slot keeps them paired.
+`<test-url>` is the full `https://<SERVER_IP>:<port>/pair#token=…` link `test-deploy` printed. Pairing tokens last ~1 hour; after that (or after a purge), re-mint with `node scripts/test-status.ts --pair <port>`. Once the user pairs, they stay logged in on that port for 30 days — redeploying the same branch to the same slot keeps them paired.
 
 ## Other commands
 
@@ -153,8 +153,8 @@ node scripts/test-status.ts --pair <port>
 **Degraded mode** (external port not reachable — Caddy not bootstrapped or OVH port closed): the instance still runs on loopback. The handoff and PR comment give an SSH tunnel plus a re-mint bound to the tunnel origin:
 
 ```bash
-ssh -L 8080:127.0.0.1:<loopbackPort> dgordon@15.204.108.12
-# then, inside that SSH session (on 15.204.108.12), mint a link for the tunnel origin:
+ssh -L 8080:127.0.0.1:<loopbackPort> dgordon@<SERVER_IP>
+# then, inside that SSH session (on <SERVER_IP>), mint a link for the tunnel origin:
 node scripts/test-status.ts --pair <port> --base-url http://127.0.0.1:8080
 # open the printed http://127.0.0.1:8080/pair#token=... in your local browser
 ```
@@ -227,7 +227,7 @@ sudo systemctl reload caddy
 
 # 4. VERIFY external reachability from OFF the box (do NOT skip — see note below).
 #    From your laptop / any external host, one open pool port should answer:
-#      curl -sko /dev/null -w '%{http_code}\n' https://15.204.108.12:7444/
+#      curl -sko /dev/null -w '%{http_code}\n' https://<SERVER_IP>:7444/
 #    Expect an HTTP status (e.g. 200/302/404), NOT a connection timeout/refused.
 
 # 5. Mark the framework as externally-enabled
@@ -240,7 +240,7 @@ touch ~/.t3-test-deploy/caddy-bootstrapped
 > own-public-IP bypasses that filter). The `caddy-bootstrapped` marker is an
 > operator assertion that inbound `7444–7453` is genuinely reachable. If you
 > `touch` it without opening the firewall, `test-deploy` will mint and post an
-> `https://15.204.108.12:<port>/pair` link that external users get
+> `https://<SERVER_IP>:<port>/pair` link that external users get
 > connection-refused on. Run the step-4 external `curl` before creating the
 > marker (and again if the OVH firewall ever changes).
 
