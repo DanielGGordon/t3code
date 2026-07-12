@@ -12,6 +12,12 @@ T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
+This is a fork of [`pingdotgg/t3code`](https://github.com/pingdotgg/t3code). See
+[`UPSTREAM_DIVERGENCE.md`](./UPSTREAM_DIVERGENCE.md) for the running log of which upstream
+changes we've pulled in, which we've deliberately skipped, and why. Update it whenever you
+review or merge upstream commits. Standing policy: **do not pull Android / native-mobile
+changes** — we are not investing in the mobile app on this fork.
+
 ## Core Priorities
 
 1. Performance first.
