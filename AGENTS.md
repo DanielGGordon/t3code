@@ -38,7 +38,7 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
 
-## Claude Transcript Import (15-minute timer on the dancode host)
+## Claude Transcript Import (15-minute timer on the T3 Code host)
 
 A systemd **user** timer, `t3-claude-import.timer`, runs every 15 minutes on the host that serves
 T3 (`journalctl --user -u t3-claude-import.service` for logs). It executes
