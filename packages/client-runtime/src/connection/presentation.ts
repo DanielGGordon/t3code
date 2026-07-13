@@ -76,6 +76,28 @@ export function connectionStatusText(connection: EnvironmentConnectionPresentati
   }
 }
 
+/**
+ * Short, single-line status headline without the failure reason. Pair with the
+ * connection error as a separate description so the reason is not duplicated
+ * (e.g. in the composer's environment-unavailable banner).
+ */
+export function connectionStatusHeadline(connection: EnvironmentConnectionPresentation): string {
+  switch (connection.phase) {
+    case "available":
+      return "Available";
+    case "offline":
+      return "Offline";
+    case "connecting":
+      return "Connecting...";
+    case "reconnecting":
+      return connection.error ? "Failed to connect. Reconnecting..." : "Reconnecting...";
+    case "connected":
+      return "Connected";
+    case "error":
+      return "Connection failed";
+  }
+}
+
 export function presentEnvironmentConnection(
   state: SupervisorConnectionState,
 ): EnvironmentConnectionPresentation {

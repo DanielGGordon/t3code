@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -32,6 +32,8 @@ export interface ComposerBannerStackItem {
   readonly actions?: ReactNode;
   readonly dismissLabel?: string;
   readonly onDismiss?: () => void;
+  /** When true, the banner can be minimized to a single line via a toggle. */
+  readonly collapsible?: boolean;
 }
 
 interface ComposerBannerStackProps {
@@ -159,22 +161,65 @@ function ComposerBannerStackAlert({
   readonly exiting: boolean;
   readonly onDismissRequest: () => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const dismissOnly = item.onDismiss && !item.actions;
+
+  // Minimized: a single line with the title and an expand toggle. Keeps the
+  // dismiss control available so the banner can still be cleared while collapsed.
+  if (item.collapsible && collapsed) {
+    return (
+      <Alert variant={item.variant}>
+        {item.icon}
+        <AlertTitle className="truncate">{item.title}</AlertTitle>
+        <AlertAction>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Expand message"
+            onClick={() => setCollapsed(false)}
+          >
+            <ChevronDownIcon className="size-3.5" />
+          </Button>
+          {item.onDismiss ? (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={item.dismissLabel ?? "Dismiss warning"}
+              disabled={exiting}
+              onClick={onDismissRequest}
+            >
+              <XIcon className="size-3.5" />
+            </Button>
+          ) : null}
+        </AlertAction>
+      </Alert>
+    );
+  }
 
   return (
     <Alert variant={item.variant}>
       {item.icon}
       <AlertTitle>{item.title}</AlertTitle>
       {item.description ? <AlertDescription>{item.description}</AlertDescription> : null}
-      {item.actions || item.onDismiss ? (
+      {item.actions || item.onDismiss || item.collapsible ? (
         <AlertAction
           className={
-            dismissOnly
-              ? "max-sm:col-start-3 max-sm:row-start-1 max-sm:mt-0 max-sm:self-start"
-              : undefined
+            // Stack the actions on their own full-width row below the message on
+            // narrow screens so the text is not squeezed into a tall column.
+            dismissOnly ? "max-sm:self-start" : "max-sm:w-full max-sm:justify-end"
           }
         >
           {item.actions}
+          {item.collapsible ? (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Minimize message"
+              onClick={() => setCollapsed(true)}
+            >
+              <ChevronUpIcon className="size-3.5" />
+            </Button>
+          ) : null}
           {item.onDismiss ? (
             <Button
               size="icon-xs"
