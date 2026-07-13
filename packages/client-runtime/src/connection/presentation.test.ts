@@ -11,6 +11,7 @@ import {
 import {
   connectionCatalogDisplayUrl,
   connectionPhaseMessage,
+  connectionStatusHeadline,
   connectionStatusText,
   presentEnvironmentConnection,
   presentConnectionState,
@@ -130,6 +131,26 @@ describe("connection presentation", () => {
         traceId: "trace-retry",
       }),
     ).toBe("Failed to connect. Reconnecting... Reason: Relay request timed out.");
+  });
+
+  it("omits the failure reason from the status headline", () => {
+    expect(
+      connectionStatusHeadline({
+        phase: "reconnecting",
+        error: "Relay request timed out.",
+        traceId: "trace-retry",
+      }),
+    ).toBe("Failed to connect. Reconnecting...");
+    expect(
+      connectionStatusHeadline({ phase: "reconnecting", error: null, traceId: null }),
+    ).toBe("Reconnecting...");
+    expect(
+      connectionStatusHeadline({
+        phase: "error",
+        error: "Relay request timed out.",
+        traceId: "trace-retry",
+      }),
+    ).toBe("Connection failed");
   });
 
   it("presents the supervisor's offline state without consulting shell state", () => {

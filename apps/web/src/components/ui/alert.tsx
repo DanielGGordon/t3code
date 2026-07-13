@@ -71,7 +71,7 @@ function Alert({
       role="alert"
       {...props}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {icon.length > 0 && (
           <div className="flex size-4 shrink-0 items-center justify-center [&>svg]:size-full">
             {icon}
@@ -80,9 +80,7 @@ function Alert({
         {content.length > 0 && (
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">{content}</div>
         )}
-        {action.length > 0 && (
-          <div className="flex shrink-0 items-center self-center">{action}</div>
-        )}
+        {action}
       </div>
     </div>
   );
@@ -103,7 +101,13 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
 }
 
 function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex gap-1", className)} data-slot="alert-action" {...props} />;
+  return (
+    <div
+      className={cn("flex shrink-0 items-center gap-1 self-center", className)}
+      data-slot="alert-action"
+      {...props}
+    />
+  );
 }
 
 AlertTitle.displayName = "AlertTitle";

@@ -22,7 +22,7 @@ import {
   TerminalOpenInput,
 } from "@t3tools/contracts";
 import {
-  connectionStatusText,
+  connectionStatusHeadline,
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import {
@@ -1697,7 +1697,8 @@ function ChatViewContent(props: ChatViewProps) {
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: connection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusText(connection)}`,
+        collapsible: true,
+        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusHeadline(connection)}`,
         description:
           connection.error ??
           "Reconnect this environment before sending messages or running actions.",
