@@ -21,8 +21,8 @@ import {
   unitForExternal,
 } from "./test-deploy-lib.ts";
 
-const CERT = "/etc/caddy/dancode-server.crt";
-const KEY = "/etc/caddy/dancode-server.key";
+const CERT = "/etc/caddy/t3code-server.crt";
+const KEY = "/etc/caddy/t3code-server.key";
 
 function blockFor(externalPort: number, loopbackPort: number): string {
   return `https://${HOST}:${externalPort} {
