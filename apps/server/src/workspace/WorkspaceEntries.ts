@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
 
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -152,16 +151,6 @@ function isMissingPathError(cause: unknown): boolean {
   return code === "ENOENT" || code === "ENOTDIR";
 }
 
-function expandHomePath(input: string, path: Path.Path): string {
-  if (input === "~") {
-    return NodeOS.homedir();
-  }
-  if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return path.join(NodeOS.homedir(), input.slice(2));
-  }
-  return input;
-}
-
 const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(function* (
   input: FilesystemBrowseInput,
   path: Path.Path,
@@ -176,7 +165,7 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
   }
 
   if (!isExplicitRelativePath(input.partialPath)) {
-    return path.resolve(expandHomePath(input.partialPath, path));
+    return path.resolve(WorkspacePaths.expandHomePath(input.partialPath, path));
   }
 
   if (!input.cwd) {
@@ -184,7 +173,7 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
       partialPath: input.partialPath,
     });
   }
-  return path.resolve(expandHomePath(input.cwd, path), input.partialPath);
+  return path.resolve(WorkspacePaths.expandHomePath(input.cwd, path), input.partialPath);
 });
 
 export const make = Effect.gen(function* () {
@@ -301,7 +290,7 @@ export const make = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.list();
+        return yield* searchIndex.list(input.showDotfiles ?? false);
       }).pipe(Effect.provide(workspaceSearchIndexes.get(normalizedCwd)));
     },
   );

@@ -3,6 +3,7 @@ import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  fileSurfaceId,
   migratePersistedRightPanelState,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
@@ -188,6 +189,37 @@ describe("rightPanelStore", () => {
         },
       ],
     });
+  });
+
+  it("binds explorer file surfaces to their workspace root", () => {
+    useRightPanelStore.getState().openFile(refA, ".env", undefined, "~");
+    useRightPanelStore.getState().openFile(refA, ".env", undefined, "/workspace/project");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "file:%2Fworkspace%2Fproject:.env",
+      surfaces: [
+        {
+          id: "file:~:.env",
+          kind: "file",
+          relativePath: ".env",
+          cwd: "~",
+          revealLine: null,
+          revealRequestId: 1,
+        },
+        {
+          id: "file:%2Fworkspace%2Fproject:.env",
+          kind: "file",
+          relativePath: ".env",
+          cwd: "/workspace/project",
+          revealLine: null,
+          revealRequestId: 1,
+        },
+      ],
+    });
+    expect(fileSurfaceId(".env", "/workspace/project")).toBe(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)?.id,
+    );
   });
 
   it("removes persisted file surfaces when their workspace no longer exists", () => {

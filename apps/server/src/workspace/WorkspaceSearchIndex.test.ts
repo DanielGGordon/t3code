@@ -1,4 +1,8 @@
 import { FileFinder } from "@ff-labs/fff-node";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -154,6 +158,45 @@ it.effect("keeps returned search diagnostics out of the cause chain", () =>
         reason: "native refresh rejected",
       });
       expect(refreshError.cause).toBeUndefined();
+    }),
+  ),
+);
+
+it.effect("walks dot-directories without descending into .git", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cwd = yield* Effect.acquireRelease(
+        Effect.tryPromise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-"))),
+        (directory) =>
+          Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+      );
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(cwd, ".github", "workflows"), { recursive: true });
+        await NodeFSP.mkdir(NodePath.join(cwd, ".git"), { recursive: true });
+        await NodeFSP.writeFile(NodePath.join(cwd, ".github", "workflows", "ci.yml"), "name: CI");
+        await NodeFSP.writeFile(NodePath.join(cwd, ".git", "config"), "secret");
+        await NodeFSP.writeFile(NodePath.join(cwd, ".env"), "TOKEN=test");
+      });
+      const finder = {
+        destroy: vi.fn(),
+        isScanning: vi.fn(() => false),
+        mixedSearch: vi.fn(() => ({
+          ok: true,
+          value: { items: [], totalMatched: 0 },
+        })),
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+      const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
+      const result = yield* searchIndex.list(true);
+
+      expect(result.entries).toEqual([
+        { path: ".env", kind: "file" },
+        { path: ".github", kind: "directory" },
+        { path: ".github/workflows", kind: "directory" },
+        { path: ".github/workflows/ci.yml", kind: "file" },
+      ]);
+      expect(result.truncated).toBe(false);
     }),
   ),
 );

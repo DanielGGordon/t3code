@@ -135,19 +135,20 @@ export const make = Effect.gen(function* () {
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
   )(function* (input) {
+    const workspaceRoot = path.resolve(WorkspacePaths.expandHomePath(input.cwd.trim(), path));
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
-      workspaceRoot: input.cwd,
+      workspaceRoot,
       relativePath: input.relativePath,
     });
 
     const realWorkspaceRoot = yield* Effect.tryPromise({
-      try: () => NodeFSP.realpath(input.cwd),
+      try: () => NodeFSP.realpath(workspaceRoot),
       catch: (cause) =>
         new WorkspaceFileSystemOperationError({
           workspaceRoot: input.cwd,
           relativePath: input.relativePath,
           resolvedPath: target.absolutePath,
-          operationPath: input.cwd,
+          operationPath: workspaceRoot,
           operation: "realpath-workspace-root",
           cause,
         }),
@@ -262,8 +263,9 @@ export const make = Effect.gen(function* () {
   const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
   )(function* (input) {
+    const workspaceRoot = path.resolve(WorkspacePaths.expandHomePath(input.cwd.trim(), path));
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
-      workspaceRoot: input.cwd,
+      workspaceRoot,
       relativePath: input.relativePath,
     });
 

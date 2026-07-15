@@ -1,4 +1,7 @@
 import { FileFinder, type MixedItem, type MixedSearchResult } from "@ff-labs/fff-node";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,6 +20,7 @@ const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
 const WORKSPACE_INDEX_SCAN_TIMEOUT = "15 seconds";
 const WORKSPACE_INDEX_IDLE_TTL = "15 minutes";
 const WORKSPACE_INDEX_SCAN_POLL_INTERVAL = "50 millis";
+const DOTFILE_SCAN_DENYLIST = new Set([".git", "node_modules"]);
 
 export class WorkspaceSearchIndexCreateFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexCreateFailed>()(
   "WorkspaceSearchIndexCreateFailed",
@@ -92,7 +96,9 @@ export type WorkspaceSearchIndexError =
 export class WorkspaceSearchIndex extends Context.Service<
   WorkspaceSearchIndex,
   {
-    readonly list: () => Effect.Effect<ProjectListEntriesResult, WorkspaceSearchIndexSearchFailed>;
+    readonly list: (
+      showDotfiles: boolean,
+    ) => Effect.Effect<ProjectListEntriesResult, WorkspaceSearchIndexSearchFailed>;
     readonly search: (
       query: string,
       limit: number,
@@ -168,6 +174,66 @@ function withDirectoryAncestors(entries: ReadonlyArray<ProjectEntry>): ProjectEn
   }
   return [...entryByPath.values()];
 }
+
+const supplementDotfiles = Effect.fn("WorkspaceSearchIndex.supplementDotfiles")(function* (
+  cwd: string,
+  entries: ReadonlyArray<ProjectEntry>,
+) {
+  const entryByPath = new Map(entries.map((entry) => [entry.path, entry]));
+  const queue = [
+    { path: "", walkContents: false },
+    ...entries
+      .filter((entry) => entry.kind === "directory")
+      .map((entry) => ({ path: entry.path, walkContents: false })),
+  ];
+  const queuedPaths = new Set(queue.map((entry) => entry.path));
+  let queueIndex = 0;
+  let truncated = false;
+
+  while (queueIndex < queue.length && entryByPath.size < WORKSPACE_INDEX_MAX_ENTRIES) {
+    const batch = queue.slice(queueIndex, queueIndex + 16);
+    queueIndex += batch.length;
+    const batchEntries = yield* Effect.forEach(
+      batch,
+      (directory) =>
+        Effect.tryPromise(() =>
+          NodeFSP.readdir(NodePath.join(cwd, directory.path), { withFileTypes: true }),
+        ).pipe(Effect.orElseSucceed(() => [])),
+      { concurrency: "unbounded" },
+    );
+
+    for (let index = 0; index < batch.length; index += 1) {
+      const directory = batch[index];
+      if (!directory) continue;
+      for (const dirent of batchEntries[index] ?? []) {
+        if (DOTFILE_SCAN_DENYLIST.has(dirent.name)) continue;
+        if (!directory.walkContents && !dirent.name.startsWith(".")) continue;
+        const entryPath = toPosixPath(NodePath.join(directory.path, dirent.name));
+        if (!entryByPath.has(entryPath)) {
+          if (entryByPath.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
+            truncated = true;
+            break;
+          }
+          entryByPath.set(entryPath, {
+            path: entryPath,
+            kind: dirent.isDirectory() ? "directory" : "file",
+          });
+        }
+        if (dirent.isDirectory() && !queuedPaths.has(entryPath)) {
+          if (entryByPath.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
+            truncated = true;
+            break;
+          }
+          queuedPaths.add(entryPath);
+          queue.push({ path: entryPath, walkContents: true });
+        }
+      }
+      if (truncated) break;
+    }
+  }
+  if (queueIndex < queue.length) truncated = true;
+  return { entries: [...entryByPath.values()], truncated };
+});
 
 const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (cwd: string) {
   const result = yield* Effect.try({
@@ -286,16 +352,21 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
   });
 
   const list: WorkspaceSearchIndex["Service"]["list"] = Effect.fn("WorkspaceSearchIndex.list")(
-    function* () {
+    function* (showDotfiles) {
       const result = yield* runMixedSearch("", WORKSPACE_INDEX_PAGE_SIZE);
       const mapped = mapMixedSearchResult(result, WORKSPACE_INDEX_MAX_ENTRIES);
-      const sortedEntries = withDirectoryAncestors(mapped.entries).toSorted((left, right) =>
+      const entriesWithAncestors = withDirectoryAncestors(mapped.entries);
+      const supplemented = showDotfiles
+        ? yield* supplementDotfiles(cwd, entriesWithAncestors)
+        : { entries: entriesWithAncestors, truncated: false };
+      const sortedEntries = supplemented.entries.toSorted((left, right) =>
         left.path.localeCompare(right.path),
       );
       const entries = sortedEntries.slice(0, WORKSPACE_INDEX_MAX_ENTRIES);
       return {
         entries,
-        truncated: mapped.truncated || entries.length < sortedEntries.length,
+        truncated:
+          mapped.truncated || supplemented.truncated || entries.length < sortedEntries.length,
       };
     },
   );
