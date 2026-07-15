@@ -1,4 +1,10 @@
-import { ActivityIcon, GitBranchIcon, PlayIcon, SquareArrowOutUpRightIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  FileKeyIcon,
+  GitBranchIcon,
+  PlayIcon,
+  SquareArrowOutUpRightIcon,
+} from "lucide-react";
 import { type ReactNode } from "react";
 import {
   type ClientSettings,
@@ -64,6 +70,7 @@ export function FeaturesSettingsPanel() {
     headerGitActionsVisibility: s.headerGitActionsVisibility,
     headerOpenInEditorVisibility: s.headerOpenInEditorVisibility,
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
+    fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
   }));
   const updateSettings = useUpdateClientSettings();
@@ -105,6 +112,24 @@ export function FeaturesSettingsPanel() {
             />
           );
         })}
+      </SettingsSection>
+      <SettingsSection title="File explorer">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <FileKeyIcon className="size-3.5" />
+              Show dotfiles in the file explorer
+            </span>
+          }
+          description="Show hidden files such as .env and .gitignore in the project tree."
+          control={
+            <Switch
+              checked={settings.fileExplorerShowDotfiles}
+              onCheckedChange={(checked) => updateSettings({ fileExplorerShowDotfiles: checked })}
+              aria-label="Show dotfiles in the file explorer"
+            />
+          }
+        />
       </SettingsSection>
       <SettingsSection title="Sidebar">
         <SettingsRow

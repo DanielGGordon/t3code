@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeOS from "node:os";
 import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -168,6 +170,27 @@ it.layer(TestLayer)("WorkspacePathsLive", (it) => {
   });
 
   describe("resolveRelativePathWithinRoot", () => {
+    it.effect("expands home-relative workspace roots", () =>
+      Effect.gen(function* () {
+        const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+        const path = yield* Path.Path;
+
+        const homeRoot = yield* workspacePaths.resolveRelativePathWithinRoot({
+          workspaceRoot: "~",
+          relativePath: "notes/todo.md",
+        });
+        const homeSubdirectory = yield* workspacePaths.resolveRelativePathWithinRoot({
+          workspaceRoot: "~/projects",
+          relativePath: "README.md",
+        });
+
+        expect(homeRoot.absolutePath).toBe(path.join(NodeOS.homedir(), "notes/todo.md"));
+        expect(homeSubdirectory.absolutePath).toBe(
+          path.join(NodeOS.homedir(), "projects/README.md"),
+        );
+      }),
+    );
+
     it.effect("resolves relative paths inside the workspace root", () =>
       Effect.gen(function* () {
         const workspacePaths = yield* WorkspacePaths.WorkspacePaths;

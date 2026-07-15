@@ -72,6 +72,7 @@ import {
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
   cwd: string;
+  projectRoot: string;
   projectName: string;
   relativePath: string | null;
   threadRef: ScopedThreadRef;
@@ -80,8 +81,15 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   revealLine: number | null;
   revealRequestId: number;
-  onOpenFile: (relativePath: string) => void;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  onOpenFile: (relativePath: string, cwd: string) => void;
+  onPendingChange: (relativePath: string, cwd: string, pending: boolean) => void;
+}
+
+interface FilePreviewPanelContentProps extends FilePreviewPanelProps {
+  explorerRoot: string;
+  explorerReRooted: boolean;
+  onRootChange: (cwd: string) => void;
+  onRootReset: () => void;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
@@ -277,6 +285,7 @@ function useFileLineReveal(
 interface EditableFileSurfaceProps {
   environmentId: EnvironmentId;
   cwd: string;
+  projectRoot: string;
   relativePath: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
   contents: string;
@@ -284,7 +293,7 @@ interface EditableFileSurfaceProps {
   revealRequestId: number;
   wordWrap: boolean;
   onPostRender: FilePostRender;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  onPendingChange: (relativePath: string, cwd: string, pending: boolean) => void;
 }
 
 interface FileSelectionOverride {
@@ -306,7 +315,7 @@ function useFileSaveCoordinator({
     () =>
       new FileSaveCoordinator({
         debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => onPendingChange(relativePath, pending),
+        onPendingChange: (pending) => onPendingChange(relativePath, cwd, pending),
         persist: (nextContents) =>
           writeFile({
             environmentId,
@@ -326,6 +335,7 @@ function useFileSaveCoordinator({
 function EditableFileSurface({
   environmentId,
   cwd,
+  projectRoot,
   relativePath,
   composerDraftTarget,
   contents,
@@ -355,6 +365,8 @@ function EditableFileSurface({
     relativePath,
     onPendingChange,
   });
+  const reviewFilePath =
+    cwd === projectRoot ? relativePath : resolvePathLinkTarget(relativePath, cwd);
   /* The attached editor owns the rendered document: it patches lines in place
    * and expects the `file` prop to keep a stable identity across its own
    * edits. Rebuilding the file object per keystroke (the edited contents
@@ -396,7 +408,7 @@ function EditableFileSurface({
                   composerDraftTarget,
                   buildFileReviewComment({
                     id: entry.id,
-                    filePath: relativePath,
+                    filePath: reviewFilePath,
                     startLine: entry.startLine,
                     endLine: entry.endLine,
                     text: entry.text,
@@ -408,7 +420,15 @@ function EditableFileSurface({
           }
         },
       }),
-    [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
+    [
+      addReviewComment,
+      composerDraftTarget,
+      cwd,
+      environmentId,
+      relativePath,
+      reviewFilePath,
+      saveCoordinator,
+    ],
   );
 
   useEffect(
@@ -443,7 +463,7 @@ function EditableFileSurface({
           composerDraftTarget,
           buildFileReviewComment({
             id: entry.id,
-            filePath: relativePath,
+            filePath: reviewFilePath,
             startLine: entry.startLine,
             endLine: entry.endLine,
             text,
@@ -469,7 +489,7 @@ function EditableFileSurface({
       composerDraftTarget,
       contents,
       lineAnnotations,
-      relativePath,
+      reviewFilePath,
       setSelectedRange,
     ],
   );
@@ -613,6 +633,7 @@ function RenderedMarkdownSurface({
 }: Omit<
   EditableFileSurfaceProps,
   | "viewerTheme"
+  | "projectRoot"
   | "composerDraftTarget"
   | "revealLine"
   | "revealRequestId"
@@ -670,6 +691,7 @@ function initialInvertViewerTheme(): boolean {
 function FilePreviewPanelContent({
   environmentId,
   cwd,
+  projectRoot,
   projectName,
   relativePath,
   threadRef,
@@ -680,7 +702,11 @@ function FilePreviewPanelContent({
   revealRequestId,
   onOpenFile,
   onPendingChange,
-}: FilePreviewPanelProps) {
+  explorerRoot,
+  explorerReRooted,
+  onRootChange,
+  onRootReset,
+}: FilePreviewPanelContentProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -970,6 +996,7 @@ function FilePreviewPanelContent({
                 key={`${relativePath}:${viewerTheme}`}
                 environmentId={environmentId}
                 cwd={cwd}
+                projectRoot={projectRoot}
                 relativePath={relativePath}
                 composerDraftTarget={composerDraftTarget}
                 contents={file.data.contents}
@@ -992,10 +1019,13 @@ function FilePreviewPanelContent({
             )}
           >
             <FileBrowserPanel
-              key={`${environmentId}:${cwd}`}
+              key={`${environmentId}:${explorerRoot}`}
               environmentId={environmentId}
-              cwd={cwd}
+              cwd={explorerRoot}
               projectName={projectName}
+              reRooted={explorerReRooted}
+              onRootChange={onRootChange}
+              onRootReset={onRootReset}
               onOpenFile={onOpenFile}
             />
           </aside>
@@ -1007,9 +1037,18 @@ function FilePreviewPanelContent({
 
 export default function FilePreviewPanel(props: FilePreviewPanelProps) {
   const [workerPool] = useState(getFileViewerWorkerPool);
+  const [explorerRootOverride, setExplorerRootOverride] = useState<string | null>(null);
+  useEffect(() => setExplorerRootOverride(null), [props.projectRoot]);
+  const explorerRoot = explorerRootOverride ?? props.projectRoot;
   return (
     <WorkerPoolContext.Provider value={workerPool}>
-      <FilePreviewPanelContent {...props} />
+      <FilePreviewPanelContent
+        {...props}
+        explorerRoot={explorerRoot}
+        explorerReRooted={explorerRootOverride !== null}
+        onRootChange={setExplorerRootOverride}
+        onRootReset={() => setExplorerRootOverride(null)}
+      />
     </WorkerPoolContext.Provider>
   );
 }

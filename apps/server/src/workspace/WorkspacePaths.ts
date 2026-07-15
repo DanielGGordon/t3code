@@ -121,7 +121,7 @@ function toPosixRelativePath(input: string): string {
   return input.replaceAll("\\", "/");
 }
 
-function expandHomePath(input: string, path: Path.Path): string {
+export function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
     return NodeOS.homedir();
   }
@@ -209,8 +209,9 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const absolutePath = path.resolve(input.workspaceRoot, normalizedInputPath);
-      const relativeToRoot = toPosixRelativePath(path.relative(input.workspaceRoot, absolutePath));
+      const workspaceRoot = path.resolve(expandHomePath(input.workspaceRoot.trim(), path));
+      const absolutePath = path.resolve(workspaceRoot, normalizedInputPath);
+      const relativeToRoot = toPosixRelativePath(path.relative(workspaceRoot, absolutePath));
       if (
         relativeToRoot.length === 0 ||
         relativeToRoot === "." ||
