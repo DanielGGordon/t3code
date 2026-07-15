@@ -15,7 +15,7 @@ import type {
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
 
-const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
+export const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
 const WORKSPACE_INDEX_SCAN_TIMEOUT = "15 seconds";
 const WORKSPACE_INDEX_IDLE_TTL = "15 minutes";
@@ -175,11 +175,21 @@ function withDirectoryAncestors(entries: ReadonlyArray<ProjectEntry>): ProjectEn
   return [...entryByPath.values()];
 }
 
+/**
+ * Walk the filesystem to discover the dotfiles the native finder omits and
+ * return ONLY the newly discovered entries. `entries` (the finder's results) is
+ * used to avoid re-adding known paths and to seed the directories to scan, but
+ * it does not count against this walk's own entry budget — otherwise a large
+ * tree (e.g. the home directory) that already fills the finder's cap would
+ * starve dotfile discovery entirely. Prioritisation of these entries against the
+ * native results happens in `list`.
+ */
 const supplementDotfiles = Effect.fn("WorkspaceSearchIndex.supplementDotfiles")(function* (
   cwd: string,
   entries: ReadonlyArray<ProjectEntry>,
 ) {
-  const entryByPath = new Map(entries.map((entry) => [entry.path, entry]));
+  const existingPaths = new Set(entries.map((entry) => entry.path));
+  const discovered = new Map<string, ProjectEntry>();
   const queue = [
     { path: "", walkContents: false },
     ...entries
@@ -190,7 +200,7 @@ const supplementDotfiles = Effect.fn("WorkspaceSearchIndex.supplementDotfiles")(
   let queueIndex = 0;
   let truncated = false;
 
-  while (queueIndex < queue.length && entryByPath.size < WORKSPACE_INDEX_MAX_ENTRIES) {
+  while (queueIndex < queue.length && discovered.size < WORKSPACE_INDEX_MAX_ENTRIES) {
     const batch = queue.slice(queueIndex, queueIndex + 16);
     queueIndex += batch.length;
     const batchEntries = yield* Effect.forEach(
@@ -209,21 +219,17 @@ const supplementDotfiles = Effect.fn("WorkspaceSearchIndex.supplementDotfiles")(
         if (DOTFILE_SCAN_DENYLIST.has(dirent.name)) continue;
         if (!directory.walkContents && !dirent.name.startsWith(".")) continue;
         const entryPath = toPosixPath(NodePath.join(directory.path, dirent.name));
-        if (!entryByPath.has(entryPath)) {
-          if (entryByPath.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
+        if (!existingPaths.has(entryPath) && !discovered.has(entryPath)) {
+          if (discovered.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
             truncated = true;
             break;
           }
-          entryByPath.set(entryPath, {
+          discovered.set(entryPath, {
             path: entryPath,
             kind: dirent.isDirectory() ? "directory" : "file",
           });
         }
         if (dirent.isDirectory() && !queuedPaths.has(entryPath)) {
-          if (entryByPath.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
-            truncated = true;
-            break;
-          }
           queuedPaths.add(entryPath);
           queue.push({ path: entryPath, walkContents: true });
         }
@@ -232,7 +238,7 @@ const supplementDotfiles = Effect.fn("WorkspaceSearchIndex.supplementDotfiles")(
     }
   }
   if (queueIndex < queue.length) truncated = true;
-  return { entries: [...entryByPath.values()], truncated };
+  return { entries: [...discovered.values()], truncated };
 });
 
 const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (cwd: string) {
@@ -355,19 +361,36 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
     function* (showDotfiles) {
       const result = yield* runMixedSearch("", WORKSPACE_INDEX_PAGE_SIZE);
       const mapped = mapMixedSearchResult(result, WORKSPACE_INDEX_MAX_ENTRIES);
-      const entriesWithAncestors = withDirectoryAncestors(mapped.entries);
-      const supplemented = showDotfiles
-        ? yield* supplementDotfiles(cwd, entriesWithAncestors)
-        : { entries: entriesWithAncestors, truncated: false };
-      const sortedEntries = supplemented.entries.toSorted((left, right) =>
+      const nativeEntries = withDirectoryAncestors(mapped.entries);
+      if (!showDotfiles) {
+        const sortedEntries = nativeEntries.toSorted((left, right) =>
+          left.path.localeCompare(right.path),
+        );
+        const entries = sortedEntries.slice(0, WORKSPACE_INDEX_MAX_ENTRIES);
+        return {
+          entries,
+          truncated: mapped.truncated || entries.length < sortedEntries.length,
+        };
+      }
+
+      const supplemented = yield* supplementDotfiles(cwd, nativeEntries);
+      // Insert the dotfiles first so a large native (gitignore-filtered) tree —
+      // e.g. the home directory, which alone can exceed the entry cap — can't
+      // exhaust the budget before any dotfiles make it into the listing.
+      const entryByPath = new Map(supplemented.entries.map((entry) => [entry.path, entry]));
+      let truncated = mapped.truncated || supplemented.truncated;
+      for (const entry of nativeEntries) {
+        if (entryByPath.has(entry.path)) continue;
+        if (entryByPath.size >= WORKSPACE_INDEX_MAX_ENTRIES) {
+          truncated = true;
+          break;
+        }
+        entryByPath.set(entry.path, entry);
+      }
+      const entries = [...entryByPath.values()].toSorted((left, right) =>
         left.path.localeCompare(right.path),
       );
-      const entries = sortedEntries.slice(0, WORKSPACE_INDEX_MAX_ENTRIES);
-      return {
-        entries,
-        truncated:
-          mapped.truncated || supplemented.truncated || entries.length < sortedEntries.length,
-      };
+      return { entries, truncated };
     },
   );
 

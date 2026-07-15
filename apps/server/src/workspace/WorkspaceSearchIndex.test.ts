@@ -200,3 +200,42 @@ it.effect("walks dot-directories without descending into .git", () =>
     }),
   ),
 );
+
+it.effect("surfaces dotfiles even when the native results already fill the entry cap", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cwd = yield* Effect.acquireRelease(
+        Effect.tryPromise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-cap-"))),
+        (directory) =>
+          Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(cwd, ".env"), "TOKEN=test"));
+
+      // Simulate a tree (e.g. the home directory) whose gitignore-filtered
+      // native scan alone reaches the entry cap. Before dotfiles were given
+      // priority, this starved dotfile discovery so `.env` never appeared.
+      const nativeItems = Array.from(
+        { length: WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES },
+        (_, index) => ({ type: "file", item: { relativePath: `native-${index}.txt` } }),
+      );
+      const finder = {
+        destroy: vi.fn(),
+        isScanning: vi.fn(() => false),
+        mixedSearch: vi.fn(() => ({
+          ok: true,
+          value: { items: nativeItems, totalMatched: nativeItems.length },
+        })),
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+      const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
+      const result = yield* searchIndex.list(true);
+
+      expect(result.entries).toContainEqual({ path: ".env", kind: "file" });
+      expect(result.entries.length).toBeLessThanOrEqual(
+        WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES,
+      );
+      expect(result.truncated).toBe(true);
+    }),
+  ),
+);
