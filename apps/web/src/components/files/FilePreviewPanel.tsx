@@ -4,7 +4,7 @@ import type {
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
+import { VirtualizedFile, type FileContents, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
 import {
   EditorProvider,
@@ -355,12 +355,35 @@ function EditableFileSurface({
     relativePath,
     onPendingChange,
   });
+  /* The attached editor owns the rendered document: it patches lines in place
+   * and expects the `file` prop to keep a stable identity across its own
+   * edits. Rebuilding the file object per keystroke (the edited contents
+   * round-trip through the optimistic file atom) makes Pierre discard the
+   * DOM and its TextDocument/EditStack on every character — dropping focus,
+   * caret, and undo history. So the object identity only changes when the
+   * contents changed somewhere other than this editor (see the effect
+   * below); the editor's own edits instead mutate `contents` in place so
+   * every reader of the file object sees the live document. No cacheKey:
+   * one would pin Pierre's per-file line cache to the stale creation-time
+   * contents. */
+  const [editorFile, setEditorFile] = useState<FileContents>(() => ({
+    name: relativePath,
+    contents,
+  }));
+  const editorFileRef = useRef(editorFile);
+  editorFileRef.current = editorFile;
+  useEffect(() => {
+    if (editorFileRef.current.contents === contents) return;
+    setEditorFile({ name: relativePath, contents });
+  }, [contents, relativePath]);
   const editor = useMemo(
     () =>
       new Editor<FileCommentAnnotationGroup>({
         onChange: (file, nextLineAnnotations) => {
-          setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
-          saveCoordinator.change(file.contents);
+          const nextContents = file.contents;
+          editorFileRef.current.contents = nextContents;
+          setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
+          saveCoordinator.change(nextContents);
           if (nextLineAnnotations) {
             const remapped = remapFileCommentAnnotations(
               nextLineAnnotations as FileCommentLineAnnotation[],
@@ -377,7 +400,7 @@ function EditableFileSurface({
                     startLine: entry.startLine,
                     endLine: entry.endLine,
                     text: entry.text,
-                    contents: file.contents,
+                    contents: nextContents,
                   }),
                 );
               }
@@ -540,11 +563,7 @@ function EditableFileSurface({
           }}
         >
           <File<FileCommentAnnotationGroup>
-            file={{
-              name: relativePath,
-              contents,
-              cacheKey: projectFileCacheKey(cwd, relativePath, contents),
-            }}
+            file={editorFile}
             options={{
               disableFileHeader: true,
               enableGutterUtility: !hasOpenCommentForm,
