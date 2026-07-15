@@ -14,8 +14,11 @@ import type {
   FilesystemBrowseResult,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectListSkillsInput,
+  ProjectListSkillsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSkill,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
@@ -90,12 +93,64 @@ export class WorkspaceEntries extends Context.Service<
     readonly list: (
       input: ProjectListEntriesInput,
     ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
+    readonly listSkills: (
+      input: ProjectListSkillsInput,
+    ) => Effect.Effect<ProjectListSkillsResult, WorkspaceEntriesError>;
     readonly search: (
       input: ProjectSearchEntriesInput,
     ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
 >()("t3/workspace/WorkspaceEntries") {}
+
+const SKILL_MANIFEST_FILENAME = "SKILL.md";
+const SKILLS_DIRECTORY_SEGMENTS = [".claude", "skills"] as const;
+const SKILL_MANIFEST_MAX_BYTES = 64 * 1024;
+
+/**
+ * Extract `name` / `description` from a SKILL.md YAML frontmatter block. This is
+ * intentionally minimal (single-line scalar values only) — enough to label a
+ * project skill in the composer without pulling in a YAML dependency.
+ */
+function parseSkillFrontmatter(contents: string): {
+  readonly name?: string;
+  readonly description?: string;
+} {
+  const normalized = contents.replace(/^\uFEFF/, "");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(normalized);
+  const frontmatterBlock = match?.[1];
+  if (frontmatterBlock === undefined) {
+    return {};
+  }
+  const result: { name?: string; description?: string } = {};
+  for (const rawLine of frontmatterBlock.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separatorIndex).trim().toLowerCase();
+    if (key !== "name" && key !== "description") {
+      continue;
+    }
+    let value = line.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (value) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function isMissingPathError(cause: unknown): boolean {
+  const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
@@ -251,7 +306,51 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return WorkspaceEntries.of({ browse, list, refresh, search });
+  const listSkills: WorkspaceEntries["Service"]["listSkills"] = Effect.fn(
+    "WorkspaceEntries.listSkills",
+  )(function* (input) {
+    // Best-effort: an unresolvable root simply yields no project skills rather
+    // than surfacing an error into the composer autocomplete path.
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd).pipe(
+      Effect.orElseSucceed(() => input.cwd),
+    );
+    const skillsRoot = path.join(normalizedCwd, ...SKILLS_DIRECTORY_SEGMENTS);
+
+    const dirents = yield* Effect.tryPromise(() =>
+      NodeFSP.readdir(skillsRoot, { withFileTypes: true }),
+    ).pipe(Effect.orElseSucceed(() => []));
+
+    const skills: Array<ProjectSkill> = [];
+    for (const dirent of dirents) {
+      if (!dirent.isDirectory() || dirent.name.startsWith(".")) {
+        continue;
+      }
+      const manifestPath = path.join(skillsRoot, dirent.name, SKILL_MANIFEST_FILENAME);
+      const contents = yield* Effect.tryPromise(() =>
+        NodeFSP.readFile(manifestPath, { encoding: "utf8" }),
+      ).pipe(
+        Effect.map((raw) => raw.slice(0, SKILL_MANIFEST_MAX_BYTES)),
+        Effect.catchIf(isMissingPathError, () => Effect.succeed(null)),
+        Effect.orElseSucceed(() => null),
+      );
+      if (contents === null) {
+        // Skills require a SKILL.md manifest; skip directories without one.
+        continue;
+      }
+      const frontmatter = parseSkillFrontmatter(contents);
+      const name = frontmatter.name?.trim() || dirent.name;
+      skills.push({
+        name,
+        path: manifestPath,
+        ...(frontmatter.description ? { description: frontmatter.description } : {}),
+      });
+    }
+
+    skills.sort((left, right) => left.name.localeCompare(right.name));
+    return { skills };
+  });
+
+  return WorkspaceEntries.of({ browse, list, listSkills, refresh, search });
 });
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(

@@ -40,6 +40,7 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   ProjectListEntriesError,
+  ProjectListSkillsError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -311,6 +312,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sourceControlCloneRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.sourceControlPublishRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.projectsListEntries, AuthOrchestrationReadScope],
+  [WS_METHODS.projectsListSkills, AuthOrchestrationReadScope],
   [WS_METHODS.projectsReadFile, AuthOrchestrationReadScope],
   [WS_METHODS.projectsSearchEntries, AuthOrchestrationReadScope],
   [WS_METHODS.projectsWriteFile, AuthOrchestrationOperateScope],
@@ -1463,6 +1465,16 @@ const makeWsRpcLayer = (
                     ...projectEntriesFailureContext(cause),
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsListSkills]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsListSkills,
+            workspaceEntries.listSkills(input).pipe(
+              Effect.mapError(
+                (cause) => new ProjectListSkillsError({ cwd: input.cwd, cause }),
               ),
             ),
             { "rpc.aggregate": "workspace" },

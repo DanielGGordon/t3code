@@ -7,6 +7,7 @@ import { type VcsRefTarget } from "@t3tools/client-runtime/state/vcs";
 import type {
   EnvironmentId,
   OrchestrationThread,
+  ProjectSkill,
   ThreadId,
   VcsListRefsResult,
   VcsRef,
@@ -212,6 +213,30 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
     isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
     refresh: result.refresh,
   };
+}
+
+const EMPTY_PROJECT_SKILLS: ReadonlyArray<ProjectSkill> = [];
+
+/**
+ * Project-scoped skills discovered under `<cwd>/.claude/skills`. These are
+ * invisible to the global provider capability probe (it runs without a project
+ * working directory), so the composer fetches them per `cwd` to surface them in
+ * the slash-command menu alongside global/user skills.
+ */
+export function useComposerProjectSkills(target: {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly enabled: boolean;
+}): ReadonlyArray<ProjectSkill> {
+  const result = useEnvironmentQuery(
+    target.enabled && target.environmentId !== null && target.cwd !== null
+      ? projectEnvironment.listSkills({
+          environmentId: target.environmentId,
+          input: { cwd: target.cwd },
+        })
+      : null,
+  );
+  return result.data?.skills ?? EMPTY_PROJECT_SKILLS;
 }
 
 export function useCheckpointDiff(
