@@ -31,6 +31,29 @@ export const ProjectListEntriesInput = Schema.Struct({
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
+export const ProjectListSkillsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectListSkillsInput = typeof ProjectListSkillsInput.Type;
+
+/**
+ * A skill discovered under a project's `.claude/skills` directory. These are
+ * project-scoped and therefore invisible to the global provider capability
+ * probe (which runs without the project working directory), so the composer
+ * fetches them separately per `cwd`.
+ */
+export const ProjectSkill = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  path: TrimmedNonEmptyString,
+});
+export type ProjectSkill = typeof ProjectSkill.Type;
+
+export const ProjectListSkillsResult = Schema.Struct({
+  skills: Schema.Array(ProjectSkill),
+});
+export type ProjectListSkillsResult = typeof ProjectListSkillsResult.Type;
+
 export const ProjectListEntriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,
@@ -112,6 +135,24 @@ export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectList
       ...props,
       message:
         decodedProjectErrorMessage(props) ?? `Failed to list workspace entries in '${props.cwd}'.`,
+    } as any);
+  }
+}
+
+export class ProjectListSkillsError extends Schema.TaggedErrorClass<ProjectListSkillsError>()(
+  "ProjectListSkillsError",
+  {
+    cwd: Schema.optional(TrimmedNonEmptyString),
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
+  constructor(props: { readonly cwd: string; readonly cause?: unknown }) {
+    super({
+      ...props,
+      message:
+        decodedProjectErrorMessage(props) ?? `Failed to list project skills in '${props.cwd}'.`,
     } as any);
   }
 }

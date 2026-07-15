@@ -24,6 +24,8 @@ import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import type {
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectListSkillsInput,
+  ProjectListSkillsResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectSearchEntriesInput,
@@ -1156,6 +1158,7 @@ export interface EnvironmentApi {
   };
   projects: {
     listEntries: (input: ProjectListEntriesInput) => Promise<ProjectListEntriesResult>;
+    listSkills: (input: ProjectListSkillsInput) => Promise<ProjectListSkillsResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;

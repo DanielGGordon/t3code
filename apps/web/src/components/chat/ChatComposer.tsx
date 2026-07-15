@@ -58,6 +58,7 @@ import {
   removeInlineTerminalContextPlaceholder,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
+import { useComposerProjectSkills } from "../../state/queries";
 import { type ElementContextDraft } from "../../lib/elementContext";
 import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
@@ -937,6 +938,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  // Project skills live in `<cwd>/.claude/skills` and are Claude-specific, so we
+  // only fetch them for Claude threads while the slash-command menu is open. The
+  // global provider probe misses them because it runs without the project cwd.
+  const projectSkills = useComposerProjectSkills({
+    environmentId,
+    cwd: gitCwd,
+    enabled:
+      composerTriggerKind === "slash-command" &&
+      selectedProvider === ProviderDriverKind.make("claudeAgent"),
+  });
 
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
@@ -984,8 +995,36 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           description: command.description ?? command.input?.hint ?? "Run provider command",
         }),
       );
+      // Merge project-scoped skills (from `<cwd>/.claude/skills`) into the slash
+      // menu, skipping any already surfaced by the global provider probe.
+      const knownSlashCommandNames = new Set(
+        providerSlashCommandItems.map((item) => item.command.name.toLowerCase()),
+      );
+      const projectSkillItems = projectSkills.flatMap((skill) => {
+        if (knownSlashCommandNames.has(skill.name.toLowerCase())) {
+          return [];
+        }
+        knownSlashCommandNames.add(skill.name.toLowerCase());
+        return [
+          {
+            id: `provider-slash-command:${selectedProvider}:skill:${skill.name}`,
+            type: "provider-slash-command" as const,
+            provider: selectedProvider,
+            command: {
+              name: skill.name,
+              ...(skill.description ? { description: skill.description } : {}),
+            },
+            label: `/${skill.name}`,
+            description: skill.description ?? "Run project skill",
+          },
+        ];
+      });
       const query = composerTrigger.query.trim().toLowerCase();
-      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const slashCommandItems = [
+        ...builtInSlashCommandItems,
+        ...providerSlashCommandItems,
+        ...projectSkillItems,
+      ];
       if (!query) {
         return slashCommandItems;
       }
@@ -1007,7 +1046,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
     }
     return [];
-  }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries.entries]);
+  }, [
+    composerTrigger,
+    projectSkills,
+    selectedProvider,
+    selectedProviderStatus,
+    workspaceEntries.entries,
+  ]);
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger

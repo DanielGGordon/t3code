@@ -118,6 +118,65 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
     );
   });
 
+  describe("listSkills", () => {
+    it.effect("discovers project skills and parses SKILL.md frontmatter", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        yield* writeTextFile(
+          cwd,
+          ".claude/skills/redeploy/SKILL.md",
+          '---\nname: redeploy\ndescription: "Redeploy the prod server"\n---\nBody here.',
+        );
+        // Frontmatter name overrides the directory name.
+        yield* writeTextFile(
+          cwd,
+          ".claude/skills/legacy-dir/SKILL.md",
+          "---\nname: aliased\n---\n",
+        );
+        // Directory without a manifest is ignored.
+        yield* writeTextFile(cwd, ".claude/skills/not-a-skill/notes.md", "hello");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.listSkills({ cwd });
+
+        expect(result.skills).toEqual([
+          { name: "aliased", path: expect.stringContaining("legacy-dir") },
+          {
+            name: "redeploy",
+            description: "Redeploy the prod server",
+            path: expect.stringContaining("redeploy"),
+          },
+        ]);
+      }),
+    );
+
+    it.effect("falls back to the directory name when frontmatter has no name", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        yield* writeTextFile(cwd, ".claude/skills/tidy/SKILL.md", "no frontmatter here");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.listSkills({ cwd });
+
+        expect(result.skills).toEqual([
+          { name: "tidy", path: expect.stringContaining("tidy") },
+        ]);
+      }),
+    );
+
+    it.effect("returns no skills when the project has no .claude/skills directory", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        yield* writeTextFile(cwd, "README.md");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.listSkills({ cwd });
+
+        expect(result.skills).toEqual([]);
+      }),
+    );
+  });
+
   describe("search", () => {
     it.effect("returns files and directories relative to cwd", () =>
       Effect.gen(function* () {
