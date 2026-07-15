@@ -141,18 +141,14 @@ export const make = Effect.gen(function* () {
       relativePath: input.relativePath,
     });
 
-    const realWorkspaceRoot = yield* Effect.tryPromise({
-      try: () => NodeFSP.realpath(workspaceRoot),
-      catch: (cause) =>
-        new WorkspaceFileSystemOperationError({
-          workspaceRoot: input.cwd,
-          relativePath: input.relativePath,
-          resolvedPath: target.absolutePath,
-          operationPath: workspaceRoot,
-          operation: "realpath-workspace-root",
-          cause,
-        }),
-    });
+    /* Follow symlinks to the file they point at, mirroring writeFile (which
+     * writes straight through target.absolutePath). The lexical containment in
+     * resolveRelativePathWithinRoot already rejects `..`/absolute relativePaths,
+     * so an in-tree entry the user can see in the explorer stays readable even
+     * when it is a symlink whose target resolves outside the root — e.g. a
+     * `.env` symlinked into a git worktree from the main checkout. Every editor
+     * opens symlinked files this way; refusing to only broke reads while writes
+     * already succeeded. */
     const realTargetPath = yield* Effect.tryPromise({
       try: () => NodeFSP.realpath(target.absolutePath),
       catch: (cause) =>
@@ -165,19 +161,6 @@ export const make = Effect.gen(function* () {
           cause,
         }),
     });
-    const relativeRealPath = path.relative(realWorkspaceRoot, realTargetPath);
-    if (
-      relativeRealPath.startsWith(`..${path.sep}`) ||
-      relativeRealPath === ".." ||
-      path.isAbsolute(relativeRealPath)
-    ) {
-      return yield* new WorkspaceFilePathEscapeError({
-        workspaceRoot: input.cwd,
-        relativePath: input.relativePath,
-        resolvedWorkspaceRoot: realWorkspaceRoot,
-        resolvedPath: realTargetPath,
-      });
-    }
 
     return yield* Effect.acquireUseRelease(
       Effect.tryPromise({

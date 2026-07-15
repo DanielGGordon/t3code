@@ -6,6 +6,33 @@
   - If changing native mobile code, `vp run lint:mobile` must also pass.
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
+## Local Dev & Testing (start here in a fresh worktree)
+
+A freshly-created `t3code/*` worktree ships **without `node_modules`** — install before running
+anything:
+
+- `pnpm install --frozen-lockfile --prefer-offline` — packages come from the shared pnpm store, so
+  this is ~10s and fully offline, not a cold download.
+
+Then, to exercise a change without spinning up the whole app (fastest feedback loop):
+
+- Run one test file from its package dir: `cd apps/server && npx vp test run src/workspace/WorkspaceFileSystem.test.ts`
+  (`vp test` is Vitest under the hood; add `run` for a single non-watch pass).
+- Typecheck one package: `npx tsgo --noEmit -p apps/server/tsconfig.json`.
+- Lint changed files' area: `npx vp lint apps/server/src/workspace/`.
+
+Server behavior (filesystem, workspace, VCS, etc.) is very testable in isolation — copy an existing
+`*.test.ts` in the same directory as a template rather than booting a server. `apps/server/src/workspace/*.test.ts`
+are good examples: they use `it.layer(TestLayer)` + a `makeTempDir` helper to run the real Effect services
+against a scratch dir, so you can reproduce a "does the server accept/reject this file?" bug in seconds.
+
+Gotchas when writing these tests:
+
+- This repo's Effect build has **no `Effect.either`** — use `Effect.exit` (with `Exit.isSuccess`/`Exit.isFailure`)
+  or `Effect.flip` to capture the error channel.
+- `vp test` **suppresses `console.log`** on passing tests — assert the values you want to see (a failing
+  `expect(...).toEqual(...)` prints the actual object) instead of logging them.
+
 ## Project Snapshot
 
 T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
