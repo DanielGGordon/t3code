@@ -55,6 +55,10 @@ export interface HostStatsWithHistory {
   readonly history: readonly HostStatsSample[];
 }
 
+// Module-level so the window survives sidebar unmounts (e.g. visiting the
+// Settings page and coming back) — only an explicit disable clears it.
+let cachedHistory: readonly HostStatsSample[] = [];
+
 /**
  * `useHostStats` plus a client-side rolling window of recent samples so
  * richer readouts (sparklines, trend meters) have something to draw. The
@@ -62,12 +66,13 @@ export interface HostStatsWithHistory {
  */
 export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory {
   const stats = useHostStats(enabled);
-  const [history, setHistory] = useState<readonly HostStatsSample[]>([]);
+  const [history, setHistory] = useState<readonly HostStatsSample[]>(cachedHistory);
   const lastSampleRef = useRef<ServerHostStatsSnapshot | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       lastSampleRef.current = null;
+      cachedHistory = [];
       setHistory([]);
       return;
     }
@@ -81,7 +86,8 @@ export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory 
       memUsedBytes: stats.memUsedBytes,
       memTotalBytes: stats.memTotalBytes,
     };
-    setHistory((previous) => [...previous.slice(-(HISTORY_LIMIT - 1)), sample]);
+    cachedHistory = [...cachedHistory.slice(-(HISTORY_LIMIT - 1)), sample];
+    setHistory(cachedHistory);
   }, [enabled, stats]);
 
   return { stats, history };
