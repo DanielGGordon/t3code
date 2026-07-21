@@ -34,6 +34,21 @@ export const SidebarChatListView = Schema.Literals(["grouped", "flat"]);
 export type SidebarChatListView = typeof SidebarChatListView.Type;
 export const DEFAULT_SIDEBAR_CHAT_LIST_VIEW: SidebarChatListView = "grouped";
 
+// Visual style of the sidebar-footer server-load readout. "classic" is the
+// original plain-text CPU/MEM line; the rest are richer redesign candidates.
+export const SidebarHostStatsStyle = Schema.Literals([
+  "classic",
+  "signature",
+  "bars",
+  "sparkline",
+  "segments",
+  "rings",
+  "equalizer",
+  "badge",
+]);
+export type SidebarHostStatsStyle = typeof SidebarHostStatsStyle.Type;
+export const DEFAULT_SIDEBAR_HOST_STATS_STYLE: SidebarHostStatsStyle = "classic";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -116,6 +131,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // Settings button in the sidebar footer. Default off; toggled per device
   // from the Features settings page.
   sidebarHostStatsVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidebarHostStatsStyle: SidebarHostStatsStyle.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_HOST_STATS_STYLE)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -617,6 +635,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   sidebarChatListView: Schema.optionalKey(SidebarChatListView),
   sidebarHostStatsVisible: Schema.optionalKey(Schema.Boolean),
+  sidebarHostStatsStyle: Schema.optionalKey(SidebarHostStatsStyle),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

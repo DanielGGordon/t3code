@@ -1,5 +1,5 @@
-import type { ServerHostStatsResult } from "@t3tools/contracts";
-import { useEffect } from "react";
+import type { ServerHostStatsResult, ServerHostStatsSnapshot } from "@t3tools/contracts";
+import { useEffect, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentQuery } from "../state/query";
@@ -36,4 +36,53 @@ export function useHostStats(enabled: boolean): ServerHostStatsResult {
   }, [enabled, refresh]);
 
   return query.data;
+}
+
+/** One retained host-stats sample; `at` is the client receive time (ms epoch). */
+export interface HostStatsSample {
+  readonly at: number;
+  readonly cpuPercent: number;
+  readonly memUsedBytes: number;
+  readonly memTotalBytes: number;
+}
+
+/** ~2 minutes of history at the 5s poll interval. */
+const HISTORY_LIMIT = 24;
+
+export interface HostStatsWithHistory {
+  readonly stats: ServerHostStatsSnapshot | null;
+  /** Oldest→newest rolling window of recent samples, including `stats`. */
+  readonly history: readonly HostStatsSample[];
+}
+
+/**
+ * `useHostStats` plus a client-side rolling window of recent samples so
+ * richer readouts (sparklines, trend meters) have something to draw. The
+ * history resets when the readout is disabled.
+ */
+export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory {
+  const stats = useHostStats(enabled);
+  const [history, setHistory] = useState<readonly HostStatsSample[]>([]);
+  const lastSampleRef = useRef<ServerHostStatsSnapshot | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      lastSampleRef.current = null;
+      setHistory([]);
+      return;
+    }
+    if (stats === null || stats === lastSampleRef.current) {
+      return;
+    }
+    lastSampleRef.current = stats;
+    const sample: HostStatsSample = {
+      at: Date.now(),
+      cpuPercent: stats.cpuPercent,
+      memUsedBytes: stats.memUsedBytes,
+      memTotalBytes: stats.memTotalBytes,
+    };
+    setHistory((previous) => [...previous.slice(-(HISTORY_LIMIT - 1)), sample]);
+  }, [enabled, stats]);
+
+  return { stats, history };
 }

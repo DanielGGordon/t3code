@@ -210,7 +210,8 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
-import { useHostStats } from "~/hooks/useHostStats";
+import { useHostStatsWithHistory } from "~/hooks/useHostStats";
+import { HOST_STATS_VARIANTS } from "~/components/host-stats/variants";
 import { primaryServerConfigAtom, primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
@@ -3298,37 +3299,19 @@ function T3Wordmark() {
   );
 }
 
-// Compact "3.2/15.6 GB" style figure for the footer host-stats readout.
-function formatFooterGigabytes(bytes: number): string {
-  const gigabytes = bytes / 1024 ** 3;
-  if (gigabytes >= 100) return String(Math.round(gigabytes));
-  return gigabytes.toFixed(1);
-}
-
 // Ambient CPU/memory telemetry for the T3 server host, shown next to the
 // Settings button when the "Server load" toggle (Settings → Features) is on.
+// The visual style is selectable there too; see components/host-stats/.
 const SidebarHostStats = memo(function SidebarHostStats() {
   const visible = useClientSettings((settings) => settings.sidebarHostStatsVisible);
-  const stats = useHostStats(visible);
+  const style = useClientSettings((settings) => settings.sidebarHostStatsStyle);
+  const { stats, history } = useHostStatsWithHistory(visible);
   if (!visible || stats === null) {
     return null;
   }
 
-  const cpuLabel = `${Math.round(stats.cpuPercent)}%`;
-  const memLabel = `${formatFooterGigabytes(stats.memUsedBytes)}/${formatFooterGigabytes(stats.memTotalBytes)}G`;
-  const coreLabel = stats.cpuCount === 1 ? "1 core" : `${stats.cpuCount} cores`;
-  const detail = `Server load — CPU ${stats.cpuPercent.toFixed(1)}% of ${coreLabel} · memory ${formatFooterGigabytes(stats.memUsedBytes)} of ${formatFooterGigabytes(stats.memTotalBytes)} GB`;
-
-  return (
-    <div
-      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-[10px] tabular-nums text-muted-foreground/70"
-      title={detail}
-      aria-label={detail}
-    >
-      <span>CPU {cpuLabel}</span>
-      <span>MEM {memLabel}</span>
-    </div>
-  );
+  const { Component } = HOST_STATS_VARIANTS[style];
+  return <Component stats={stats} history={history} />;
 });
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
