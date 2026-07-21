@@ -19,6 +19,7 @@ const clientSettings: ClientSettings = {
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   favorites: [],
+  fileExplorerShowDotfiles: true,
   headerGitActionsVisibility: "auto",
   headerOpenInEditorVisibility: "auto",
   headerProjectScriptsVisibility: "auto",
