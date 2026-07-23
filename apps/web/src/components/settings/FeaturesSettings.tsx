@@ -13,7 +13,7 @@ import {
   type SidebarHostStatsStyle,
 } from "@t3tools/contracts/settings";
 
-import { HOST_STATS_VARIANTS } from "../host-stats/variants";
+import { HOST_STATS_PICKER_STYLES, HOST_STATS_VARIANTS } from "../host-stats/variants";
 
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
@@ -167,9 +167,9 @@ export function FeaturesSettingsPanel() {
                 <SelectValue>{HOST_STATS_VARIANTS[settings.sidebarHostStatsStyle].label}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                {Object.entries(HOST_STATS_VARIANTS).map(([value, entry]) => (
+                {HOST_STATS_PICKER_STYLES.map((value) => (
                   <SelectItem hideIndicator key={value} value={value}>
-                    {entry.label}
+                    {HOST_STATS_VARIANTS[value].label}
                   </SelectItem>
                 ))}
               </SelectPopup>

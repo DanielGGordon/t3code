@@ -3311,7 +3311,11 @@ const SidebarHostStats = memo(function SidebarHostStats() {
   }
 
   const { Component } = HOST_STATS_VARIANTS[style];
-  return <Component stats={stats} history={history} />;
+  return (
+    <div className="ml-auto flex h-full min-w-0 flex-1 items-center justify-end">
+      <Component stats={stats} history={history} />
+    </div>
+  );
 });
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
@@ -3329,10 +3333,12 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarMenu>
-        <SidebarMenuItem className="flex items-center">
+        {/* Desktop: 1.5× a project row (h-18 = 72px vs the 48px project rows), Settings squished to its
+            content, and the host-stats readout stretched to the full height. */}
+        <SidebarMenuItem className="flex items-center gap-2 md:h-18">
           <SidebarMenuButton
             size="sm"
-            className="w-auto flex-1 gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            className="w-auto shrink-0 gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground md:h-full"
             onClick={handleSettingsClick}
           >
             <SettingsIcon className="size-3.5" />
