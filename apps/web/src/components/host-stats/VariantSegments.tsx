@@ -30,7 +30,7 @@ function SegmentMeter({ percent, peakPercent }: SegmentMeterProps) {
         <span
           key={index}
           className={cn(
-            "h-1.5 min-w-0 flex-1 rounded-[2px] transition-colors duration-700 ease-out",
+            "h-1.5 min-w-0 flex-1 rounded-[2px] transition-colors duration-700 ease-out md:h-2.5",
             index < litCount ? color : index < peakCount ? "bg-muted-foreground/30" : "bg-muted",
           )}
         />
@@ -57,19 +57,23 @@ export function VariantSegments({ stats, history }: HostStatsVariantProps) {
 
   return (
     <div
-      className="grid h-7 w-[150px] shrink-0 grid-cols-[22px_1fr_59px] items-center gap-x-1 whitespace-nowrap rounded-md border border-border/60 bg-muted/25 px-1.5 py-0.5 tabular-nums"
+      className="grid h-7 w-[150px] shrink-0 grid-cols-[22px_1fr_59px] content-center items-center gap-x-1 whitespace-nowrap rounded-md border border-border/60 bg-muted/25 px-1.5 py-0.5 tabular-nums md:h-full md:w-full md:grid-cols-[28px_1fr_70px] md:gap-x-1.5 md:gap-y-2 md:px-2.5"
       title={detail}
       aria-label={detail}
     >
-      <span className="text-[9px] font-semibold tracking-wide text-muted-foreground">CPU</span>
+      <span className="text-[9px] font-semibold tracking-wide text-muted-foreground md:text-[10px]">
+        CPU
+      </span>
       <SegmentMeter percent={cpuPercent} peakPercent={cpuPeak} />
-      <span className="text-right text-[11px] font-semibold leading-none text-foreground">
+      <span className="text-right text-[11px] font-semibold leading-none text-foreground md:text-[13px]">
         {cpuPercent.toFixed(1)}%
       </span>
 
-      <span className="text-[9px] font-semibold tracking-wide text-muted-foreground">MEM</span>
+      <span className="text-[9px] font-semibold tracking-wide text-muted-foreground md:text-[10px]">
+        MEM
+      </span>
       <SegmentMeter percent={memoryPercent} peakPercent={memoryPeak} />
-      <span className="text-right text-[11px] font-semibold leading-none text-foreground">
+      <span className="text-right text-[11px] font-semibold leading-none text-foreground md:text-[13px]">
         {formatFooterGigabytes(stats.memUsedBytes)}/{formatFooterGigabytes(stats.memTotalBytes)}G
       </span>
     </div>
