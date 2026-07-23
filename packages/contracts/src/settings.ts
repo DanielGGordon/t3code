@@ -34,8 +34,10 @@ export const SidebarChatListView = Schema.Literals(["grouped", "flat"]);
 export type SidebarChatListView = typeof SidebarChatListView.Type;
 export const DEFAULT_SIDEBAR_CHAT_LIST_VIEW: SidebarChatListView = "grouped";
 
-// Visual style of the sidebar-footer server-load readout. "classic" is the
-// original plain-text CPU/MEM line; the rest are richer redesign candidates.
+// Visual style of the sidebar-footer server-load readout. "segments" won the
+// PR #39 redesign bake-off; "classic" is the original plain-text CPU/MEM line.
+// The remaining literals are retired candidates kept only so settings stored
+// while the bake-off ran still decode — the UI renders them as "segments".
 export const SidebarHostStatsStyle = Schema.Literals([
   "classic",
   "signature",
@@ -47,7 +49,7 @@ export const SidebarHostStatsStyle = Schema.Literals([
   "badge",
 ]);
 export type SidebarHostStatsStyle = typeof SidebarHostStatsStyle.Type;
-export const DEFAULT_SIDEBAR_HOST_STATS_STYLE: SidebarHostStatsStyle = "classic";
+export const DEFAULT_SIDEBAR_HOST_STATS_STYLE: SidebarHostStatsStyle = "segments";
 
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
