@@ -5624,6 +5624,116 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  // A resuming shell client is only replayed when the replay is both possible
+  // and cheaper than the snapshot it stands in for. See
+  // SHELL_CATCH_UP_REPLAY_LIMIT in ws.ts.
+  const subscribeShellResume = (input: {
+    readonly afterSequence: number;
+    readonly projectedSequence: number;
+    readonly onReadEvents: () => void;
+  }) =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (_fromSequenceExclusive, _limit) =>
+              Stream.suspend(() => {
+                input.onReadEvents();
+                // `project.deleted` maps to a shell event without any further
+                // projection lookup, so it isolates the replay-vs-snapshot
+                // decision from the rest of the shell mapping.
+                return Stream.make({
+                  sequence: input.afterSequence + 1,
+                  eventId: EventId.make("event-replayed"),
+                  aggregateKind: "project",
+                  aggregateId: defaultProjectId,
+                  occurredAt: "2026-04-05T00:00:00.000Z",
+                  commandId: null,
+                  causationEventId: null,
+                  correlationId: null,
+                  metadata: {},
+                  type: "project.deleted",
+                  payload: {
+                    projectId: defaultProjectId,
+                    deletedAt: "2026-04-05T00:00:00.000Z",
+                  },
+                } satisfies Extract<OrchestrationEvent, { type: "project.deleted" }>);
+              }),
+          },
+          projectionSnapshotQuery: {
+            getSnapshotSequence: () =>
+              Effect.succeed({ snapshotSequence: input.projectedSequence }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+            afterSequence: input.afterSequence,
+          }).pipe(Stream.take(1), Stream.runCollect),
+        ),
+      );
+      return items[0];
+    });
+
+  it.effect("replays shell events for a client resuming from a recent sequence", () =>
+    Effect.gen(function* () {
+      let readEventsCalls = 0;
+      const first = yield* subscribeShellResume({
+        afterSequence: 10,
+        projectedSequence: 12,
+        onReadEvents: () => {
+          readEventsCalls += 1;
+        },
+      });
+
+      assert.equal(readEventsCalls, 1);
+      assert.equal(first?.kind, "project-removed");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("sends a shell snapshot instead of replaying when the client is far behind", () =>
+    Effect.gen(function* () {
+      let readEventsCalls = 0;
+      const first = yield* subscribeShellResume({
+        afterSequence: 10,
+        // Far enough behind that replaying the window would cost more than the
+        // snapshot, and slow enough to send that the client may never finish it.
+        projectedSequence: 100_000,
+        onReadEvents: () => {
+          readEventsCalls += 1;
+        },
+      });
+
+      assert.equal(readEventsCalls, 0);
+      assert.equal(first?.kind, "snapshot");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "sends a shell snapshot when the client cursor is ahead of the projected sequence",
+    () =>
+      Effect.gen(function* () {
+        let readEventsCalls = 0;
+        // A cursor past our own head means the client cached against an event log
+        // we no longer have (rebuilt, restored, or a different server). Replaying
+        // would send nothing and every live event would be dropped by the client's
+        // sequence check, leaving it stale forever.
+        const first = yield* subscribeShellResume({
+          afterSequence: 500,
+          projectedSequence: 12,
+          onReadEvents: () => {
+            readEventsCalls += 1;
+          },
+        });
+
+        assert.equal(readEventsCalls, 0);
+        assert.equal(first?.kind, "snapshot");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("enriches replayed project events with repository identity metadata", () =>
     Effect.gen(function* () {
       const repositoryIdentity = {

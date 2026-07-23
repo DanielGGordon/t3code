@@ -149,7 +149,10 @@ export function runStream<TTag extends EnvironmentStreamCommandRpcTag>(
 
 export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
   tag: TTag,
-  input: EnvironmentRpcInput<TTag>,
+  // Pass a thunk when the input carries a resume cursor: it is re-read on every
+  // (re)subscribe, so a subscription that outlives several sessions resumes
+  // from where it actually got to rather than from where the page booted.
+  input: EnvironmentRpcInput<TTag> | (() => EnvironmentRpcInput<TTag>),
   options?: {
     readonly onExpectedFailure?: (
       cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
@@ -161,6 +164,8 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
   EnvironmentRpcStreamFailure<TTag>,
   EnvironmentSupervisor
 > {
+  const resolveInput = (): EnvironmentRpcInput<TTag> =>
+    typeof input === "function" ? (input as () => EnvironmentRpcInput<TTag>)() : input;
   return Stream.unwrap(
     EnvironmentSupervisor.pipe(
       Effect.map((supervisor) =>
@@ -180,7 +185,7 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
                   EnvironmentRpcStreamFailure<TTag>
                 > =>
                   Stream.suspend(() =>
-                    method(input).pipe(
+                    method(resolveInput()).pipe(
                       Stream.catchCause((cause) => {
                         const hasOnlyExpectedFailures =
                           cause.reasons.length > 0 &&
