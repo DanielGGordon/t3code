@@ -10,11 +10,15 @@ import {
   type ClientSettings,
   DEFAULT_HEADER_CONTROL_VISIBILITY,
   type HeaderControlVisibility,
+  type SidebarHostStatsStyle,
 } from "@t3tools/contracts/settings";
+
+import { HOST_STATS_VARIANTS } from "../host-stats/variants";
 
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { resolveHeaderControlVisibility } from "../chat/ChatHeader";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import {
   SettingResetButton,
@@ -72,6 +76,7 @@ export function FeaturesSettingsPanel() {
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
+    sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
   const updateSettings = useUpdateClientSettings();
 
@@ -146,6 +151,29 @@ export function FeaturesSettingsPanel() {
               onCheckedChange={(checked) => updateSettings({ sidebarHostStatsVisible: checked })}
               aria-label="Show server load in the sidebar"
             />
+          }
+        />
+        <SettingsRow
+          title="Server load style"
+          description="Visual style of the server-load readout. Applies while “Server load” is on."
+          control={
+            <Select
+              value={settings.sidebarHostStatsStyle}
+              onValueChange={(value) => {
+                updateSettings({ sidebarHostStatsStyle: value as SidebarHostStatsStyle });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Server load style">
+                <SelectValue>{HOST_STATS_VARIANTS[settings.sidebarHostStatsStyle].label}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {Object.entries(HOST_STATS_VARIANTS).map(([value, entry]) => (
+                  <SelectItem hideIndicator key={value} value={value}>
+                    {entry.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>

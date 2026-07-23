@@ -19,6 +19,7 @@ const clientSettings: ClientSettings = {
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   favorites: [],
+  fileExplorerShowDotfiles: true,
   headerGitActionsVisibility: "auto",
   headerOpenInEditorVisibility: "auto",
   headerProjectScriptsVisibility: "auto",
@@ -33,6 +34,7 @@ const clientSettings: ClientSettings = {
   providerModelPreferences: {},
   sidebarChatListView: "grouped",
   sidebarHostStatsVisible: false,
+  sidebarHostStatsStyle: "classic",
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
