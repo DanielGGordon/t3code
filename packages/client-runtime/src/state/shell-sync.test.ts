@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
+  ThreadId,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamItem,
 } from "@t3tools/contracts";
@@ -8,8 +9,10 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -191,6 +194,90 @@ describe("environment shell synchronization", () => {
 
       expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBe(5);
       expect(yield* SubscriptionRef.get(loaderCalls)).toBe(0);
+    }),
+  );
+
+  it.effect("retries a failed shell stream and resumes from the latest applied sequence", () =>
+    Effect.gen(function* () {
+      const cachedSnapshot: OrchestrationShellSnapshot = {
+        snapshotSequence: 5,
+        projects: [],
+        threads: [],
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      };
+      // Records the resume cursor the client asks for on each subscribe attempt.
+      const attempts = yield* Ref.make<ReadonlyArray<number | undefined>>([]);
+      const client = {
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: { readonly afterSequence?: number }) =>
+          Stream.unwrap(
+            Ref.updateAndGet(attempts, (seen) => [...seen, input.afterSequence]).pipe(
+              Effect.map((seen) =>
+                // The first attempt advances the shell to sequence 9 and then
+                // fails with a domain (non-transport) error; without a retry the
+                // shell would stay on that snapshot for the life of the page.
+                seen.length === 1
+                  ? Stream.concat(
+                      Stream.make({
+                        kind: "thread-removed" as const,
+                        sequence: 9,
+                        threadId: ThreadId.make("thread-1"),
+                      }),
+                      Stream.fail(new Error("shell stream failed")),
+                    )
+                  : Stream.never,
+              ),
+            ),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+      const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
+        Option.some(session(client)),
+      );
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: supervisorState,
+        session: activeSession,
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.some(cachedSnapshot)),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      const snapshotLoader = ShellSnapshotLoader.of({
+        load: () => Effect.succeed(Option.none()),
+      });
+      yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(ShellSnapshotLoader, snapshotLoader),
+      );
+
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(attempts)).length >= 1) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(attempts)).toEqual([5]);
+
+      yield* TestClock.adjust("250 millis");
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(attempts)).length >= 2) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+
+      // Resubscribed (rather than ending the stream), and asked to resume from
+      // the sequence it actually reached rather than the boot-time cursor.
+      expect(yield* Ref.get(attempts)).toEqual([5, 9]);
     }),
   );
 });

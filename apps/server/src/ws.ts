@@ -282,6 +282,20 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
+/**
+ * How far behind a resuming shell client may be before we send it a fresh
+ * snapshot instead of replaying its catch-up window.
+ *
+ * Replay is only a win while the gap is small. Every thread-aggregate event in
+ * the window costs a `getThreadShellById` query and emits a full thread shell
+ * on the socket, so a client that has been away for a few days can ask for tens
+ * of megabytes to rebuild a list that a single snapshot expresses in a few
+ * hundred kilobytes. Worse, a client that cannot afford the replay never
+ * advances its cursor, so its next attempt is just as expensive — it stays
+ * stale indefinitely.
+ */
+const SHELL_CATCH_UP_REPLAY_LIMIT = 500;
+
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.getTurnDiff, AuthOrchestrationReadScope],
@@ -1084,6 +1098,19 @@ const makeWsRpcLayer = (
                 ),
               );
 
+              const loadShellSnapshot = projectionSnapshotQuery.getShellSnapshot().pipe(
+                Effect.tapError((cause) =>
+                  Effect.logError("orchestration shell snapshot load failed", { cause }),
+                ),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to load orchestration shell snapshot",
+                      cause,
+                    }),
+                ),
+              );
+
               // When the client already holds a shell snapshot (cached, or loaded
               // over HTTP) it passes that snapshot's sequence, and we resume by
               // replaying shell events after it instead of re-sending the whole
@@ -1101,6 +1128,38 @@ const makeWsRpcLayer = (
                     yield* Effect.forkScoped(
                       liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
                     );
+
+                    // A resume cursor is only usable if we can actually serve it.
+                    // If it sits ahead of our projected sequence the client is
+                    // resuming against an event log that no longer matches its
+                    // cache (rebuilt, restored from backup, or a different
+                    // server), and every live event we send will be discarded by
+                    // its sequence check — it would render its stale cache
+                    // forever. If it sits too far behind, the replay costs far
+                    // more than the snapshot it stands in for. Both cases are
+                    // repaired by sending a snapshot, which the client applies
+                    // wholesale rather than merging by sequence.
+                    const projectedSequence = yield* projectionSnapshotQuery
+                      .getSnapshotSequence()
+                      .pipe(
+                        Effect.map(({ snapshotSequence }) => snapshotSequence),
+                        // If we cannot read our own cursor, prefer the previous
+                        // behaviour (replay) over forcing a full snapshot.
+                        Effect.orElseSucceed(() => afterSequence),
+                      );
+                    const gap = projectedSequence - afterSequence;
+                    if (gap < 0 || gap > SHELL_CATCH_UP_REPLAY_LIMIT) {
+                      yield* Effect.logInfo(
+                        "orchestration shell resume fell back to a full snapshot",
+                        { afterSequence, projectedSequence, gap },
+                      );
+                      const snapshot = yield* loadShellSnapshot;
+                      return Stream.concat(
+                        Stream.make({ kind: "snapshot" as const, snapshot }),
+                        Stream.fromQueue(liveBuffer),
+                      );
+                    }
+
                     const catchUpStream = orchestrationEngine
                       .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
                       .pipe(
@@ -1121,18 +1180,7 @@ const makeWsRpcLayer = (
                 );
               }
 
-              const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
-                Effect.tapError((cause) =>
-                  Effect.logError("orchestration shell snapshot load failed", { cause }),
-                ),
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to load orchestration shell snapshot",
-                      cause,
-                    }),
-                ),
-              );
+              const snapshot = yield* loadShellSnapshot;
 
               return Stream.concat(
                 Stream.make({

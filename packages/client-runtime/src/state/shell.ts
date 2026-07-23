@@ -123,6 +123,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       ),
     );
 
+  // The sequence the subscription should resume from. Kept as plain closure
+  // state (rather than read back out of `state`) because the subscribe input
+  // thunk below is synchronous. It always tracks the applied snapshot.
+  let resumeSequence: number | null = null;
+
   const applyItem = Effect.fn("EnvironmentShellState.applyItem")(function* (
     item: OrchestrationShellStreamItem,
   ) {
@@ -140,6 +145,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     if (nextSnapshot === null) {
       return;
     }
+    resumeSequence = nextSnapshot.snapshotSequence;
 
     yield* SubscriptionRef.set(state, {
       snapshot: Option.some(nextSnapshot),
@@ -178,13 +184,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         yield* applyItem({ kind: "snapshot", snapshot: base.value });
       }
 
-      const subscribeInput = Option.match(base, {
-        onNone: () => ({}),
-        onSome: (snapshot) => ({ afterSequence: snapshot.snapshotSequence }),
-      });
+      // Resolved per (re)subscribe so reconnects resume from the latest applied
+      // sequence instead of replaying the boot-time catch-up window again.
+      const subscribeInput = () =>
+        resumeSequence === null ? {} : { afterSequence: resumeSequence };
 
+      // Without a retry an expected (non-transport) failure ends the stream for
+      // the life of the page: the shell keeps rendering its cached snapshot and
+      // silently never updates again, even across reloads, because the cache is
+      // what the next load resumes from. Mirrors the thread subscription.
       yield* subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, subscribeInput, {
         onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
+        retryExpectedFailureAfter: "250 millis",
       }).pipe(Stream.runForEach(applyItem));
     }),
   );
