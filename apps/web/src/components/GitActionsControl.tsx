@@ -1034,15 +1034,11 @@ export default function GitActionsControl({
           return;
         }
 
-        const worktreePath = activeServerThread.worktreePath;
         void updateThreadMetadata({
           environmentId: activeThreadRef.environmentId,
           input: {
             threadId: activeThreadRef.threadId,
-            // Carry expectedBranch so a stale git-status sync can't regress a
-            // freshly-generated branch back to a temporary worktree branch (upstream #3822).
             ...resolveThreadBranchMetadataPatch(branch, activeServerThread.branch),
-            worktreePath,
           },
         });
 

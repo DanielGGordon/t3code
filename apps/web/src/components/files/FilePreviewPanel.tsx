@@ -4,6 +4,7 @@ import type {
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { VirtualizedFile, type FileContents, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
 import {
@@ -24,6 +25,7 @@ import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
+import { useAssetUrlState } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -152,6 +154,43 @@ function getFileViewerWorkerPool(): WorkerPoolManager | undefined {
     },
   );
   return fileViewerWorkerPool;
+}
+
+function WorkspaceImagePreview(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
+  readonly absolutePath: string;
+  readonly alt: string;
+}) {
+  const assetUrl = useAssetUrlState(props.environmentId, {
+    _tag: "workspace-file",
+    threadId: props.threadRef.threadId,
+    path: props.absolutePath,
+  });
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
+        Unable to load workspace image.
+      </div>
+    );
+  }
+
+  return assetUrl._tag === "Success" ? (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+      <img
+        className="max-h-full max-w-full object-contain"
+        src={assetUrl.url}
+        alt={props.alt}
+        onError={() => setFailedUrl(assetUrl.url)}
+      />
+    </div>
+  ) : (
+    <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+      <LoaderCircle className="size-5 animate-spin" />
+    </div>
+  );
 }
 
 function clampFileLine(contents: string, requestedLine: number): number {
@@ -717,7 +756,8 @@ function FilePreviewPanelContent({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
-  const file = useProjectFileQuery(environmentId, cwd, relativePath);
+  const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
+  const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   const [invertViewerTheme, setInvertViewerTheme] = useState(initialInvertViewerTheme);
   /* Theme applied to the file content viewport: matches the app theme by
@@ -947,7 +987,15 @@ function FilePreviewPanelContent({
           )}
           data-file-viewer-inverted={invertViewerTheme && !renderMarkdown ? "" : undefined}
         >
-          {relativePath && file.error && file.data === null ? (
+          {relativePath && isImage && absolutePath ? (
+            <WorkspaceImagePreview
+              key={absolutePath}
+              environmentId={environmentId}
+              threadRef={threadRef}
+              absolutePath={absolutePath}
+              alt={relativePath}
+            />
+          ) : relativePath && file.error && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
               {file.error}
             </div>

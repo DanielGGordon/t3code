@@ -12,7 +12,9 @@ import type {
   SidebarProjectGroupingMode,
   SidebarThreadSortOrder,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,7 +24,8 @@ import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey } from "../../lib/scopedEntities";
-import { loadPreferences, savePreferencesPatch } from "../../lib/storage";
+import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   PendingTaskListRow,
@@ -85,7 +88,6 @@ const ESTIMATED_THREAD_ROW_HEIGHT = 72;
  * already consumes the top safe-area inset, so the list only needs breathing
  * room here.
  */
-const ANDROID_LIST_TOP_PADDING = 16;
 
 function deriveEmptyState(props: {
   readonly catalogState: WorkspaceState;
@@ -151,7 +153,7 @@ function deriveEmptyState(props: {
 }
 
 function HomeTopContentSpacer() {
-  return <View style={{ height: ANDROID_LIST_TOP_PADDING }} />;
+  return <View className="h-4" />;
 }
 
 /* ─── Main screen ────────────────────────────────────────────────────── */
@@ -160,65 +162,47 @@ export function HomeScreen(props: HomeScreenProps) {
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
-  const collapseDirtyRef = useRef(false);
   const insets = useSafeAreaInsets();
   const accentColor = useThemeColor("--color-icon-muted");
-
-  // Collapsed groups survive restarts. Hydration only fills groups the user
-  // hasn't already toggled this session, so a fast tap can't be clobbered by
-  // the async preferences read.
-  useEffect(() => {
-    let cancelled = false;
-    loadPreferences()
-      .then((preferences) => {
-        const collapsedKeys = preferences.collapsedProjectGroups;
-        if (cancelled || !collapsedKeys || collapsedKeys.length === 0) {
-          return;
-        }
-        setGroupDisplayStates((previous) => {
-          const next = new Map(previous);
-          for (const key of collapsedKeys) {
-            if (!next.has(key)) {
-              next.set(key, { ...DEFAULT_GROUP_DISPLAY_STATE, collapsed: true });
-            }
-          }
-          return next;
-        });
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
-    if (action === "toggle-collapsed") {
-      collapseDirtyRef.current = true;
-    }
-    setGroupDisplayStates((previous) => {
-      const next = new Map(previous);
-      next.set(
-        key,
-        nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
-      );
+  const effectiveGroupDisplayStates = useMemo(() => {
+    const next = new Map(groupDisplayStates);
+    if (!AsyncResult.isSuccess(preferencesResult)) {
       return next;
-    });
-  }, []);
-
-  // Persist collapse changes after commit — once per state change, outside
-  // the updater, so it can't interleave with other preference writes.
-  useEffect(() => {
-    if (!collapseDirtyRef.current) {
-      return;
     }
-    collapseDirtyRef.current = false;
-    const collapsedProjectGroups = [...groupDisplayStates.entries()]
-      .filter(([, state]) => state.collapsed)
-      .map(([groupKey]) => groupKey);
-    void savePreferencesPatch({ collapsedProjectGroups }).catch(() => undefined);
-  }, [groupDisplayStates]);
+    for (const key of preferencesResult.value.collapsedProjectGroups ?? []) {
+      const existing = next.get(key);
+      next.set(key, {
+        ...(existing ?? DEFAULT_GROUP_DISPLAY_STATE),
+        collapsed: true,
+      });
+    }
+    return next;
+  }, [groupDisplayStates, preferencesResult]);
+  const effectiveGroupDisplayStatesRef = useRef(effectiveGroupDisplayStates);
+  effectiveGroupDisplayStatesRef.current = effectiveGroupDisplayStates;
+
+  const updateGroupDisplay = useCallback(
+    (key: string, action: HomeGroupDisplayAction) => {
+      const next = new Map(effectiveGroupDisplayStatesRef.current);
+      next.set(key, nextGroupDisplayState(next.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action));
+      effectiveGroupDisplayStatesRef.current = next;
+      setGroupDisplayStates(next);
+      if (action === "toggle-collapsed") {
+        const collapsedProjectGroups: string[] = [];
+        for (const [groupKey, state] of next) {
+          if (state.collapsed) {
+            collapsedProjectGroups.push(groupKey);
+          }
+        }
+        savePreferences({ collapsedProjectGroups });
+      }
+    },
+    [savePreferences],
+  );
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
@@ -269,10 +253,10 @@ export function HomeScreen(props: HomeScreenProps) {
     () =>
       buildHomeListLayout({
         groups: projectGroups,
-        displayStates: groupDisplayStates,
+        displayStates: effectiveGroupDisplayStates,
         showAllThreads: hasSearchQuery,
       }),
-    [projectGroups, groupDisplayStates, hasSearchQuery],
+    [projectGroups, effectiveGroupDisplayStates, hasSearchQuery],
   );
 
   const projectCwdByKey = useMemo(() => {
@@ -405,7 +389,7 @@ export function HomeScreen(props: HomeScreenProps) {
         className="flex-1 items-center justify-center bg-screen px-8"
         style={{
           paddingBottom: Math.max(insets.bottom, 24),
-          paddingTop: Platform.OS === "ios" ? insets.top + 72 : 0,
+          paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
         }}
       >
         <View className="w-full max-w-[430px]">
@@ -416,9 +400,18 @@ export function HomeScreen(props: HomeScreenProps) {
             onAction={!props.catalogState.hasReadyEnvironment ? props.onAddConnection : undefined}
             variant="plain"
           />
-          {emptyState.loading ? (
+          {emptyState.loading && !shouldShowConnectionStatus ? (
             <View className="mt-4 items-center">
               <ActivityIndicator color={accentColor} />
+            </View>
+          ) : null}
+          {shouldShowConnectionStatus && Platform.OS === "ios" ? (
+            <View className="mt-4">
+              <WorkspaceConnectionStatus
+                state={props.catalogState}
+                onPress={props.onOpenEnvironments}
+                variant="sidebar"
+              />
             </View>
           ) : null}
         </View>
@@ -432,7 +425,7 @@ export function HomeScreen(props: HomeScreenProps) {
       {Platform.OS === "ios" ? null : <HomeTopContentSpacer />}
 
       {shouldShowConnectionStatus && Platform.OS === "ios" ? (
-        <View style={{ paddingBottom: 16 }}>
+        <View className="pb-4">
           <WorkspaceConnectionStatus
             state={props.catalogState}
             onPress={props.onOpenEnvironments}
@@ -477,8 +470,8 @@ export function HomeScreen(props: HomeScreenProps) {
           ListHeaderComponent={listHeader}
           ListEmptyComponent={listEmpty}
           style={{ flex: 1 }}
-          automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-          contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+          automaticallyAdjustsScrollIndicatorInsets={NATIVE_LIQUID_GLASS_SUPPORTED}
+          contentInsetAdjustmentBehavior={NATIVE_LIQUID_GLASS_SUPPORTED ? "automatic" : "never"}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"

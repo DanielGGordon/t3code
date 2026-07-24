@@ -1,6 +1,5 @@
 import * as Haptics from "expo-haptics";
-import type { SymbolViewProps } from "expo-symbols";
-import { SymbolView } from "../../components/AppSymbol";
+import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
 import { LayoutAnimation, Pressable, ScrollView, useColorScheme, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -41,7 +40,7 @@ function compactActivityDetail(detail: string | null): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-function workRowSymbolName(icon: ThreadFeedActivity["icon"]): SymbolViewProps["name"] {
+function workRowSymbolName(icon: ThreadFeedActivity["icon"]): AppSymbolName {
   switch (icon) {
     case "agent":
       return { ios: "sparkles", android: "auto_awesome" };
@@ -211,13 +210,12 @@ export function ThreadWorkLog(props: {
                     nestedScrollEnabled
                     directionalLockEnabled
                     showsVerticalScrollIndicator
-                    style={{ maxHeight: 240 }}
+                    className="max-h-60"
                     contentContainerStyle={{ paddingRight: 8 }}
                   >
                     <Text
                       selectable
-                      className="text-2xs leading-normal text-foreground-muted"
-                      style={{ fontFamily: "ui-monospace" }}
+                      className="font-mono text-2xs leading-normal text-foreground-muted"
                     >
                       {row.fullDetail}
                     </Text>

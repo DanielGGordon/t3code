@@ -26,7 +26,6 @@ import { ControlPillMenu } from "../../components/ControlPill";
 import { EmptyState } from "../../components/EmptyState";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { relativeTime } from "../../lib/time";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
@@ -68,13 +67,8 @@ function ArchivedThreadsHeader(props: {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const hasCustomFilter = props.selectedEnvironmentId !== null || props.sortOrder !== "newest";
-  const searchBackgroundColor = useThemeColor("--color-input");
   const searchIconColor = useThemeColor("--color-icon");
-  const searchPlaceholderColor = useThemeColor("--color-placeholder");
   const searchTextColor = useThemeColor("--color-foreground");
-  const headerColor = useThemeColor("--color-header");
-  const headerBorderColor = useThemeColor("--color-header-border");
-  const subtleColor = useThemeColor("--color-subtle");
   const usesNativeChrome = Platform.OS === "ios";
   const usesCompactMailToolbar = Platform.OS === "ios" && width < 700;
   const androidFilterActions = useMemo<MenuAction[]>(
@@ -140,22 +134,18 @@ function ArchivedThreadsHeader(props: {
       <>
         <NativeStackScreenOptions options={{ headerShown: false }} />
         <View
+          className="border-b border-header-border bg-header px-3 pb-2.5"
           style={{
-            backgroundColor: headerColor,
-            borderBottomColor: headerBorderColor,
-            borderBottomWidth: 1,
-            paddingBottom: 10,
-            paddingHorizontal: 12,
             paddingTop: Math.max(insets.top, 12),
           }}
         >
-          <View style={{ alignItems: "center", flexDirection: "row", gap: 8, minHeight: 48 }}>
+          <View className="min-h-12 flex-row items-center gap-2">
             <Pressable
               accessibilityLabel="Navigate up"
               accessibilityRole="button"
               hitSlop={8}
               onPress={() => navigation.goBack()}
-              style={{ alignItems: "center", height: 44, justifyContent: "center", width: 44 }}
+              className="size-11 items-center justify-center"
             >
               <SymbolView
                 name="chevron.left"
@@ -164,18 +154,7 @@ function ArchivedThreadsHeader(props: {
                 type="monochrome"
               />
             </Pressable>
-            <View
-              style={{
-                alignItems: "center",
-                backgroundColor: searchBackgroundColor,
-                borderRadius: 16,
-                flex: 1,
-                flexDirection: "row",
-                gap: 10,
-                minHeight: 44,
-                paddingHorizontal: 14,
-              }}
-            >
+            <View className="min-h-11 flex-1 flex-row items-center gap-2.5 rounded-2xl bg-input px-3.5">
               <SymbolView
                 name="magnifyingglass"
                 size={17}
@@ -188,14 +167,8 @@ function ArchivedThreadsHeader(props: {
                 onChangeText={props.onSearchQueryChange}
                 value={props.searchQuery}
                 placeholder="Search archived threads"
-                placeholderTextColor={String(searchPlaceholderColor)}
-                style={{
-                  color: String(searchTextColor),
-                  flex: 1,
-                  fontFamily: "DMSans_400Regular",
-                  fontSize: MOBILE_TYPOGRAPHY.body.fontSize,
-                  paddingVertical: 8,
-                }}
+                placeholderTextColorClassName="accent-placeholder"
+                className="flex-1 py-2 text-base font-sans text-foreground"
               />
             </View>
             <ControlPillMenu
@@ -206,14 +179,7 @@ function ArchivedThreadsHeader(props: {
               <Pressable
                 accessibilityLabel="Filter and sort archived threads"
                 accessibilityRole="button"
-                style={{
-                  alignItems: "center",
-                  backgroundColor: subtleColor,
-                  borderRadius: 99,
-                  height: 44,
-                  justifyContent: "center",
-                  width: 44,
-                }}
+                className="size-11 items-center justify-center rounded-full bg-subtle"
               >
                 <SymbolView
                   name={
@@ -399,9 +365,8 @@ function ProjectGroupLabel(props: {
         workspaceRoot={props.project.workspaceRoot}
       />
       <Text
-        className="flex-1 text-xs font-t3-medium uppercase text-foreground-muted"
+        className="flex-1 text-xs font-t3-medium tracking-[0.5px] uppercase text-foreground-muted"
         numberOfLines={1}
-        style={{ letterSpacing: 0.5 }}
       >
         {props.project.title}
       </Text>
@@ -480,10 +445,7 @@ function ArchivedThreadRow(props: {
               >
                 {props.thread.title}
               </Text>
-              <Text
-                className="text-xs text-foreground-tertiary"
-                style={{ fontVariant: ["tabular-nums"], minWidth: 30, textAlign: "right" }}
-              >
+              <Text className="min-w-[30px] text-right text-xs tabular-nums text-foreground-tertiary">
                 {timestamp}
               </Text>
             </View>
@@ -496,9 +458,8 @@ function ArchivedThreadRow(props: {
                   type="monochrome"
                 />
                 <Text
-                  className="min-w-0 flex-1 text-2xs text-foreground-tertiary"
+                  className="min-w-0 flex-1 font-mono text-2xs text-foreground-tertiary"
                   numberOfLines={1}
-                  style={{ fontFamily: "monospace" }}
                 >
                   {subtitle.join(" · ")}
                 </Text>

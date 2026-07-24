@@ -33,12 +33,7 @@ import {
   useReviewCommentTarget,
 } from "./reviewCommentSelection";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
-import {
-  changeTone,
-  DiffTokenText,
-  REVIEW_MONO_FONT_FAMILY,
-  ReviewChangeBar,
-} from "./reviewDiffRendering";
+import { changeTone, DiffTokenText, ReviewChangeBar } from "./reviewDiffRendering";
 import {
   highlightReviewSelectedLines,
   type ReviewDiffTheme,
@@ -167,12 +162,11 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
   }, [attachments, commentText, dismissComposer, environmentId, target, threadId]);
 
   return (
-    <View style={{ flex: 1 }}>
-      <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
+    <View className="flex-1">
+      <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1">
         <View
+          className="flex-1 px-5"
           style={{
-            flex: 1,
-            paddingHorizontal: 20,
             paddingTop: isAndroid ? insets.top + 8 : 8,
             paddingBottom: target ? (isAndroid ? 72 : 0) : Math.max(insets.bottom, 18),
           }}
@@ -240,10 +234,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                             style={{ height: codeSurface.rowHeight }}
                           >
                             <ReviewChangeBar change={line.change} height={codeSurface.rowHeight} />
-                            <Text
-                              className="w-9 py-1 pr-1 text-right text-2xs font-t3-medium text-foreground-muted"
-                              style={{ fontFamily: REVIEW_MONO_FONT_FAMILY }}
-                            >
+                            <Text className="w-9 py-1 pr-1 text-right text-2xs font-mono text-foreground-muted">
                               {lineNumber ?? ""}
                             </Text>
                             <View className="min-w-0 flex-1 shrink-0 px-1 py-1">
@@ -276,8 +267,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                         textAlignVertical="top"
                         value={commentText}
                         onChangeText={setCommentText}
-                        className="h-full flex-1 border-0 bg-transparent px-0 py-0 font-sans text-base"
-                        style={{ flex: 1, minHeight: 0 }}
+                        className="h-full min-h-0 flex-1 border-0 bg-transparent px-0 py-0 font-sans text-base"
                       />
                     </TextInputWrapper>
                   </View>
@@ -323,8 +313,8 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
       </KeyboardAvoidingView>
       {isAndroid && target ? (
         <KeyboardStickyView
+          className="absolute inset-x-0 bottom-0"
           offset={{ closed: 0, opened: 0 }}
-          style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
         >
           <View
             className="flex-row items-center gap-3 border-t border-border bg-sheet px-5 pt-2"

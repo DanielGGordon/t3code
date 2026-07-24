@@ -79,3 +79,46 @@ sync base `dad0889` (2026-07-07).
   when we next touch auth/toolchain so it doesn't drift too far.
 - `18a41388e`, `0c6656585`, `03ac1f0cd` — desktop / electron-builder + pnpm-11 asar packaging
   fixes. Only relevant if we ship the desktop build; pull alongside the Clerk block.
+
+---
+
+## 2026-07-23 — True merge of upstream through `6f34ad3e8` (2026-07-21)
+
+**Strategy change:** this sync is a real `git merge 6f34ad3e8` (~130 commits), not a
+cherry-pick batch. Rationale: the fork had drifted 186 commits behind and per-commit review
+stopped scaling; a merge also zeroes out divergence in areas we don't customize, so future
+syncs only conflict where we actually differ. The cut point is deliberate: everything through
+2026-07-21, **stopping before** the churny 7/22+ wave (Sidebar v2 beta + DB migration 033,
+the "glass" UI redesign, and the mobile thread-sync overhaul) — take those as a follow-up
+merge once upstream's daily fix-up rate drops.
+
+### Decisions that supersede earlier entries
+
+- **Mobile: resolved wholesale to upstream's official Android implementation.** A merge can't
+  "skip" paths both sides touched, and our hand-rolled Android commits are unmaintained per the
+  standing policy — so all `apps/mobile` conflicts were resolved by taking upstream. This keeps
+  the no-investment spirit (zero fork-side mobile maintenance; future mobile changes merge
+  clean) while dropping our stale copies. Upstream subsumed our polish (collapse persistence →
+  `mobile-preferences.ts`, Gradle heap → `withAndroidGradleHeap.cjs`, font/favicon fixes,
+  serialized pref writes → Semaphore in `MobilePreferencesStore`). **Fork-only mobile files kept:**
+  `plugins/withAndroidSelfSignedServerTrust.cjs` (+ its `app.config.ts` plugin entry) and
+  `scripts/publish-android-apk.sh` — inert unless we build the app.
+- **Clerk upgrade (#3785/#3821), desktop/electron packaging fixes, prod splash asset,
+  `ca1e08b5a` reasoning labels:** previously deferred/skipped, now pulled as part of the merge.
+
+### Conflict resolutions of note
+
+- `apps/server/src/ws.ts` + `server.test.ts` + `client-runtime` (`rpc/client.ts`,
+  `state/shell.ts`): our #40 stale-shell-cache fix collided with upstream's rework of the same
+  problem (`c14a5ca49`, `db4b2d8a0`). Took upstream — it covers both our failure modes
+  (cursor-ahead → snapshot, large gap → snapshot) with tests, plus bounded replay and
+  completion markers. Our #40 implementation and its tests are retired.
+- `GitActionsControl.tsx`: dropped our client-side `worktreePath` pass-through from the #3822
+  cherry-pick — upstream's merged #3822 preserves worktree metadata server-side in the decider.
+- `FileBrowserPanel.tsx` / `FilePreviewPanel.tsx` / `index.css` / `AppSidebarLayout.tsx`:
+  unioned — kept fork features (dotfiles toggle + root input + 3-arg `useProjectEntriesQuery`,
+  Solarized theme layer + file-viewer worker pool, ThemeToggle) alongside upstream's new
+  composer file links, workspace image preview, and sidebar width/backdrop work.
+- `AGENTS.md`: adopted upstream's focused-verification policy; kept all fork sections.
+- `.claude/skills` → upstream's symlink to `.agents/skills/`; our `redeploy` skill moved to
+  `.agents/skills/redeploy/` (same resolved path as before).
