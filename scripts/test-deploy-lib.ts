@@ -70,7 +70,7 @@ export type SeedMode = "minimal" | "copy" | "empty" | "curated";
  * than silently orphaning rows — bump this constant AND extend the prune list
  * together, in lockstep.
  */
-export const PRUNE_SCHEMA_VERSION = 32 as const;
+export const PRUNE_SCHEMA_VERSION = 35 as const;
 
 /** Default number of most-recently-active projects kept in a curated template. */
 export const SEED_DEFAULT_PROJECTS = 3;

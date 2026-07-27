@@ -523,7 +523,7 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     assert.equal(manifest.projects, 3);
     assert.equal(manifest.threadsPerProject, 2);
     assert.equal(manifest.dbSchemaVersion, 32);
-    assert.equal(manifest.pruneSchemaVersion, 32);
+    assert.equal(manifest.pruneSchemaVersion, 35);
     assert.equal(manifest.keptThreadIds.length, 6);
     assert.equal(manifest.prodGitSha, "unknown");
     assert.isTrue(manifest.keptProjects.every((p) => p.title.startsWith(COPYOF_PREFIX)));
@@ -546,7 +546,7 @@ describe("runRefresh end-to-end (prod read-only)", () => {
   });
 
   it("refuses when prod schema is newer than the prune list", async () => {
-    buildFakeProd(prodRoot, { schemaVersion: 33 });
+    buildFakeProd(prodRoot, { schemaVersion: 36 });
     let err: Error | null = null;
     try {
       await runRefresh(DEFAULT_OPTS);
@@ -554,7 +554,7 @@ describe("runRefresh end-to-end (prod read-only)", () => {
       err = e as Error;
     }
     assert.isNotNull(err);
-    assert.match(err!.message, /schema 33/);
+    assert.match(err!.message, /schema 36/);
     // A refused build must not leave a published template behind.
     assert.isNull(resolveSeedTemplate());
   });
