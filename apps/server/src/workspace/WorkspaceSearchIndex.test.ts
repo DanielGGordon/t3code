@@ -205,7 +205,9 @@ it.effect("surfaces dotfiles even when the native results already fill the entry
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* Effect.acquireRelease(
-        Effect.tryPromise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-cap-"))),
+        Effect.tryPromise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-cap-")),
+        ),
         (directory) =>
           Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
       );

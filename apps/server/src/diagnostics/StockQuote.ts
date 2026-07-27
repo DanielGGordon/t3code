@@ -97,7 +97,8 @@ export function parseYahooChart(body: unknown, capturedAt: number): StockQuote |
   if (price === null) {
     return null;
   }
-  const previousClose = asFiniteNumber(meta.previousClose) ?? asFiniteNumber(meta.chartPreviousClose);
+  const previousClose =
+    asFiniteNumber(meta.previousClose) ?? asFiniteNumber(meta.chartPreviousClose);
   const changePercent =
     previousClose !== null && previousClose !== 0
       ? ((price - previousClose) / previousClose) * 100
@@ -307,7 +308,10 @@ export const readStockQuote = (
     const value = freshQuote ?? previousValue;
     writeCache(normalized, { value, freshUntilMs });
     return value;
-  }).pipe(Effect.withSpan("readStockQuote"), Effect.orElseSucceed(() => null));
+  }).pipe(
+    Effect.withSpan("readStockQuote"),
+    Effect.orElseSucceed(() => null),
+  );
 
 /** Test-only: drop the process-wide cache so cases start clean. */
 export function clearStockQuoteCacheForTests(): void {

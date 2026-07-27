@@ -94,6 +94,31 @@ sessions T3 itself spawned are skipped (`skipped-owned` — session id found in 
 worktrees dir; `skipped-copy` — a forkSession copy whose message uuids largely already live on
 another thread), and deleted imported threads stay deleted via the event-log tombstone.
 
+## Upstream sync PRs: NEVER squash-merge
+
+Sync PRs (`merge: upstream through <sha>`) must land as a **merge commit** or a
+fast-forward push (`git push origin HEAD:refs/heads/main`). Never squash-merge,
+never rebase-merge, never `git revert -m 1`.
+
+Squash-merging discards the second parent, so git stops believing upstream is an
+ancestor. PR #42 was squash-merged and the next sync's conflict set went from
+18 files / 40 hunks to **76 files / 238 hunks** — a 4x tax paid for one wrong
+click, plus an inflated 208-commit delta when only 79 commits were actually new.
+Rebase-merge cannot replay merge commits at all. `git revert -m 1` is the same
+class of trap: ancestry keeps claiming upstream is merged while the content is
+gone, so a later `git merge upstream/main` never restores the reverted files.
+
+If it happens anyway, it is repairable while the PR branch still exists on
+GitHub (the repo has `delete_branch_on_merge:false`): re-merge that branch with
+`git merge --no-ff origin/t3code/<branch>`. The tree is unchanged and the
+upstream parent is restored.
+
+After landing a sync, assert the repair held:
+
+```
+git merge-base origin/main upstream/main   # must be the SHA you merged, not an older one
+```
+
 ## Finishing a feature: MANDATORY test-deploy + PR flow
 
 When a feature or bugfix is complete in a `t3code/*` worktree, do NOT merge to `main`. Follow **[docs/test-deployments.md](docs/test-deployments.md)**: open a PR, deploy the branch to a test port from the pool (`node scripts/test-deploy.ts --pr <url> --note "<desc>" --comment`), and comment the test URL on the PR so the user can jump straight into the running instance. Prod (external `7443` / loopback `3773` / unit `t3code.service`) is only redeployed from `main` after the user approves the PR — and `t3code.service` is never restarted without explicit user approval in the conversation. The scripts refuse all prod targets; never work around the guard.

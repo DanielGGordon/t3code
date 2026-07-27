@@ -20,7 +20,7 @@ Redeploys the self-hosted T3 Code server to the current `origin/main`. The logic
 
 ## CRITICAL — this session will drop
 
-This chat runs *inside* `t3code.service`. When the service restarts, **this chat's own
+This chat runs _inside_ `t3code.service`. When the service restarts, **this chat's own
 session disconnects.** That is expected and unavoidable — the deploy still finishes in the
 background. Reconnect and read the status log.
 

@@ -1704,11 +1704,11 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectsListSkills]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsListSkills,
-            workspaceEntries.listSkills(input).pipe(
-              Effect.mapError(
-                (cause) => new ProjectListSkillsError({ cwd: input.cwd, cause }),
+            workspaceEntries
+              .listSkills(input)
+              .pipe(
+                Effect.mapError((cause) => new ProjectListSkillsError({ cwd: input.cwd, cause })),
               ),
-            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.projectsReadFile]: (input) =>

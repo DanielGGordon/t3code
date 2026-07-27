@@ -1,0 +1,36 @@
+# Reference copy of the PRODUCTION systemd user unit for this fork's
+# self-hosted deployment. The live file is ~/.config/systemd/user/t3code.service
+# and is NOT generated from this one -- this copy exists so the unit is
+# recoverable, and so drift is visible.
+#
+# WARNING: upstream's `t3 service install` / `t3 service uninstall`
+# (apps/server/src/cloud/bootService.ts) hard-codes this exact unit NAME and
+# unconditionally overwrites/deletes ~/.config/systemd/user/t3code.service.
+# Running it on the deploy host would replace the mise/node@24 wrapper, the
+# source-checkout entrypoint and the loopback flags below with a pinned-npm
+# unit, and Caddy would start returning 502. NEVER run `t3 service` here.
+#
+# Restore:  cp deploy/t3code.service ~/.config/systemd/user/t3code.service \
+#             && systemctl --user daemon-reload && systemctl --user restart t3code.service
+[Unit]
+Description=T3 Code headless server (loopback-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+# mise provides Node 24 (system Node 20 is too old for node:sqlite)
+# Run from the v2 worktree (branch main = upstream main + solarized/import + features)
+# + claude import/resume port on upstream main are served, instead of the npm pkg.
+# Node 24 runs the TS entrypoint directly via type-stripping; serves apps/web/dist.
+# Loopback-only since the 2026-07 VPS reprovision (no tailscale on this box for
+# now); front with Caddy on 15.204.108.12 if remote/phone access is needed.
+ExecStart=/home/dgordon/.local/bin/mise exec node@24 -- node /home/dgordon/projects/meta/t3code-v2/apps/server/src/bin.ts serve --host 127.0.0.1 --port 3773 --no-browser
+Restart=on-failure
+RestartSec=3
+# keep npx cache + t3 data under the home dir
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target

@@ -143,9 +143,9 @@ describe("connection presentation", () => {
         traceId: "trace-retry",
       }),
     ).toBe("Failed to connect. Reconnecting...");
-    expect(
-      connectionStatusTitle({ phase: "reconnecting", error: null, traceId: null }),
-    ).toBe("Reconnecting...");
+    expect(connectionStatusTitle({ phase: "reconnecting", error: null, traceId: null })).toBe(
+      "Reconnecting...",
+    );
     expect(
       connectionStatusTitle({
         phase: "error",

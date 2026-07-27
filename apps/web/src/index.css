@@ -966,7 +966,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-
 /* Sidebar token family. Upstream scopes these (plus a generic zinc palette) on
    [data-sidebar-version]; element-scoped custom properties beat :root[data-scheme],
    so the generic half of that block is stripped below and the sidebar is themed

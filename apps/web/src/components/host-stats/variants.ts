@@ -19,9 +19,7 @@ const SEGMENTS: HostStatsVariantEntry = { label: "Segments", Component: VariantS
 
 // "segments" won the PR #39 redesign bake-off. The retired candidate ids stay
 // decodable (see SidebarHostStatsStyle in contracts) and render as the winner.
-export const HOST_STATS_VARIANTS: Readonly<
-  Record<SidebarHostStatsStyle, HostStatsVariantEntry>
-> = {
+export const HOST_STATS_VARIANTS: Readonly<Record<SidebarHostStatsStyle, HostStatsVariantEntry>> = {
   classic: CLASSIC,
   signature: SEGMENTS,
   bars: SEGMENTS,
@@ -33,7 +31,4 @@ export const HOST_STATS_VARIANTS: Readonly<
 };
 
 /** The styles actually offered in the picker (retired ids are hidden). */
-export const HOST_STATS_PICKER_STYLES: readonly SidebarHostStatsStyle[] = [
-  "segments",
-  "classic",
-];
+export const HOST_STATS_PICKER_STYLES: readonly SidebarHostStatsStyle[] = ["segments", "classic"];
