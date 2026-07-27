@@ -311,15 +311,20 @@ const make = Effect.gen(function* () {
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
-    const session = thread?.session;
-    if (!session) {
+    if (!thread) {
       return;
     }
+    const session = thread.session;
     yield* setThreadSession({
       threadId: input.threadId,
       session: {
-        ...session,
-        status: session.status === "stopped" ? "stopped" : "ready",
+        ...(session ?? {
+          threadId: input.threadId,
+          providerName: null,
+          providerInstanceId: thread.modelSelection.instanceId,
+          runtimeMode: thread.runtimeMode,
+        }),
+        status: session?.status === "stopped" ? "stopped" : "error",
         activeTurnId: null,
         lastError: input.detail,
         updatedAt: input.createdAt,
@@ -377,6 +382,7 @@ const make = Effect.gen(function* () {
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
+      readonly pendingTurnStart?: boolean;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -451,6 +457,22 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
+      yield* setThreadSession({
+        threadId,
+        session: {
+          threadId,
+          status: "starting",
+          providerName: activeSession?.provider ?? preferredProvider,
+          providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
+          runtimeMode: desiredRuntimeMode,
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+    }
     if (thread.session !== null) {
       yield* rejectStartedThreadModelChangeIfRequired({
         threadId,
@@ -521,7 +543,10 @@ const make = Effect.gen(function* () {
           threadId,
           session: {
             threadId,
-            status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+            status:
+              options?.pendingTurnStart === true && session.status === "ready"
+                ? "starting"
+                : mapProviderSessionStatusToOrchestrationStatus(session.status),
             providerName: session.provider,
             providerInstanceId: session.providerInstanceId,
             runtimeMode: desiredRuntimeMode,
@@ -750,11 +775,16 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
-    yield* ensureSessionForThread(
-      input.threadId,
-      input.createdAt,
-      input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
-    );
+    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+      ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      pendingTurnStart: true,
+    });
+    // Upstream also writes `threadModelSelections` here. This fork deliberately
+    // does not: the deferred model-change recycle decides whether a pending
+    // recycle is still needed by comparing it against this map (see the
+    // Equal.equals check in the turn-completed flush), so recording the
+    // selection eagerly at turn start makes every pending recycle look already
+    // applied and it never flushes. Keep upstream's `pendingTurnStart` flag.
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
