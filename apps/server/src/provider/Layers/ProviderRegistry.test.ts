@@ -31,7 +31,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { checkClaudeProviderStatus, normalizeClaudeCliEffort } from "./ClaudeProvider.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -1542,6 +1542,22 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           );
           const fable5 = status.models.find((model) => model.slug === "claude-fable-5");
           assert.strictEqual(fable5?.name, "Claude Fable 5");
+          const opus5 = status.models.find((model) => model.slug === "claude-opus-5");
+          assert.strictEqual(opus5?.name, "Claude Opus 5");
+          const opus5Descriptors = opus5?.capabilities?.optionDescriptors ?? [];
+          assert.deepStrictEqual(
+            opus5Descriptors.map((descriptor) => descriptor.id),
+            ["effort", "fastMode"],
+          );
+          const opus5Effort = opus5Descriptors.find((descriptor) => descriptor.id === "effort");
+          assert.strictEqual(
+            opus5Effort?.type === "select" &&
+              (opus5Effort.options ?? []).some((option) => option.id === "xhigh"),
+            true,
+          );
+          // The runtime must honor the advertised xhigh choice rather than
+          // downgrading it via the older-model compatibility mapping.
+          assert.strictEqual(normalizeClaudeCliEffort("xhigh", "claude-opus-5"), "xhigh");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
@@ -1570,8 +1586,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             false,
           );
           assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-5"),
+            false,
+          );
+          assert.strictEqual(
             status.message,
-            "Claude Code v2.1.168 is too old for Claude Fable 5. Upgrade to v2.1.169 or newer to access it.",
+            "Claude Code v2.1.168 is too old for Claude Fable 5 and Claude Opus 5. Upgrade to v2.1.169 or newer to access them.",
           );
         }).pipe(
           Effect.provide(
