@@ -37,6 +37,7 @@ import {
   type OrchestrationDispatchError,
   type OrchestrationProjectorDecodeError,
 } from "../Errors.ts";
+import { findProjectById, findThreadById } from "../commandInvariants.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
@@ -56,10 +57,11 @@ interface CommandEnvelope {
   startedAtMs: number;
 }
 
-function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
-} {
+function commandToAggregateRef(
+  command: OrchestrationCommand,
+):
+  | { readonly aggregateKind: "project"; readonly aggregateId: ProjectId }
+  | { readonly aggregateKind: "thread"; readonly aggregateId: ThreadId } {
   switch (command.type) {
     case "project.create":
     case "project.meta.update":
@@ -148,6 +150,49 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             commandId: envelope.command.commandId,
             detail: existingReceipt.value.error ?? "Previously rejected.",
           });
+        }
+
+        // External writers (e.g. the `t3 import` CLI) append events and projections
+        // to the shared database from another process, so an aggregate missing from
+        // the in-memory model may still exist in SQL; refresh before rejecting.
+        const mustExistAggregate =
+          envelope.command.type === "project.create"
+            ? undefined
+            : envelope.command.type === "thread.create"
+              ? {
+                  aggregateKind: "project" as const,
+                  aggregateId: envelope.command.projectId,
+                }
+              : aggregateRef;
+        const aggregateMissingFromMemory =
+          mustExistAggregate !== undefined &&
+          (mustExistAggregate.aggregateKind === "thread"
+            ? findThreadById(commandReadModel, mustExistAggregate.aggregateId) === undefined
+            : findProjectById(commandReadModel, mustExistAggregate.aggregateId) === undefined);
+        if (aggregateMissingFromMemory) {
+          const mustExistAggregateId = mustExistAggregate.aggregateId;
+          yield* Effect.gen(function* () {
+            const refreshed = yield* projectionSnapshotQuery.getCommandReadModel();
+            commandReadModel =
+              refreshed.snapshotSequence >= commandReadModel.snapshotSequence
+                ? refreshed
+                : {
+                    ...refreshed,
+                    snapshotSequence: commandReadModel.snapshotSequence,
+                    updatedAt: commandReadModel.updatedAt,
+                  };
+          }).pipe(
+            Effect.catch(() =>
+              Effect.logWarning(
+                "failed to refresh orchestration read model before command dispatch",
+              ).pipe(
+                Effect.annotateLogs({
+                  commandId: envelope.command.commandId,
+                  aggregateId: mustExistAggregateId,
+                }),
+              ),
+            ),
+          );
         }
 
         const eventBase = yield* decideOrchestrationCommand({
