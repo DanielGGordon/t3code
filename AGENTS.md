@@ -64,6 +64,14 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
 
+## Dev Servers
+
+- In a linked git worktree, dev state defaults to that worktree's gitignored `.t3`. This deliberately outranks an ambient `T3CODE_HOME`, which could otherwise select the installed app's live `~/.t3/userdata` database. An explicit `--home-dir` still wins.
+- Start the web stack with `vp run dev`. Add `--share` when someone needs to open it from another device on the tailnet.
+- Browser dev is single-origin: Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known` to the backend. Do not set `VITE_HTTP_URL` or `VITE_WS_URL` for `dev`/`dev:web`.
+- Worktree paths supply stable preferred port offsets. Read the actual server and web ports from the `[dev-runner]` line because occupied ports can still shift them.
+- Before handing off a `--share` URL, open its origin in a controlled browser and confirm the app loads. A successful curl is insufficient because browsers reject some otherwise reachable ports.
+
 ## Package Roles
 
 - `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
@@ -85,6 +93,31 @@ sessions T3 itself spawned are skipped (`skipped-owned` — session id found in 
 `provider_session_runtime` resume cursor; `skipped-worktree` — transcript cwd inside the T3
 worktrees dir; `skipped-copy` — a forkSession copy whose message uuids largely already live on
 another thread), and deleted imported threads stay deleted via the event-log tombstone.
+
+## Upstream sync PRs: NEVER squash-merge
+
+Sync PRs (`merge: upstream through <sha>`) must land as a **merge commit** or a
+fast-forward push (`git push origin HEAD:refs/heads/main`). Never squash-merge,
+never rebase-merge, never `git revert -m 1`.
+
+Squash-merging discards the second parent, so git stops believing upstream is an
+ancestor. PR #42 was squash-merged and the next sync's conflict set went from
+18 files / 40 hunks to **76 files / 238 hunks** — a 4x tax paid for one wrong
+click, plus an inflated 208-commit delta when only 79 commits were actually new.
+Rebase-merge cannot replay merge commits at all. `git revert -m 1` is the same
+class of trap: ancestry keeps claiming upstream is merged while the content is
+gone, so a later `git merge upstream/main` never restores the reverted files.
+
+If it happens anyway, it is repairable while the PR branch still exists on
+GitHub (the repo has `delete_branch_on_merge:false`): re-merge that branch with
+`git merge --no-ff origin/t3code/<branch>`. The tree is unchanged and the
+upstream parent is restored.
+
+After landing a sync, assert the repair held:
+
+```
+git merge-base origin/main upstream/main   # must be the SHA you merged, not an older one
+```
 
 ## Finishing a feature: MANDATORY test-deploy + PR flow
 

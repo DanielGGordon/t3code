@@ -346,7 +346,6 @@ function selectedClaudeContextWindow(
   modelSelection: ModelSelection | undefined,
 ): number | undefined {
   switch (modelSelection?.model) {
-    case "claude-opus-5":
     case "claude-opus-4-8":
     case "claude-opus-4-7":
       // Always 1M at the API; these models expose no contextWindow option.
@@ -3545,6 +3544,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const effectiveEffort = getEffectiveClaudeAgentEffort(effort, modelSelection?.model);
       const runtimeModeToPermission: Record<string, PermissionMode> = {
         "auto-accept-edits": "acceptEdits",
+        auto: "auto",
         "full-access": "bypassPermissions",
       };
       const permissionMode = runtimeModeToPermission[input.runtimeMode];

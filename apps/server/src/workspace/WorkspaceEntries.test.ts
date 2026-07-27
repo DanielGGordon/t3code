@@ -158,9 +158,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
         const result = yield* workspaceEntries.listSkills({ cwd });
 
-        expect(result.skills).toEqual([
-          { name: "tidy", path: expect.stringContaining("tidy") },
-        ]);
+        expect(result.skills).toEqual([{ name: "tidy", path: expect.stringContaining("tidy") }]);
       }),
     );
 

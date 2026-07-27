@@ -8,21 +8,17 @@ import { syncBrowserChromeTheme } from "./useTheme";
  * then selects which half applies. This keeps the OS light/dark switch and the
  * desktop `setTheme` IPC contract untouched.
  */
-export type ColorScheme =
-  | "default"
-  | "solarized"
-  | "dracula"
-  | "gruvbox"
-  | "catppuccin"
-  | "tokyo-night";
+// Dracula, Gruvbox, Catppuccin and Tokyo Night were culled in the 2026-07-27
+// upstream sync: upstream's glass redesign introduced a new token family
+// (--sidebar-*, --glass-*, --chat-composer-*) that every scheme has to
+// re-declare, and maintaining five of those against an upstream that keeps
+// hard-coding palettes into new surfaces was not worth the recurring cost.
+// A stored value from a culled scheme falls back to "default" (see below).
+export type ColorScheme = "default" | "solarized";
 
 export const COLOR_SCHEME_OPTIONS = [
   { value: "default", label: "Default" },
   { value: "solarized", label: "Solarized" },
-  { value: "dracula", label: "Dracula" },
-  { value: "gruvbox", label: "Gruvbox" },
-  { value: "catppuccin", label: "Catppuccin" },
-  { value: "tokyo-night", label: "Tokyo Night" },
 ] as const satisfies ReadonlyArray<{ value: ColorScheme; label: string }>;
 
 const STORAGE_KEY = "t3code:colorScheme";

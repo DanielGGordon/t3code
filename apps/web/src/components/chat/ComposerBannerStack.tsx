@@ -16,11 +16,10 @@ const stackedExitStyle = {
 } satisfies CSSProperties;
 const restingStyle = {
   opacity: 1,
-  transform: "translate3d(0, 0, 0)",
+  transform: "none",
 } satisfies CSSProperties;
 const exitTransitionStyle = {
   transition: `transform ${DISMISS_TRANSITION_MS}ms ease-in, opacity ${DISMISS_TRANSITION_MS}ms ease-in`,
-  willChange: "transform, opacity",
 } satisfies CSSProperties;
 
 export interface ComposerBannerStackItem {
@@ -30,6 +29,8 @@ export interface ComposerBannerStackItem {
   readonly title: ReactNode;
   readonly description?: ReactNode;
   readonly actions?: ReactNode;
+  readonly className?: string;
+  readonly actionClassName?: string;
   readonly dismissLabel?: string;
   readonly onDismiss?: () => void;
   /** When true, the banner can be minimized to a single line via a toggle. */
@@ -206,17 +207,22 @@ function ComposerBannerStackAlert({
   }
 
   return (
-    <Alert variant={item.variant}>
+    <Alert
+      variant={item.variant}
+      className={cn("alert-glass", item.className)}
+      data-variant={item.variant}
+    >
       {item.icon}
       <AlertTitle>{item.title}</AlertTitle>
       {item.description ? <AlertDescription>{item.description}</AlertDescription> : null}
       {item.actions || item.onDismiss || item.collapsible ? (
         <AlertAction
-          className={
-            // Stack the actions on their own full-width row below the message on
-            // narrow screens so the text is not squeezed into a tall column.
-            dismissOnly ? "max-sm:self-start" : "max-sm:w-full max-sm:justify-end"
-          }
+          className={cn(
+            item.actionClassName,
+            dismissOnly
+              ? "max-sm:col-start-3 max-sm:row-start-1 max-sm:mt-0 max-sm:self-start"
+              : undefined,
+          )}
         >
           {item.actions}
           {item.collapsible ? (

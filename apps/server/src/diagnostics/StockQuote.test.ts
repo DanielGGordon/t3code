@@ -30,7 +30,10 @@ describe("StockQuote", () => {
   });
 
   describe("parseCboe", () => {
-    const payload = (data: Record<string, unknown>) => ({ timestamp: "2026-07-10T12:00:00Z", data });
+    const payload = (data: Record<string, unknown>) => ({
+      timestamp: "2026-07-10T12:00:00Z",
+      data,
+    });
 
     it("reads price, percent change, symbol and USD currency directly", () => {
       const quote = parseCboe(
@@ -95,10 +98,7 @@ describe("StockQuote", () => {
     });
 
     it("returns a null change when no previous close is available", () => {
-      const quote = parseYahooChart(
-        chart({ symbol: "SPY", regularMarketPrice: 100 }),
-        CAPTURED_AT,
-      );
+      const quote = parseYahooChart(chart({ symbol: "SPY", regularMarketPrice: 100 }), CAPTURED_AT);
       expect(quote?.changePercent).toBeNull();
     });
 
@@ -112,7 +112,8 @@ describe("StockQuote", () => {
 
   describe("parseStooqCsv", () => {
     it("reads the close price from the data row (no percent change)", () => {
-      const csv = "Symbol,Date,Time,Open,High,Low,Close,Volume\nSPY.US,2026-07-09,22:00:00,611,613,610,612.34,1000000";
+      const csv =
+        "Symbol,Date,Time,Open,High,Low,Close,Volume\nSPY.US,2026-07-09,22:00:00,611,613,610,612.34,1000000";
       const quote = parseStooqCsv(csv, CAPTURED_AT);
       expect(quote?.symbol).toBe("SPY.US");
       expect(quote?.price).toBe(612.34);
@@ -121,7 +122,8 @@ describe("StockQuote", () => {
     });
 
     it("returns null when Stooq reports N/D for an unknown symbol", () => {
-      const csv = "Symbol,Date,Time,Open,High,Low,Close,Volume\nZZZZ.US,N/D,N/D,N/D,N/D,N/D,N/D,N/D";
+      const csv =
+        "Symbol,Date,Time,Open,High,Low,Close,Volume\nZZZZ.US,N/D,N/D,N/D,N/D,N/D,N/D,N/D";
       expect(parseStooqCsv(csv, CAPTURED_AT)).toBeNull();
     });
 

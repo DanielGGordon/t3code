@@ -3,6 +3,7 @@ import {
   FileKeyIcon,
   GitBranchIcon,
   PlayIcon,
+  SparklesIcon,
   SquareArrowOutUpRightIcon,
 } from "lucide-react";
 import { type ReactNode } from "react";
@@ -75,6 +76,7 @@ export function FeaturesSettingsPanel() {
     headerOpenInEditorVisibility: s.headerOpenInEditorVisibility,
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
+    composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
@@ -140,6 +142,24 @@ export function FeaturesSettingsPanel() {
         <SettingsRow
           title={
             <span className="inline-flex items-center gap-1.5">
+              <SparklesIcon className="size-3.5" />
+              Auto runtime mode
+            </span>
+          }
+          description="Offer upstream's Auto access mode in the composer. An AI reviewer approves routine tool calls inside a workspace-write sandbox without asking you. Hidden by default: once a thread is set to Auto, older builds of the server can no longer read the thread list."
+          control={
+            <Switch
+              checked={settings.composerAutoRuntimeModeVisible}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerAutoRuntimeModeVisible: checked })
+              }
+              aria-label="Offer the Auto runtime mode in the composer"
+            />
+          }
+        />
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
               <ActivityIcon className="size-3.5" />
               Server load
             </span>
@@ -164,7 +184,9 @@ export function FeaturesSettingsPanel() {
               }}
             >
               <SelectTrigger className="w-full sm:w-48" aria-label="Server load style">
-                <SelectValue>{HOST_STATS_VARIANTS[settings.sidebarHostStatsStyle].label}</SelectValue>
+                <SelectValue>
+                  {HOST_STATS_VARIANTS[settings.sidebarHostStatsStyle].label}
+                </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 {HOST_STATS_PICKER_STYLES.map((value) => (

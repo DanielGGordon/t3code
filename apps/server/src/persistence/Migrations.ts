@@ -46,6 +46,12 @@ import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.
 import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
 import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/033_ProjectionThreadRestartRequest.ts";
+// Upstream shipped these as 033/034; renumbered to 034/035 because this fork's
+// 033 is already recorded in production's effect_sql_migrations. The Migrator
+// skips any id <= the recorded max WITHOUT comparing names, so reusing 033 here
+// would silently never create the settled columns. See UPSTREAM_DIVERGENCE.md.
+import Migration0034 from "./Migrations/034_ProjectionThreadsSettled.ts";
+import Migration0035 from "./Migrations/035_ProjectionThreadsSnoozed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -91,6 +97,8 @@ export const migrationEntries = [
   [31, "AuthAuthorizationScopes", Migration0031],
   [32, "AuthPairingProofKeyThumbprint", Migration0032],
   [33, "ProjectionThreadRestartRequest", Migration0033],
+  [34, "ProjectionThreadsSettled", Migration0034],
+  [35, "ProjectionThreadsSnoozed", Migration0035],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
