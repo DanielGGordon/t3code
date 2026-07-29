@@ -28,6 +28,7 @@ import {
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import { decideOrchestrationCommand } from "../decider.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -54,8 +55,9 @@ async function createOrchestrationSystem() {
       Layer.provide(OrchestrationProjectionPipelineLive),
     ),
     OrchestrationProjectionSnapshotQueryLive,
+    OrchestrationProjectionPipelineLive,
   ).pipe(
-    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provide(SqlitePersistenceMemory),
@@ -65,8 +67,15 @@ async function createOrchestrationSystem() {
   const runtime = ManagedRuntime.make(orchestrationLayer);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
+  const eventStore = await runtime.runPromise(Effect.service(OrchestrationEventStore));
+  const projectionPipeline = await runtime.runPromise(
+    Effect.service(OrchestrationProjectionPipeline),
+  );
   return {
     engine,
+    eventStore,
+    projectionPipeline,
+    getCommandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
@@ -417,6 +426,185 @@ describe("OrchestrationEngine", () => {
       "thread.created",
       "thread.deleted",
     ]);
+    await system.dispose();
+  });
+
+  it("dispatches commands against threads appended by an external writer", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine, eventStore, projectionPipeline } = system;
+    const createdAt = now();
+    const projectId = asProjectId("project-external-writer");
+    const threadAId = ThreadId.make("thread-engine");
+    const threadBId = ThreadId.make("thread-external");
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-external-project-create"),
+        projectId,
+        title: "External Writer Project",
+        workspaceRoot: "/tmp/project-external-writer",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-external-thread-a-create"),
+        threadId: threadAId,
+        projectId,
+        title: "engine thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const externalWriterReadModel = await system.getCommandReadModel();
+    await system.run(
+      Effect.gen(function* () {
+        const eventBase = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.create",
+            commandId: CommandId.make("cmd-external-thread-b-create"),
+            threadId: threadBId,
+            projectId,
+            title: "external thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          },
+          readModel: externalWriterReadModel,
+        });
+        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        for (const event of eventBases) {
+          const savedEvent = yield* eventStore.append(event);
+          yield* projectionPipeline.projectEvent(savedEvent);
+        }
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-external-watermark-advance"),
+        threadId: threadAId,
+        title: "engine thread updated",
+      }),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("cmd-external-delete"),
+        threadId: threadBId,
+      }),
+    );
+
+    const events = await system.run(
+      Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    expect(
+      events.some((event) => event.type === "thread.deleted" && event.aggregateId === threadBId),
+    ).toBe(true);
+
+    await system.dispose();
+  });
+
+  it("dispatches thread creation into a project appended by an external writer", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine, eventStore, projectionPipeline } = system;
+    const createdAt = now();
+    const projectId = asProjectId("project-external-import");
+    const threadId = ThreadId.make("thread-external-import");
+
+    const externalWriterReadModel = await system.getCommandReadModel();
+    await system.run(
+      Effect.gen(function* () {
+        const eventBase = yield* decideOrchestrationCommand({
+          command: {
+            type: "project.create",
+            commandId: CommandId.make("cmd-external-project-create"),
+            projectId,
+            title: "External Import Project",
+            workspaceRoot: "/tmp/project-external-import",
+            defaultModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            createdAt,
+          },
+          readModel: externalWriterReadModel,
+        });
+        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        for (const event of eventBases) {
+          const savedEvent = yield* eventStore.append(event);
+          yield* projectionPipeline.projectEvent(savedEvent);
+        }
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-watermark-project-create"),
+        projectId: asProjectId("project-watermark"),
+        title: "Watermark Project",
+        workspaceRoot: "/tmp/project-watermark",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-create-in-external-project"),
+        threadId,
+        projectId,
+        title: "thread in imported project",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const events = await system.run(
+      Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    expect(
+      events.some((event) => event.type === "thread.created" && event.aggregateId === threadId),
+    ).toBe(true);
+
     await system.dispose();
   });
 
