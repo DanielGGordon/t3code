@@ -214,4 +214,61 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       expect(normalizeDeleteEvent(forcedResult)).toEqual(normalizeDeleteEvent(sequentialEvents));
     }),
   );
+
+  it.effect("deletes a project without force when its only remaining threads are archived", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const now = "2026-01-01T00:00:01.000Z";
+      const withFirstArchived = yield* projectEvent(readModel, {
+        sequence: readModel.snapshotSequence + 1,
+        eventId: asEventId("evt-thread-archive-1"),
+        aggregateKind: "thread",
+        aggregateId: asThreadId("thread-delete-1"),
+        type: "thread.archived",
+        occurredAt: now,
+        commandId: asCommandId("cmd-thread-archive-1"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-thread-archive-1"),
+        metadata: {},
+        payload: {
+          threadId: asThreadId("thread-delete-1"),
+          archivedAt: now,
+          updatedAt: now,
+        },
+      });
+      const withBothArchived = yield* projectEvent(withFirstArchived, {
+        sequence: withFirstArchived.snapshotSequence + 1,
+        eventId: asEventId("evt-thread-archive-2"),
+        aggregateKind: "thread",
+        aggregateId: asThreadId("thread-delete-2"),
+        type: "thread.archived",
+        occurredAt: now,
+        commandId: asCommandId("cmd-thread-archive-2"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-thread-archive-2"),
+        metadata: {},
+        payload: {
+          threadId: asThreadId("thread-delete-2"),
+          archivedAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "project.delete",
+          commandId: asCommandId("cmd-project-delete-archived-only"),
+          projectId: asProjectId("project-delete"),
+        },
+        readModel: withBothArchived,
+      });
+      const events = Array.isArray(result) ? result : [result];
+
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.deleted",
+        "thread.deleted",
+        "project.deleted",
+      ]);
+    }),
+  );
 });
