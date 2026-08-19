@@ -8,6 +8,10 @@ import type {
   SlackThreadBadgeVariant,
 } from "./types";
 import { fableVariant } from "./variants/fable";
+import { grok46Variant } from "./variants/grok46";
+import { opus48Variant } from "./variants/opus48";
+import { opus5Variant } from "./variants/opus5";
+import { sol56Variant } from "./variants/sol56";
 
 export type {
   SlackBadgeDensity,
@@ -23,6 +27,10 @@ export type {
  */
 export const SLACK_THREAD_BADGE_VARIANTS: Record<string, SlackThreadBadgeVariant> = {
   [fableVariant.id]: fableVariant,
+  [opus5Variant.id]: opus5Variant,
+  [opus48Variant.id]: opus48Variant,
+  [grok46Variant.id]: grok46Variant,
+  [sol56Variant.id]: sol56Variant,
 };
 
 /** The option that ships unless overridden (see below). */
