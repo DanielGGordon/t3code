@@ -946,12 +946,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --popover-foreground: #93a1a1;
     --primary: #268bd2;
     --primary-foreground: #fdf6e3;
-    --secondary: #073642;
+    /* Solarized only ships two dark background tones (base03/base02), so a
+       literal #073642 here would equal --card/--popover and every hover state
+       (hover:bg-accent, hover:bg-muted, data-highlighted:bg-accent) would
+       repaint a surface its own color -- invisible. Mirror the default dark
+       theme and express these as translucent lifts so they read on top of
+       whatever surface they land on, glass popovers included. */
+    --secondary: color-mix(in srgb, #93a1a1 7%, transparent);
     --secondary-foreground: #93a1a1;
-    --muted: #073642;
+    --muted: color-mix(in srgb, #93a1a1 8%, transparent);
     --muted-foreground: #657b83;
-    --accent: #073642;
-    --accent-foreground: #93a1a1;
+    --accent: color-mix(in srgb, #93a1a1 12%, transparent);
+    --accent-foreground: #eee8d5;
     --destructive: #dc322f;
     --destructive-foreground: #e56b68;
     --border: #0a3d49;
