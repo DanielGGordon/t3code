@@ -724,6 +724,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {slackBadge?.at("title-leading", slackBadgeProps)}
+                    {slackBadge?.srPrefix}
                     {displayTitle}
                     {slackBadge?.at("title-trailing", slackBadgeProps)}
                   </span>

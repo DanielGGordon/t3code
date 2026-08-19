@@ -718,6 +718,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         isActive: props.isActive,
         isMuted: shouldRecede,
       })}
+      {slackBadge?.srPrefix}
       {displayTitle}
       {slackBadge?.at("title-trailing", {
         density: variant === "card" ? "card" : "slim",

@@ -57,9 +57,7 @@ export function resolveSlackThreadBadgeVariant(): SlackThreadBadgeVariant {
   if (override && SLACK_THREAD_BADGE_VARIANTS[override]) {
     return SLACK_THREAD_BADGE_VARIANTS[override]!;
   }
-  return (
-    SLACK_THREAD_BADGE_VARIANTS[SLACK_THREAD_BADGE_DEFAULT_VARIANT_ID] ?? fableVariant
-  );
+  return SLACK_THREAD_BADGE_VARIANTS[SLACK_THREAD_BADGE_DEFAULT_VARIANT_ID] ?? fableVariant;
 }
 
 const ACTIVE_VARIANT = resolveSlackThreadBadgeVariant();
@@ -81,6 +79,13 @@ export interface ResolvedSlackThreadBadge {
   variant: SlackThreadBadgeVariant;
   /** Title to display (prefix stripped when the variant asks for it). */
   displayTitle: string;
+  /**
+   * Visually-hidden `Slack:` prefix to render immediately before
+   * `displayTitle` when the variant strips it, so the row's accessible name
+   * still says "Slack" even though the visible mark sits in an `aria-hidden`
+   * cluster. Null when nothing was stripped.
+   */
+  srPrefix: ReactNode;
   /** True when this layout should render the badge in place of the project favicon. */
   replacesFavicon: (density: SlackBadgeDensity) => boolean;
   /** Render the badge if the variant wants it in `slot` for this layout; else null. */
@@ -94,6 +99,7 @@ function resolveForTitle(title: string): ResolvedSlackThreadBadge | null {
   return {
     variant,
     displayTitle: variant.stripPrefix ? stripThreadChannelPrefix(title) : title,
+    srPrefix: variant.stripPrefix ? <span className="sr-only">Slack: </span> : null,
     replacesFavicon: (density) =>
       effectiveSlackBadgePlacement(variant.placement, density) === "favicon",
     at: (slot, props) =>
