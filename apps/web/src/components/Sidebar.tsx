@@ -73,6 +73,7 @@ import {
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
+import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
@@ -456,6 +457,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
+  // Threads bridged from Slack (`Slack: …` titles) show the Slack mark in place of the prefix.
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -718,7 +721,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     className="min-w-0 flex-1 truncate text-sm"
                     data-testid={`thread-title-${thread.id}`}
                   >
-                    {thread.title}
+                    {isSlack ? (
+                      <SlackThreadBadge density="v1" isActive={isActive} isMuted={false} />
+                    ) : null}
+                    {displayTitle}
                   </span>
                 }
               />

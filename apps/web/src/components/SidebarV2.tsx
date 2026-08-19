@@ -54,6 +54,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../env";
+import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
@@ -526,6 +527,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const isRemote =
     props.currentEnvironmentId !== null && thread.environmentId !== props.currentEnvironmentId;
 
+  // Threads bridged from Slack (`Slack: …` titles) show the Slack mark in
+  // place of the prefix so they read differently from local conversations.
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
+
   const detailsTooltip = (
     <SidebarV2ThreadTooltip
       thread={thread}
@@ -707,7 +712,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             ),
       )}
     >
-      {thread.title}
+      {isSlack ? (
+        <SlackThreadBadge density={variant} isActive={props.isActive} isMuted={shouldRecede} />
+      ) : null}
+      {displayTitle}
     </span>
   );
 
