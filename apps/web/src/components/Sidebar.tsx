@@ -73,7 +73,7 @@ import {
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
-import { useSlackThreadBadge } from "./slack-thread-badge";
+import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
@@ -457,10 +457,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
-  // Threads bridged from Slack (`Slack: …` titles) get a channel symbol.
-  const slackBadge = useSlackThreadBadge(thread.title);
-  const displayTitle = slackBadge?.displayTitle ?? thread.title;
-  const slackBadgeProps = { density: "v1" as const, isActive, isMuted: false };
+  // Threads bridged from Slack (`Slack: …` titles) show the Slack mark in place of the prefix.
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -723,10 +721,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     className="min-w-0 flex-1 truncate text-sm"
                     data-testid={`thread-title-${thread.id}`}
                   >
-                    {slackBadge?.at("title-leading", slackBadgeProps)}
-                    {slackBadge?.srPrefix}
+                    {isSlack ? (
+                      <SlackThreadBadge density="v1" isActive={isActive} isMuted={false} />
+                    ) : null}
                     {displayTitle}
-                    {slackBadge?.at("title-trailing", slackBadgeProps)}
                   </span>
                 }
               />
@@ -737,7 +735,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {slackBadge?.at("trailing", slackBadgeProps)}
           {discoveredPorts.length > 0 && (
             <Tooltip>
               <TooltipTrigger

@@ -54,7 +54,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../env";
-import { useSlackThreadBadge } from "./slack-thread-badge";
+import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
@@ -527,10 +527,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const isRemote =
     props.currentEnvironmentId !== null && thread.environmentId !== props.currentEnvironmentId;
 
-  // Threads bridged from Slack (`Slack: …` titles) get a channel symbol so
-  // they read differently from locally-started conversations.
-  const slackBadge = useSlackThreadBadge(thread.title);
-  const displayTitle = slackBadge?.displayTitle ?? thread.title;
+  // Threads bridged from Slack (`Slack: …` titles) show the Slack mark in
+  // place of the prefix so they read differently from local conversations.
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
 
   const detailsTooltip = (
     <SidebarV2ThreadTooltip
@@ -713,18 +712,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             ),
       )}
     >
-      {slackBadge?.at("title-leading", {
-        density: variant === "card" ? "card" : "slim",
-        isActive: props.isActive,
-        isMuted: shouldRecede,
-      })}
-      {slackBadge?.srPrefix}
+      {isSlack ? (
+        <SlackThreadBadge density={variant} isActive={props.isActive} isMuted={shouldRecede} />
+      ) : null}
       {displayTitle}
-      {slackBadge?.at("title-trailing", {
-        density: variant === "card" ? "card" : "slim",
-        isActive: props.isActive,
-        isMuted: shouldRecede,
-      })}
     </span>
   );
 
@@ -777,32 +768,18 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                   "opacity-40 grayscale group-hover/v2-row:opacity-100 group-hover/v2-row:grayscale-0",
               )}
             >
-              {slackBadge?.replacesFavicon("slim") ? (
-                slackBadge.at("favicon", {
-                  density: "slim",
-                  isActive: props.isActive,
-                  isMuted: shouldRecede,
-                  className: "size-4",
-                })
-              ) : (
-                <ProjectFavicon
-                  environmentId={thread.environmentId}
-                  cwd={props.projectCwd ?? ""}
-                  className="size-4"
-                  fallbackIcon={MessageSquareIcon}
-                />
-              )}
+              <ProjectFavicon
+                environmentId={thread.environmentId}
+                cwd={props.projectCwd ?? ""}
+                className="size-4"
+                fallbackIcon={MessageSquareIcon}
+              />
             </span>
             {title}
             {/* The PR badge stays outside the hover-fading slot: it must
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
-            {slackBadge?.at("trailing", {
-              density: "slim",
-              isActive: props.isActive,
-              isMuted: shouldRecede,
-            })}
             <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
               <span className="inline-flex justify-end tabular-nums text-muted-foreground/55 transition-opacity group-hover/v2-row:opacity-0">
                 {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -893,20 +870,11 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         >
           <div className="relative z-10 h-[4.875rem] px-2.5 py-2">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              {slackBadge?.replacesFavicon("card") ? (
-                slackBadge.at("favicon", {
-                  density: "card",
-                  isActive: props.isActive,
-                  isMuted: shouldRecede,
-                  className: "size-4 shrink-0",
-                })
-              ) : (
-                <ProjectFavicon
-                  environmentId={thread.environmentId}
-                  cwd={props.projectCwd ?? ""}
-                  className="size-4 shrink-0"
-                />
-              )}
+              <ProjectFavicon
+                environmentId={thread.environmentId}
+                cwd={props.projectCwd ?? ""}
+                className="size-4 shrink-0"
+              />
               {props.projectTitle ? (
                 <span
                   className={cn(
@@ -919,11 +887,6 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              {slackBadge?.at("project-trailing", {
-                density: "card",
-                isActive: props.isActive,
-                isMuted: shouldRecede,
-              })}
               <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
                 <span
                   className={cn(
@@ -1006,11 +969,6 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 aria-hidden
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
               >
-                {slackBadge?.at("trailing", {
-                  density: "card",
-                  isActive: props.isActive,
-                  isMuted: shouldRecede,
-                })}
                 {isRemote ? (
                   <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
                     <ServerIcon aria-hidden className="size-3.5" />
