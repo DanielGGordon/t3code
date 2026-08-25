@@ -94,6 +94,18 @@ sessions T3 itself spawned are skipped (`skipped-owned` — session id found in 
 worktrees dir; `skipped-copy` — a forkSession copy whose message uuids largely already live on
 another thread), and deleted imported threads stay deleted via the event-log tombstone.
 
+### Threads that fail with "No conversation found with session ID"
+
+Every send in a Claude thread passes `--resume <session id>` from the thread's
+`provider_session_runtime.resume_cursor_json`. If that transcript
+(`~/.claude/projects/<cwd with non-alphanumerics replaced by '-'>/<session id>.jsonl`) is missing
+on the host — imported threads whose transcript never lived here, a reprovisioned host — Claude Code
+refuses to resume and the thread surfaces a runtime error naming the expected path
+(`apps/server/src/provider/claudeSessionTranscript.ts`). The cursor is deliberately left intact so
+the file can be restored from wherever the conversation ran. `t3 session audit` (offline, safe while
+serving) lists every affected thread; `t3 session reset <threadId> --yes` clears one cursor so the
+thread starts a fresh Claude session (`apps/server/src/cli/session.ts`).
+
 ## Upstream sync PRs: NEVER squash-merge
 
 Sync PRs (`merge: upstream through <sha>`) must land as a **merge commit** or a
