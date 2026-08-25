@@ -27,7 +27,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
-import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import {
   isNonConversationalTitle,
@@ -43,16 +42,11 @@ import {
 } from "../import/syncPlan.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationLayerLive } from "../orchestration/runtimeLayer.ts";
-import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers/Sqlite.ts";
-import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
-import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { expandHomePath } from "../os-jank.ts";
-import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { OfflineCliRuntimeLive } from "./offlineRuntime.ts";
 
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CLAUDE_ADAPTER_KEY = "claudeAgent";
@@ -62,24 +56,6 @@ const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJ
 class ImportCommandError extends Data.TaggedError("ImportCommandError")<{
   readonly message: string;
 }> {}
-
-/**
- * Offline runtime for `t3 import`. Mirrors `ProjectCliRuntimeLive`
- * (orchestration engine + projection snapshot + sqlite + workspace paths)
- * and additionally provides the provider session directory (so we can seed
- * the resume binding) and server settings (so we can resolve the Claude
- * provider instance). `FileSystem`, `Path`, and `Crypto` are satisfied by the
- * ambient CLI runtime layer (NodeServices) provided in `bin.ts`.
- */
-const ImportCliRuntimeLive = Layer.mergeAll(
-  WorkspacePaths.layer,
-  ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer)),
-  ProviderSessionDirectoryLive.pipe(Layer.provide(ProviderSessionRuntimeRepositoryLive)),
-  OrchestrationLayerLive,
-).pipe(
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
-  Layer.provideMerge(SqlitePersistenceLayerLive),
-);
 
 const claudeModel = DEFAULT_MODEL_BY_PROVIDER[CLAUDE_DRIVER_KIND] ?? "claude-sonnet-5";
 
@@ -616,7 +592,7 @@ const importClaudeCommand = Command.make("claude", {
         });
       }).pipe(
         Effect.provide(
-          ImportCliRuntimeLive.pipe(
+          OfflineCliRuntimeLive.pipe(
             Layer.provide(ServerConfig.layer(config)),
             Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
           ),
@@ -896,7 +872,7 @@ const importSyncCommand = Command.make("sync", {
         }
       }).pipe(
         Effect.provide(
-          ImportCliRuntimeLive.pipe(
+          OfflineCliRuntimeLive.pipe(
             Layer.provide(ServerConfig.layer(config)),
             Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
           ),
@@ -1020,7 +996,7 @@ const importRetitleCommand = Command.make("retitle", {
         }
       }).pipe(
         Effect.provide(
-          ImportCliRuntimeLive.pipe(
+          OfflineCliRuntimeLive.pipe(
             Layer.provide(ServerConfig.layer(config)),
             Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
           ),
