@@ -2959,6 +2959,86 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "explains a resume whose transcript is missing and keeps that explanation on stream exit",
+    () => {
+      const harness = makeHarness();
+      const missingSessionId = "9af5bb2c-886f-474a-9caa-af43d15fed38";
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+        const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => {
+            runtimeEvents.push(event);
+          }),
+        ).pipe(Effect.forkChild);
+
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          cwd: "/home/me/projects/voice-ai-integration",
+          resumeCursor: {
+            threadId: RESUME_THREAD_ID,
+            resume: missingSessionId,
+            turnCount: 0,
+          },
+          runtimeMode: "full-access",
+        });
+        yield* adapter.sendTurn({
+          threadId: RESUME_THREAD_ID,
+          input: "hello again",
+          attachments: [],
+        });
+
+        harness.query.emit({
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          errors: [`No conversation found with session ID: ${missingSessionId}`],
+          session_id: missingSessionId,
+          uuid: "result-missing-transcript",
+        } as unknown as SDKMessage);
+        harness.query.fail(new Error("Claude Code process exited"));
+
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        runtimeEventsFiber.interruptUnsafe();
+
+        const runtimeErrors = runtimeEvents.filter((event) => event.type === "runtime.error");
+        assert.equal(runtimeErrors.length, 1);
+        const runtimeError = runtimeErrors[0];
+        assert.equal(runtimeError?.type, "runtime.error");
+        if (runtimeError?.type === "runtime.error") {
+          assert.include(
+            runtimeError.payload.message,
+            `Claude could not resume session ${missingSessionId}`,
+          );
+          assert.include(
+            runtimeError.payload.message,
+            `~/.claude/projects/-home-me-projects-voice-ai-integration/${missingSessionId}.jsonl`,
+          );
+          assert.include(runtimeError.payload.message, `t3 session reset ${RESUME_THREAD_ID}`);
+          assert.deepEqual(runtimeError.payload.detail, {
+            reason: "resume_transcript_missing",
+            sessionId: missingSessionId,
+            expectedTranscriptPath: `~/.claude/projects/-home-me-projects-voice-ai-integration/${missingSessionId}.jsonl`,
+          });
+        }
+
+        const completed = runtimeEvents.find((event) => event.type === "turn.completed");
+        assert.equal(completed?.type, "turn.completed");
+        if (completed?.type === "turn.completed") {
+          assert.equal(completed.payload.state, "failed");
+          assert.include(completed.payload.errorMessage ?? "", "Claude could not resume session");
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("passes Claude resume ids without pinning a stale assistant checkpoint", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

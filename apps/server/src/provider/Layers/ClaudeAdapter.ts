@@ -73,6 +73,10 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
+  describeMissingResumeTranscript,
+  readMissingResumeSessionId,
+} from "../claudeSessionTranscript.ts";
+import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
   normalizeClaudeCliEffort,
@@ -187,7 +191,12 @@ interface ClaudeSessionContext {
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
+  readonly cwd: string | undefined;
   resumeSessionId: string | undefined;
+  // Set when the CLI refused to resume because the transcript is missing on
+  // this machine. `handleStreamExit` reuses it so the generic stream-failure
+  // text does not overwrite the actionable explanation already emitted.
+  resumeFailureMessage: string | undefined;
   // When true, the persisted resume cursor still requests a fork of
   // `forkOriginSessionId`. Cleared once the SDK reports the forked session's
   // new id, so later turns continue the fork instead of re-forking the origin.
@@ -2581,10 +2590,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const status = turnStatusFromResult(message);
-    const errorMessage = message.subtype === "success" ? undefined : message.errors[0];
+    const rawErrorMessage = message.subtype === "success" ? undefined : message.errors[0];
+    const missingResumeSessionId =
+      status === "failed" ? readMissingResumeSessionId(rawErrorMessage) : undefined;
+    let errorMessage = rawErrorMessage;
 
     if (status === "failed") {
-      yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+      if (missingResumeSessionId !== undefined) {
+        // The persisted resume cursor points at a transcript Claude Code can
+        // no longer find. Surface what happened and how to recover instead of
+        // the bare CLI text; the cursor itself is left untouched on purpose so
+        // the transcript can still be restored (see claudeSessionTranscript.ts).
+        const described = describeMissingResumeTranscript({
+          threadId: context.session.threadId,
+          sessionId: missingResumeSessionId,
+          cwd: context.cwd,
+        });
+        errorMessage = described.message;
+        context.resumeFailureMessage = described.message;
+        yield* emitRuntimeError(context, described.message, described.detail);
+      } else {
+        yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+      }
     }
 
     yield* completeTurn(context, status, errorMessage, message);
@@ -3037,11 +3064,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const failures = exit.cause.reasons.flatMap((reason) =>
           Cause.isFailReason(reason) ? [reason.error] : [],
         );
-        const message = failures[0]?.detail ?? "Claude runtime stream failed.";
-        yield* emitRuntimeError(context, message, {
-          failureCount: failures.length,
-          failureTags: failures.map((failure) => failure._tag),
-        });
+        const resumeFailureMessage = context.resumeFailureMessage;
+        const message =
+          resumeFailureMessage ?? failures[0]?.detail ?? "Claude runtime stream failed.";
+        if (resumeFailureMessage === undefined) {
+          yield* emitRuntimeError(context, message, {
+            failureCount: failures.length,
+            failureTags: failures.map((failure) => failure._tag),
+          });
+        }
         yield* completeTurn(context, "failed", message);
       }
     } else if (context.turnState) {
@@ -3670,7 +3701,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         startedAt,
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
+        cwd: input.cwd,
         resumeSessionId: sessionId,
+        resumeFailureMessage: undefined,
         forkSession,
         forkOriginSessionId: forkSession ? existingResumeSessionId : undefined,
         pendingApprovals,
