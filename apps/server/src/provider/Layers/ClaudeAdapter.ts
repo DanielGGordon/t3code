@@ -1281,6 +1281,25 @@ function sdkNativeMethod(message: SDKMessage): string {
 
 // Discriminator/identity keys carry no human-readable content; everything else
 // on an unmodeled SDK message is potentially worth surfacing in the work log.
+// Top-level SDK message types the CLI emits on the wire but the pinned SDK
+// types don't declare, and which T3 has no surface for. Matched by string
+// before the typed switch (see handleSdkMessage) so they are consumed instead
+// of surfacing as unknown-type warnings.
+const UNDECLARED_SILENT_SDK_MESSAGE_TYPES = new Set(["command_lifecycle"]);
+
+// Same idea one level down, for `system` subtypes (see handleSystemMessage):
+//   - background_tasks_changed: roster snapshot ({tasks: [...]}) — the task_*
+//     lifecycle events carry the authoritative per-agent data and the typed
+//     background_tasks control request is the reconciliation source.
+//   - vcs_state_changed / code_change_published: the CLI's observations that a
+//     shell command committed/pushed or published a PR. Informational only, and
+//     T3 reads git state from the workspace itself.
+const UNDECLARED_SILENT_SDK_SYSTEM_SUBTYPES = new Set([
+  "background_tasks_changed",
+  "vcs_state_changed",
+  "code_change_published",
+]);
+
 const SDK_MESSAGE_NOISE_KEYS = new Set([
   "type",
   "subtype",
@@ -2644,11 +2663,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // Undeclared-but-real subtypes (absent from the SDK's union, so they can't
     // be switch cases): consumed intentionally without emitting, otherwise
     // they fall through to the unknown-subtype warning and surface as spurious
-    // error rows in client work logs. `background_tasks_changed` is a roster
-    // snapshot ({tasks: [...]}) — the task_* lifecycle events carry the
-    // authoritative per-agent data and the typed background_tasks control
-    // request is the reconciliation source.
-    if ((message.subtype as string) === "background_tasks_changed") {
+    // error rows in client work logs.
+    if (UNDECLARED_SILENT_SDK_SYSTEM_SUBTYPES.has(message.subtype as string)) {
       return;
     }
 
@@ -2977,6 +2993,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   ) {
     yield* logNativeSdkMessage(context, message);
     yield* ensureThreadId(context, message);
+
+    // Undeclared-but-real top-level types (absent from the SDK's union, so they
+    // can't be switch cases): consumed intentionally, otherwise they fall
+    // through to the unknown-type warning and surface as spurious error rows in
+    // client work logs. `command_lifecycle` is the CLI's per-queued-command
+    // queued/started/terminal trace, keyed by the uuid T3 puts on the inbound
+    // user message; T3 tracks turn state from result/session_state_changed and
+    // has no command-queue surface, so the trace has nowhere to go. It is only
+    // visible here because the installed `claude` binary runs ahead of the
+    // pinned @anthropic-ai/claude-agent-sdk types.
+    if (UNDECLARED_SILENT_SDK_MESSAGE_TYPES.has(message.type as string)) {
+      return;
+    }
 
     switch (message.type) {
       case "stream_event":
