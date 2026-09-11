@@ -295,3 +295,23 @@ merge once upstream's daily fix-up rate drops.
 - `AGENTS.md`: adopted upstream's focused-verification policy; kept all fork sections.
 - `.claude/skills` → upstream's symlink to `.agents/skills/`; our `redeploy` skill moved to
   `.agents/skills/redeploy/` (same resolved path as before).
+
+---
+
+## 2026-09-10 — Fork-local: `@anthropic-ai/claude-agent-sdk` pinned ahead of upstream
+
+Not an upstream review. Recorded here because it is a deliberate divergence that the next
+sync will hit as a `apps/server/package.json` / `pnpm-lock.yaml` conflict.
+
+Upstream pins `^0.3.170`; this fork pins **`^0.3.267`**, matching the CLI versions actually
+installed on our hosts (SDK `0.3.x` tracks CLI `2.1.x`). Under the old pin the CLI emitted
+message shapes the SDK's typed unions did not declare, and `ClaudeAdapter` painted them as
+red "unknown SDK message" rows in the work log — see the fix that preceded this bump.
+
+**On the next sync: keep the higher pin.** Taking upstream's `^0.3.170` reintroduces the
+fake-error rows. Note the skew is structural rather than one-time — the `claude` binary
+auto-updates and `binaryPath` defaults to whatever is on `PATH`, so the CLI will run ahead
+of any pin again. The `UNDECLARED_SILENT_SDK_MESSAGE_TYPES` /
+`UNDECLARED_SILENT_SDK_SYSTEM_SUBTYPES` sets in `ClaudeAdapter.ts` are the escape hatch for
+that, and stay necessary at any pin (`command_lifecycle`, `vcs_state_changed`, and
+`code_change_published` are `@internal` and undeclared even in 0.3.267).

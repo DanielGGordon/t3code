@@ -1278,15 +1278,11 @@ function sdkNativeMethod(message: SDKMessage): string {
 // of surfacing as unknown-type warnings.
 const UNDECLARED_SILENT_SDK_MESSAGE_TYPES = new Set(["command_lifecycle"]);
 
-// Same idea one level down, for `system` subtypes (see handleSystemMessage):
-//   - background_tasks_changed: roster snapshot ({tasks: [...]}) — the task_*
-//     lifecycle events carry the authoritative per-agent data and the typed
-//     background_tasks control request is the reconciliation source.
-//   - vcs_state_changed / code_change_published: the CLI's observations that a
-//     shell command committed/pushed or published a PR. Informational only, and
-//     T3 reads git state from the workspace itself.
+// Same idea one level down, for `system` subtypes (see handleSystemMessage).
+// vcs_state_changed / code_change_published are the CLI's observations that a
+// shell command committed, pushed, or published a PR: informational only, and
+// T3 reads git state from the workspace itself.
 const UNDECLARED_SILENT_SDK_SYSTEM_SUBTYPES = new Set([
-  "background_tasks_changed",
   "vcs_state_changed",
   "code_change_published",
 ]);
@@ -2839,8 +2835,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           yield* emitRuntimeWarning(context, message.text, message);
         }
         return;
+      case "informational":
+        // Generic CLI banner: status lines, slash-command output, hook
+        // feedback. Only the prominent level earns a work-log row — plus
+        // anything that halts the turn (a Stop hook's block reason), which is
+        // otherwise invisible next to a turn that simply stopped.
+        if (message.level === "warning" || message.prevent_continuation === true) {
+          yield* emitRuntimeWarning(context, message.content, message);
+        }
+        return;
+      case "model_refusal_no_fallback":
+        // The stream ended in a refusal and no retry ran. Unlike
+        // model_refusal_fallback, no follow-up turn will explain the silence.
+        yield* emitRuntimeWarning(context, message.content, message);
+        return;
       // Inner protocol/UX details with no T3 surface today — consumed
       // deliberately so they don't masquerade as unknown-subtype warnings.
+      // The three that need a reason beyond that:
+      //   - background_tasks_changed: level snapshot of live background tasks.
+      //     The task_* lifecycle events carry the authoritative per-agent data
+      //     and the typed background_tasks control request reconciles it.
+      //   - control_request_progress: progress for client-originated control
+      //     requests (side_question today). T3 issues none, so there is
+      //     nothing to correlate this against.
+      //   - worker_shutting_down: graceful teardown reason from a remote
+      //     bridge. T3 runs the CLI itself, and the SDK warns this frame
+      //     replays mid-stream on resume, so it must never be read as a
+      //     session-lifetime fact.
+      case "background_tasks_changed":
+      case "control_request_progress":
+      case "worker_shutting_down":
       case "model_refusal_fallback":
       case "local_command_output":
       case "plugin_install":
@@ -3004,6 +3028,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         return;
       // Composer prompt suggestions have no T3 surface; consumed deliberately.
       case "prompt_suggestion":
+        return;
+      case "conversation_reset":
+        // /clear, plan-mode exit, and fresh-session flows start a new
+        // conversation mid-stream. The resume cursor is not moved from here:
+        // `ensureThreadId` adopts whatever session id the CLI puts on the next
+        // durable message, which is authoritative, where `new_conversation_id`
+        // is only a promise about a transcript that does not exist yet.
         return;
       default: {
         // Exhaustiveness guard (see handleSystemMessage): new SDK top-level

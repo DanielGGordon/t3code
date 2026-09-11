@@ -1790,6 +1790,36 @@ describe("ClaudeAdapterLive", () => {
         { type: "system", subtype: "commands_changed", session_id: "session", uuid: "cc" },
         {
           type: "system",
+          subtype: "control_request_progress",
+          request_id: "req-1",
+          status: "started",
+          session_id: "session",
+          uuid: "crp",
+        },
+        {
+          type: "system",
+          subtype: "worker_shutting_down",
+          reason: "host_exit",
+          session_id: "session",
+          uuid: "wsd",
+        },
+        // Quiet informational levels stay out of the work log.
+        {
+          type: "system",
+          subtype: "informational",
+          content: "compacting conversation",
+          level: "notice",
+          session_id: "session",
+          uuid: "info-notice",
+        },
+        {
+          type: "conversation_reset",
+          new_conversation_id: "11111111-2222-3333-4444-555555555555",
+          session_id: "session",
+          uuid: "reset",
+        },
+        {
+          type: "system",
           subtype: "vcs_state_changed",
           kind: "push",
           cwd: "/repo",
@@ -1905,6 +1935,69 @@ describe("ClaudeAdapterLive", () => {
           event.payload.reason.startsWith("api_retry:"),
       );
       assert.equal(heartbeat?.type, "session.state.changed");
+      runtimeEventsFiber.interruptUnsafe();
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("surfaces informational banners and unretried refusals as warning rows", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => runtimeEvents.push(event)),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      for (const message of [
+        {
+          type: "system",
+          subtype: "informational",
+          content: "slow tool detected",
+          level: "warning",
+          session_id: "session",
+          uuid: "info-warning",
+        },
+        // Quiet level, but the turn stops here (a Stop hook's block reason),
+        // so it must still be visible.
+        {
+          type: "system",
+          subtype: "informational",
+          content: "Stop hook blocked continuation",
+          level: "info",
+          prevent_continuation: true,
+          session_id: "session",
+          uuid: "info-halt",
+        },
+        {
+          type: "system",
+          subtype: "model_refusal_no_fallback",
+          original_model: "claude-opus-5",
+          request_id: "req-refusal",
+          content: "The model declined to continue.",
+          session_id: "session",
+          uuid: "refusal",
+        },
+      ]) {
+        harness.query.emit(message as unknown as SDKMessage);
+      }
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      assert.deepEqual(
+        runtimeEvents
+          .filter((event) => event.type === "runtime.warning")
+          .map((event) => (event.type === "runtime.warning" ? event.payload.message : "")),
+        ["slow tool detected", "Stop hook blocked continuation", "The model declined to continue."],
+      );
       runtimeEventsFiber.interruptUnsafe();
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -2868,6 +2961,7 @@ describe("ClaudeAdapterLive", () => {
             },
           ],
           toolUseID: "tool-use-1",
+          requestId: "req-tool-use-1",
         },
       );
 
@@ -2944,6 +3038,7 @@ describe("ClaudeAdapterLive", () => {
         {
           signal: new AbortController().signal,
           toolUseID: "tool-agent-1",
+          requestId: "req-tool-agent-1",
         },
       );
 
@@ -2968,6 +3063,7 @@ describe("ClaudeAdapterLive", () => {
         {
           signal: new AbortController().signal,
           toolUseID: "tool-grep-approval-1",
+          requestId: "req-tool-grep-approval-1",
         },
       );
 
@@ -3505,6 +3601,7 @@ describe("ClaudeAdapterLive", () => {
         {
           signal: new AbortController().signal,
           toolUseID: "tool-exit-1",
+          requestId: "req-tool-exit-1",
         },
       );
 
@@ -3671,6 +3768,7 @@ describe("ClaudeAdapterLive", () => {
       const permissionPromise = canUseTool("AskUserQuestion", askInput, {
         signal: new AbortController().signal,
         toolUseID: "tool-ask-1",
+        requestId: "req-tool-ask-1",
       });
 
       // The adapter should emit a user-input.requested event.
@@ -3797,6 +3895,7 @@ describe("ClaudeAdapterLive", () => {
       const permissionPromise = canUseTool("AskUserQuestion", askInput, {
         signal: new AbortController().signal,
         toolUseID: "tool-ask-2",
+        requestId: "req-tool-ask-2",
       });
 
       // Should still get user-input.requested even in full-access mode.
@@ -3862,6 +3961,7 @@ describe("ClaudeAdapterLive", () => {
         {
           signal: controller.signal,
           toolUseID: "tool-ask-abort",
+          requestId: "req-tool-ask-abort",
         },
       );
 
