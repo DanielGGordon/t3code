@@ -91,6 +91,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
+import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -345,6 +346,7 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
+    voiceTranscription?: Partial<VoiceTranscription.VoiceTranscription["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartup.ServerRuntimeStartup["Service"]>;
     serverEnvironment?: Partial<ServerEnvironment.ServerEnvironment["Service"]>;
@@ -764,6 +766,12 @@ const buildAppUnderTest = (options?: {
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
           record: () => Effect.void,
           ...options?.layers?.browserTraceCollector,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(VoiceTranscription.VoiceTranscription)({
+          transcribe: () => Effect.succeed(""),
+          ...options?.layers?.voiceTranscription,
         }),
       ),
       Layer.provide(
@@ -4012,6 +4020,82 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           contentType: "application/json",
         },
       ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("transcribes voice recordings for authenticated sessions", () =>
+    Effect.gen(function* () {
+      const received: Array<{ bytes: number; mimeType: string }> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          voiceTranscription: {
+            transcribe: (input) =>
+              Effect.sync(() => {
+                received.push({ bytes: input.audio.byteLength, mimeType: input.mimeType });
+                return "run the tests please";
+              }),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.post("/api/voice/transcribe", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+        body: HttpBody.uint8Array(new Uint8Array([1, 2, 3, 4]), "audio/webm;codecs=opus"),
+      });
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(yield* response.json, { text: "run the tests please" });
+      assert.deepEqual(received, [{ bytes: 4, mimeType: "audio/webm;codecs=opus" }]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects unauthenticated voice transcription requests", () =>
+    Effect.gen(function* () {
+      let called = false;
+      yield* buildAppUnderTest({
+        layers: {
+          voiceTranscription: {
+            transcribe: () =>
+              Effect.sync(() => {
+                called = true;
+                return "";
+              }),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.post("/api/voice/transcribe", {
+        body: HttpBody.uint8Array(new Uint8Array([1, 2, 3]), "audio/webm"),
+      });
+
+      assert.equal(response.status, 401);
+      assert.equal(called, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("maps voice transcription failures to a typed error response", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          voiceTranscription: {
+            transcribe: () =>
+              Effect.fail(
+                new VoiceTranscription.VoiceTranscriptionError({
+                  reason: "not_configured",
+                  message: "no key",
+                }),
+              ),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.post("/api/voice/transcribe", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+        body: HttpBody.uint8Array(new Uint8Array([1]), "audio/mp4"),
+      });
+
+      assert.equal(response.status, 503);
+      assert.deepEqual(yield* response.json, { reason: "not_configured", message: "no key" });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
