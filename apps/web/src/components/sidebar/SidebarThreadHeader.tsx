@@ -78,10 +78,10 @@ export function SidebarThreadHeader({
     : "New thread";
 
   return (
-    <div className="flex items-center gap-1 touch:gap-2">
+    <div className="flex items-center gap-1 touch:flex-wrap touch:gap-2">
       <div
         ref={searchFieldRef}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground touch:h-12 touch:text-base"
+        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground touch:h-12 touch:basis-full touch:text-base"
       >
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput
@@ -123,7 +123,7 @@ export function SidebarThreadHeader({
       {/* Unfilled like the search field beside it: the buttons carry their own
           hover states, and a background well reads far louder on themed
           palettes than on the base light and dark ones. */}
-      <div className="flex shrink-0 items-center touch:gap-1">
+      <div className="flex shrink-0 items-center touch:w-full touch:justify-around touch:gap-1">
         {hasProjects ? (
           <>
             {projectScope}
