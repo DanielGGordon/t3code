@@ -95,8 +95,11 @@ echo "    now at $TARGET_SHORT — $TARGET_SUBJ"
 echo "==> Installing dependencies"
 ( cd "$DEPLOY_DIR" && pnpm install --prefer-offline )
 
-echo "==> Building"
-( cd "$DEPLOY_DIR" && pnpm build )
+echo "==> Building web bundle"
+# Prod runs the server from source and serves apps/web/dist, so only the web
+# bundle is needed (same as test-deploy). The root `pnpm build` also builds the
+# Electron desktop app, which needs libsecret headers this headless box lacks.
+( cd "$DEPLOY_DIR" && pnpm --filter @t3tools/web build )
 
 echo "==> Build OK. Firing detached restart of $SERVICE"
 echo "    (this chat's session will drop when the server restarts)"

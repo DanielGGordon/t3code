@@ -19,7 +19,8 @@ Redeploys the self-hosted T3 Code server to the current `origin/main`. The logic
 2. `git fetch` the deploy checkout (`~/projects/meta/t3code-v2`) and hard checkout a
    **detached copy of `origin/main`** — the deploy dir becomes a plain snapshot of
    `origin/main`, no branches to reason about (it also drops the leftover `deploy` label).
-3. `pnpm install` + `pnpm build`.
+3. `pnpm install` + `pnpm --filter @t3tools/web build` (prod runs the server from source; the
+   root `pnpm build` would also build the Electron desktop app, which needs libsecret headers).
 4. If the build succeeds, fires a **detached** `systemctl --user restart t3code.service` as a
    transient systemd unit (so the restart completes even though this session dies). That unit
    waits for loopback health, **then re-starts the import timer**, and writes a health report
