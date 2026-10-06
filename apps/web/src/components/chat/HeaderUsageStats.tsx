@@ -1,10 +1,4 @@
-import type {
-  ClaudeAccountUsage,
-  ClaudeAccountUsageLimit,
-  CodexUsageResult,
-  StockQuote,
-  StockQuoteResult,
-} from "@t3tools/contracts";
+import type { StockQuote, StockQuoteResult } from "@t3tools/contracts";
 import type { ClientSettings, ClientSettingsPatch } from "@t3tools/contracts/settings";
 import { ChartNoAxesColumnIcon } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
@@ -20,6 +14,11 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+import type {
+  HeaderClaudeUsage,
+  HeaderCodexUsage,
+  HeaderUsageLimit,
+} from "~/lib/headerUsageLimits";
 import {
   type ContextWindowSnapshot,
   formatContextWindowTokens,
@@ -112,12 +111,12 @@ export function selectHeaderUsageStatsVisibility(
   };
 }
 
-function findLimit(usage: ClaudeAccountUsage | null, kind: string): ClaudeAccountUsageLimit | null {
+function findLimit(usage: HeaderClaudeUsage | null, kind: string): HeaderUsageLimit | null {
   return usage?.limits.find((limit) => limit.kind === kind) ?? null;
 }
 
 /** Display label for the scoped weekly limit (e.g. a model-family scope). */
-export function resolveScopedWeeklyLabel(usage: ClaudeAccountUsage | null): string {
+export function resolveScopedWeeklyLabel(usage: HeaderClaudeUsage | null): string {
   return findLimit(usage, "weekly_scoped")?.scopeLabel ?? FALLBACK_SCOPED_WEEKLY_LABEL;
 }
 
@@ -172,7 +171,7 @@ export const SPEND_STAT_TOOLTIP =
 /** Shown instead when part of the thread's usage has no list price. */
 export const SPEND_STAT_PARTIAL_TOOLTIP = `${SPEND_STAT_TOOLTIP} Part of this thread's usage ran on a model with no published list price and is not included in this total.`;
 
-function formatLimitPercent(limit: ClaudeAccountUsageLimit): string {
+function formatLimitPercent(limit: HeaderUsageLimit): string {
   return `${Math.round(limit.percent)}%`;
 }
 
@@ -181,20 +180,18 @@ function formatLimitPercent(limit: ClaudeAccountUsageLimit): string {
  * their used percentage and reset countdowns. The big readout shows only the
  * 5h percentage; the rest lives here.
  */
-function formatCodexUsageTooltip(usage: CodexUsageResult): string {
+function formatCodexUsageTooltip(usage: HeaderCodexUsage | null): string {
   const now = Date.now();
   const segments: string[] = [];
   const describe = (
     label: string,
-    window: { readonly usedPercent: number; readonly resetsAt: number | null } | null,
+    window: { readonly usedPercent: number; readonly resetsAt?: string } | null,
   ): void => {
     if (!window) {
       return;
     }
     const countdown =
-      window.resetsAt !== null
-        ? formatResetCountdown(new Date(window.resetsAt * 1000).toISOString(), now)
-        : null;
+      window.resetsAt !== undefined ? formatResetCountdown(window.resetsAt, now) : null;
     segments.push(
       `${label} ${Math.round(window.usedPercent)}%${countdown ? ` · resets in ${countdown}` : ""}`,
     );
@@ -251,8 +248,8 @@ function formatStockChangeTooltip(quote: StockQuote | null): string {
 export function selectHeaderUsageStats(input: {
   readonly visibility: HeaderUsageStatsVisibility;
   readonly contextWindow: ContextWindowSnapshot | null;
-  readonly claudeUsage: ClaudeAccountUsage | null;
-  readonly codexUsage?: CodexUsageResult;
+  readonly claudeUsage: HeaderClaudeUsage | null;
+  readonly codexUsage?: HeaderCodexUsage | null;
   readonly stockQuote?: StockQuoteResult;
   readonly stockSymbol?: string;
 }): HeaderUsageStatItem[] {
@@ -378,7 +375,7 @@ export function HeaderUsageStats(props: { stats: ReadonlyArray<HeaderUsageStatIt
           stat.tooltip ?? (resetCountdown ? `Resets in ${resetCountdown}` : null);
         const block = (
           <div key={stat.id} className="flex flex-col items-start">
-            <span className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+            <span className="text-3xs font-medium uppercase leading-tight tracking-wider text-muted-foreground">
               {stat.label}
             </span>
             <span
@@ -472,15 +469,14 @@ export function HeaderUsageStatsMenu(props: {
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <Input
-                    size="sm"
+                    size="compact"
                     value={symbolDraft}
                     aria-label="Stock ticker symbol"
                     placeholder="SPY"
                     spellCheck={false}
                     autoComplete="off"
                     autoCapitalize="characters"
-                    className="text-xs uppercase tracking-wide"
-                    onChange={(event) => setSymbolDraft(event.target.value)}
+                    onChange={(event) => setSymbolDraft(event.target.value.toUpperCase())}
                     onBlur={commitSymbol}
                     onKeyDown={(event) => {
                       event.stopPropagation();

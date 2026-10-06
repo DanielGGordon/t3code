@@ -1,49 +1,104 @@
+import { RefreshIcon } from "~/components/ui/refresh-icon";
 import type {
   ContextMenuItem as TreeContextMenuItem,
   ContextMenuOpenContext as TreeContextMenuOpenContext,
 } from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
-import { FileTree, useFileTree } from "@pierre/trees/react";
+import { FileTree, useFileTree, useFileTreeSearch, useFileTreeSelector } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
-import { Home, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide";
+import { Home, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "~/components/ui/button";
+import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
+import { MorphIcon } from "~/components/MorphIcon";
 import { toastManager } from "~/components/ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-import { cn } from "~/lib/utils";
+import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
+import { useFileContextMenu, type FileContextMenuAction } from "~/fileContextMenu";
 import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
+import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
-import { useProjectEntriesQuery } from "./projectFilesQueryState";
+import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
+import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
+import { useDirectoryEntries } from "./useDirectoryEntries";
+import { useProjectPathSearch } from "~/state/queries";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
   cwd: string;
   projectName: string;
+  /** True when the explorer root was changed away from the project directory. */
   reRooted: boolean;
   onRootChange: (cwd: string) => void;
   onRootReset: () => void;
-  onOpenFile: (relativePath: string, cwd: string) => void;
+  /** Entry currently open in the surface; revealed and selected in the tree. A directory is expanded. */
+  selectedPath: string | null;
+  /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
+  selectedPathRevealId: number;
+  onOpenFile: (relativePath: string) => void;
+  onRefreshSelectedFile?: () => void;
+  workspaceMutationId: string | null;
 }
-
-const TREE_UNSAFE_CSS = `
-  :host {
-    --trees-bg-override: transparent;
-    --trees-selected-bg-override: color-mix(in srgb, currentColor 12%, transparent);
-    --trees-hover-bg-override: color-mix(in srgb, currentColor 7%, transparent);
-    --trees-border-color-override: color-mix(in srgb, currentColor 14%, transparent);
-    --trees-font-family-override: var(--font-sans);
-    --trees-font-size-override: 12px;
-  }
-  button[data-type='item'] { border-radius: 5px; }
-`;
 
 function treePath(entry: ProjectEntry): string {
   return entry.kind === "directory" ? `${entry.path}/` : entry.path;
+}
+
+function RefreshFilesButton(props: { isPending: boolean; onRefresh: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Refresh workspace files"
+            onClick={props.onRefresh}
+          />
+        }
+      >
+        <RefreshIcon refreshing={props.isPending} />
+      </TooltipTrigger>
+      <TooltipPopup>{props.isPending ? "Refreshing…" : "Refresh files"}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function FileSearchField(props: {
+  ariaLabel: string;
+  name: string;
+  onClose: () => void;
+  onValueChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <InputGroup variant="ghost" className="h-7 min-w-0 flex-1">
+      <InputGroupInput
+        type="search"
+        name={props.name}
+        size="sm"
+        value={props.value}
+        aria-label={props.ariaLabel}
+        placeholder="Search files"
+        spellCheck={false}
+        onChange={(event) => props.onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          props.onClose();
+          event.currentTarget.blur();
+        }}
+      />
+    </InputGroup>
+  );
 }
 
 export default function FileBrowserPanel({
@@ -53,26 +108,65 @@ export default function FileBrowserPanel({
   reRooted,
   onRootChange,
   onRootReset,
+  selectedPath,
+  selectedPathRevealId,
   onOpenFile,
+  onRefreshSelectedFile,
+  workspaceMutationId,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const showDotfiles = useClientSettings((settings) => settings.fileExplorerShowDotfiles);
-  const composerRef = useComposerHandleContext();
-  const entriesQuery = useProjectEntriesQuery(environmentId, cwd, showDotfiles);
   const [rootInput, setRootInput] = useState(cwd);
   useEffect(() => setRootInput(cwd), [cwd]);
   const applyRoot = () => {
     const nextRoot = rootInput.trim();
     if (nextRoot) onRootChange(nextRoot);
   };
-  const entries = entriesQuery.data?.entries ?? [];
+  const composerRef = useComposerHandleContext();
+  const fileContextMenu = useFileContextMenu(environmentId);
+  const {
+    entries: directoryEntries,
+    load,
+    refresh,
+    ready,
+    error,
+    isPending,
+  } = useDirectoryEntries(environmentId, cwd);
+  const [query, setQuery] = useState("");
+  const [expandAll, setExpandAll] = useState(false);
+  const pathSearch = useProjectPathSearch({ environmentId, cwd, query: query.slice(0, 256) }, 200);
+  const entries = useMemo(() => {
+    const result = new Map(directoryEntries.map((entry) => [entry.path, entry]));
+    if (query.trim() && !pathSearch.isPending) {
+      for (const entry of pathSearch.entries) {
+        if (!result.has(entry.path)) result.set(entry.path, entry);
+        const segments = entry.path.split("/");
+        for (let index = 1; index < segments.length; index++) {
+          const path = segments.slice(0, index).join("/");
+          if (!result.has(path)) result.set(path, { path, kind: "directory" });
+        }
+      }
+    }
+    const all = [...result.values()];
+    // Fork: the "Show dotfiles" feature toggle hides dot-prefixed entries (and their children).
+    return showDotfiles
+      ? all
+      : all.filter((entry) => !entry.path.split("/").some((segment) => segment.startsWith(".")));
+  }, [directoryEntries, pathSearch.entries, pathSearch.isPending, query, showDotfiles]);
   const entryKinds = useMemo(
     () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
     [entries],
   );
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
   const treePaths = useMemo(() => entries.map(treePath), [entries]);
-  const previousTreePathsRef = useRef<readonly string[]>([]);
+  const directoryPaths = useMemo(
+    () => entries.filter((entry) => entry.kind === "directory").map(treePath),
+    [entries],
+  );
+  const previousTreePathsRef = useRef<readonly string[] | null>(null);
+  const syncingSelectionRef = useRef(false);
+  const treeSelectionPathRef = useRef<string | null>(null);
+  const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
 
   // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -86,6 +180,7 @@ export default function FileBrowserPanel({
     return () => document.removeEventListener("contextmenu", capturePointer, true);
   }, []);
 
+  /** Combines the file actions (open/reveal/open with) with the panel's own mention actions. */
   const showEntryContextMenu = async (
     item: TreeContextMenuItem,
     context: TreeContextMenuOpenContext,
@@ -103,14 +198,26 @@ export default function FileBrowserPanel({
     const position = pointerIsFresh
       ? { x: pointer.x, y: pointer.y }
       : { x: anchorRect.left, y: anchorRect.bottom };
+    const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
+    const fileMenuItems = fileContextMenu.buildItems(fileTarget);
     try {
       const clicked = await api.contextMenu.show(
         [
+          ...fileMenuItems,
           { id: "copy-mention", label: "Copy mention" },
           { id: "add-to-chat", label: "Add to chat" },
         ],
         position,
       );
+      if (clicked === null) return;
+      // "Open with" submenu selections report the child id ("editor:<id>"),
+      // which is not present in the top-level item list.
+      const isFileMenuAction =
+        fileMenuItems.some((entry) => entry.id === clicked) || clicked.startsWith("editor:");
+      if (isFileMenuAction) {
+        await fileContextMenu.activate(clicked as FileContextMenuAction, fileTarget);
+        return;
+      }
       if (clicked === "copy-mention") {
         try {
           await writeTextToClipboard(mention);
@@ -178,7 +285,12 @@ export default function FileBrowserPanel({
     initialExpansion: "closed",
     icons: T3_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
+      // The drag controller's selection cache must track every change,
+      // including reveal-driven ones, or drags act on a stale selection.
       dragMention.handleSelectionChange(selectedPaths);
+      // Selection changes driven by the reveal sync below are echoes of an
+      // already-open file, not a request to open it again.
+      if (syncingSelectionRef.current) return;
       // Starting a drag selects the dragged row; that selection is a side
       // effect of the gesture, not a request to open the file.
       if (dragMention.isDragInProgress()) {
@@ -186,30 +298,184 @@ export default function FileBrowserPanel({
       }
       const selectedPath = selectedPaths.at(-1)?.replace(/\/$/, "");
       if (selectedPath && entryKindsRef.current.get(selectedPath) === "file") {
-        onOpenFile(selectedPath, cwd);
+        treeSelectionPathRef.current = selectedPath;
+        onOpenFile(selectedPath);
       }
     },
     paths: [],
-    search: true,
-    unsafeCSS: TREE_UNSAFE_CSS,
+    search: false,
+    onSearchChange: (value) => setQuery(value ?? ""),
+    unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
+  });
+  const search = useFileTreeSearch(model);
+  const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
+    areAllDirectoriesExpanded(currentModel, directoryPaths),
+  );
+  const toggleAllDirectories = () => {
+    const expanded = !(expandAll || allDirectoriesExpanded);
+    setExpandAll(expanded);
+    setAllDirectoriesExpanded(model, directoryPaths, expanded);
+  };
+  const closeSearch = () => {
+    setQuery("");
+    search.close();
+  };
+  const expandedPathsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const currentPaths = new Set(directoryPaths);
+    for (const path of expandedPathsRef.current) {
+      if (!currentPaths.has(path)) expandedPathsRef.current.delete(path);
+    }
+    const loadExpanded = () => {
+      if (model.isSearchOpen()) return;
+      for (const path of directoryPaths) {
+        const item = model.getItem(path);
+        if (item?.isDirectory() && "isExpanded" in item && item.isExpanded()) {
+          if (!expandedPathsRef.current.has(path)) {
+            expandedPathsRef.current.add(path);
+            void load(path.replace(/\/$/, ""));
+          }
+        } else {
+          if (item?.isDirectory() && expandedPathsRef.current.has(path)) setExpandAll(false);
+          expandedPathsRef.current.delete(path);
+        }
+      }
+    };
+    loadExpanded();
+    return model.subscribe(loadExpanded);
+  }, [directoryPaths, load, model]);
+  useEffect(() => {
+    model.setGitStatus(
+      entries
+        .filter((entry) => entry.ignored)
+        .map((entry) => ({
+          path: treePath(entry),
+          status: "ignored",
+        })),
+    );
+  }, [entries, model]);
+  useEffect(() => {
+    if (!selectedPath) return;
+    const controller = new AbortController();
+    void (async () => {
+      const segments = selectedPath.split("/");
+      for (let index = 0; index < segments.length && !controller.signal.aborted; index++) {
+        await load(segments.slice(0, index).join("/"));
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [load, selectedPath]);
+  const handleSearchValueChange = (value: string) => {
+    setQuery(value);
+    if (value.trim().length === 0) {
+      search.close();
+      return;
+    }
+    search.setValue(value);
+  };
+  const handleRefresh = () => {
+    refresh();
+    if (query.trim()) pathSearch.refresh();
+    onRefreshSelectedFile?.();
+  };
+  useWorkspaceMutationRefresh({
+    mutationId: workspaceMutationId,
+    refresh: () => {
+      refresh();
+      if (query.trim()) pathSearch.refresh();
+    },
+    resourceKey: `files:${environmentId}:${cwd}`,
   });
 
   useEffect(() => {
+    if (!ready) return;
     if (previousTreePathsRef.current === treePaths) return;
     entryKindsRef.current = entryKinds;
+    const previousTreePaths = previousTreePathsRef.current;
     previousTreePathsRef.current = treePaths;
-    model.resetPaths(treePaths);
-  }, [entryKinds, model, treePaths]);
+    if (previousTreePaths === null) {
+      model.resetPaths(treePaths);
+      return;
+    }
+    const updates = buildFileTreePathUpdates(previousTreePaths, treePaths);
+    if (updates.length > 0) model.batch(updates);
+  }, [ready, entryKinds, model, treePaths]);
 
-  const fileCount = useMemo(
-    () => entries.reduce((count, entry) => count + (entry.kind === "file" ? 1 : 0), 0),
-    [entries],
-  );
-  const rootLabel = useMemo(() => {
-    if (!reRooted) return projectName;
-    const normalized = cwd.replace(/[\\/]+$/, "");
-    return normalized.split(/[\\/]/).at(-1) || cwd;
-  }, [cwd, projectName, reRooted]);
+  useEffect(() => {
+    if (expandAll && !query.trim()) setAllDirectoriesExpanded(model, directoryPaths, true);
+  }, [directoryPaths, expandAll, model, query]);
+
+  useEffect(() => {
+    if (!selectedPath) {
+      handledRevealRef.current = null;
+      return;
+    }
+    const selectedKind = entryKinds.get(selectedPath);
+    // An unloaded entry has no row to reveal yet; folders do, and chat links can
+    // point at them.
+    if (selectedKind === undefined) {
+      handledRevealRef.current = null;
+      return;
+    }
+    const revealRequest = { path: selectedPath, revealId: selectedPathRevealId };
+    const handledReveal = handledRevealRef.current;
+    // Entry refreshes rebuild treePaths while the same preview stays open.
+    // Replaying a handled reveal would close an active tree search and steal focus.
+    if (
+      handledReveal?.path === revealRequest.path &&
+      handledReveal.revealId === revealRequest.revealId
+    ) {
+      return;
+    }
+    // Directory rows are registered with a trailing slash (see treePath).
+    const selectedTreePath = selectedKind === "directory" ? `${selectedPath}/` : selectedPath;
+    const selectedItem = model.getItem(selectedTreePath);
+    if (!selectedItem) return;
+
+    // A selection that originated inside the tree (clicking a row, possibly
+    // in an active tree search) is already visible; re-revealing it would
+    // close the search and clobber the user's context. Only sync external
+    // opens (file picker, content search, chat links).
+    const selectedInTree = model
+      .getSelectedPaths()
+      .some((path) => path.replace(/\/$/, "") === selectedPath);
+    if (selectedInTree && treeSelectionPathRef.current === selectedPath) {
+      treeSelectionPathRef.current = null;
+      handledRevealRef.current = revealRequest;
+      return;
+    }
+    treeSelectionPathRef.current = null;
+    handledRevealRef.current = revealRequest;
+
+    syncingSelectionRef.current = true;
+    setQuery("");
+    model.closeSearch();
+    for (const path of model.getSelectedPaths()) {
+      model.getItem(path)?.deselect();
+    }
+
+    // Directory rows are registered with a trailing slash (see treePath), so
+    // ancestor lookups must use the same form to expand them.
+    const segments = selectedPath.split("/");
+    let ancestorPath = "";
+    for (const segment of segments.slice(0, -1)) {
+      ancestorPath = ancestorPath ? `${ancestorPath}/${segment}` : segment;
+      const item = model.getItem(`${ancestorPath}/`) ?? model.getItem(ancestorPath);
+      if (item && "expand" in item) item.expand();
+    }
+
+    if ("expand" in selectedItem) selectedItem.expand();
+    selectedItem.select();
+    model.scrollToPath(selectedTreePath, {
+      focus: true,
+      offset: "center",
+    });
+    queueMicrotask(() => {
+      syncingSelectionRef.current = false;
+    });
+  }, [entryKinds, model, selectedPath, selectedPathRevealId]);
 
   // Tag tree drags with the composer mention payload. The row is read from
   // the composed event path (the tree's shadow root is open), so this does
@@ -242,86 +508,127 @@ export default function FileBrowserPanel({
       className="flex min-h-0 flex-1 flex-col bg-background"
       data-file-browser-panel={`${environmentId}:${cwd}`}
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-foreground" title={cwd}>
-            {rootLabel}
-          </div>
-          <div className="truncate text-[10px] leading-none text-muted-foreground">
-            {entriesQuery.isPending && entriesQuery.data === null
-              ? "Indexing…"
-              : `${fileCount.toLocaleString()} files`}
-            {entriesQuery.data?.truncated ? " · partial" : ""}
-          </div>
-        </div>
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Search workspace files"
-          onClick={() => model.openSearch()}
-        >
-          <Search className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Refresh workspace files"
-          onClick={entriesQuery.refresh}
-        >
-          <RefreshCw className={cn("size-3.5", entriesQuery.isPending && "animate-spin")} />
-        </button>
+      <div
+        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-9 in-data-[preview-panel-mode=inline]:min-h-9 in-data-[preview-panel-mode=inline]:border-b-transparent"
+        data-surface-subheader
+      >
+        <RefreshFilesButton isPending={isPending} onRefresh={handleRefresh} />
+        <FileSearchField
+          name="project-files-search"
+          ariaLabel={`Search ${projectName} files`}
+          value={search.value}
+          onValueChange={handleSearchValueChange}
+          onClose={closeSearch}
+        />
+        {directoryPaths.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={
+                    expandAll || allDirectoriesExpanded
+                      ? "Collapse all folders"
+                      : "Expand all folders"
+                  }
+                  onClick={toggleAllDirectories}
+                />
+              }
+            >
+              <MorphIcon
+                className="size-3.5"
+                icon={allDirectoriesExpanded ? ChevronsDownUp : ChevronsUpDown}
+              />
+            </TooltipTrigger>
+            <TooltipPopup>
+              {expandAll || allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5">
-        <input
-          value={rootInput}
-          onChange={(event) => setRootInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") applyRoot();
-          }}
-          className="min-w-0 flex-1 rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] text-foreground outline-none focus:border-ring"
-          aria-label="File explorer root directory"
-          title={cwd}
-        />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <input
+                value={rootInput}
+                onChange={(event) => setRootInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") applyRoot();
+                }}
+                className="min-w-0 flex-1 rounded-md border border-border/70 bg-background px-2 py-1 text-2xs text-foreground outline-none focus:border-ring"
+                aria-label="File explorer root directory"
+              />
+            }
+          />
+          <TooltipPopup side="bottom">{cwd}</TooltipPopup>
+        </Tooltip>
         <button
           type="button"
-          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-md px-2 py-1 text-2xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={applyRoot}
         >
           Apply
         </button>
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Browse home directory"
-          title="Home"
-          onClick={() => onRootChange("~")}
-        >
-          <Home className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-          aria-label="Reset file explorer to project directory"
-          title="Reset to project"
-          disabled={!reRooted}
-          onClick={onRootReset}
-        >
-          <RotateCcw className="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Browse home directory"
+                onClick={() => onRootChange("~")}
+              >
+                <Home className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">Home</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                aria-label="Reset file explorer to project directory"
+                disabled={!reRooted}
+                onClick={onRootReset}
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">Reset to project</TooltipPopup>
+        </Tooltip>
       </div>
-      {entriesQuery.error && entriesQuery.data === null ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{entriesQuery.error}</div>
-      ) : (
-        <FileTree
-          model={model}
-          aria-label={`${projectName} files`}
-          className="min-h-0 flex-1 overflow-hidden"
-          style={{
-            colorScheme: resolvedTheme,
-            ["--trees-fg-override" as string]: "var(--foreground)",
-          }}
-        />
+      {error || pathSearch.error ? (
+        <button
+          type="button"
+          onClick={handleRefresh}
+          className="p-4 text-left text-xs leading-relaxed text-destructive"
+        >
+          {error ?? pathSearch.error} Click to retry.
+        </button>
+      ) : null}
+      {query.trim() && pathSearch.truncated && !pathSearch.isPending ? (
+        <div className="px-3 py-1 text-xs text-muted-foreground">
+          More matches available. Refine your search.
+        </div>
+      ) : null}
+      {(isPending || pathSearch.isPending) && (
+        <div role="status" className="px-3 py-1 text-xs text-muted-foreground">
+          Loading files…
+        </div>
       )}
+      <FileTree
+        model={model}
+        aria-label={`${projectName} files`}
+        className="min-h-0 flex-1 overflow-hidden"
+        style={pierreTreeStyle(resolvedTheme)}
+      />
     </div>
   );
 }

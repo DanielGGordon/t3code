@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -11,21 +12,24 @@ import * as Schema from "effect/Schema";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectEntry,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
-  ProjectListSkillsInput,
-  ProjectListSkillsResult,
+  ProjectSearchContentsInput,
+  ProjectSearchContentsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
-  ProjectSkill,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
+import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
+import { expandHomePathWith } from "../pathExpansion.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 
-export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
+export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedError<WorkspaceEntriesWindowsPathUnsupportedError>()(
   "WorkspaceEntriesWindowsPathUnsupportedError",
   {
     cwd: Schema.optional(Schema.String),
@@ -39,7 +43,7 @@ export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedEr
   }
 }
 
-export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedErrorClass<WorkspaceEntriesCurrentProjectRequiredError>()(
+export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedError<WorkspaceEntriesCurrentProjectRequiredError>()(
   "WorkspaceEntriesCurrentProjectRequiredError",
   {
     partialPath: Schema.String,
@@ -50,7 +54,7 @@ export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedEr
   }
 }
 
-export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedErrorClass<WorkspaceEntriesReadDirectoryError>()(
+export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedError<WorkspaceEntriesReadDirectoryError>()(
   "WorkspaceEntriesReadDirectoryError",
   {
     cwd: Schema.optional(Schema.String),
@@ -73,6 +77,7 @@ export const WorkspaceEntriesBrowseError = Schema.Union([
 export type WorkspaceEntriesBrowseError = typeof WorkspaceEntriesBrowseError.Type;
 
 export const WorkspaceEntriesError = Schema.Union([
+  WorkspaceEntriesReadDirectoryError,
   WorkspacePaths.WorkspaceRootNotExistsError,
   WorkspacePaths.WorkspaceRootCreateFailedError,
   WorkspacePaths.WorkspaceRootStatFailedError,
@@ -92,64 +97,15 @@ export class WorkspaceEntries extends Context.Service<
     readonly list: (
       input: ProjectListEntriesInput,
     ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
-    readonly listSkills: (
-      input: ProjectListSkillsInput,
-    ) => Effect.Effect<ProjectListSkillsResult, WorkspaceEntriesError>;
     readonly search: (
       input: ProjectSearchEntriesInput,
     ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
+    readonly searchContents: (
+      input: ProjectSearchContentsInput,
+    ) => Effect.Effect<ProjectSearchContentsResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
 >()("t3/workspace/WorkspaceEntries") {}
-
-const SKILL_MANIFEST_FILENAME = "SKILL.md";
-const SKILLS_DIRECTORY_SEGMENTS = [".claude", "skills"] as const;
-const SKILL_MANIFEST_MAX_BYTES = 64 * 1024;
-
-/**
- * Extract `name` / `description` from a SKILL.md YAML frontmatter block. This is
- * intentionally minimal (single-line scalar values only) — enough to label a
- * project skill in the composer without pulling in a YAML dependency.
- */
-function parseSkillFrontmatter(contents: string): {
-  readonly name?: string;
-  readonly description?: string;
-} {
-  const normalized = contents.replace(/^\uFEFF/, "");
-  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(normalized);
-  const frontmatterBlock = match?.[1];
-  if (frontmatterBlock === undefined) {
-    return {};
-  }
-  const result: { name?: string; description?: string } = {};
-  for (const rawLine of frontmatterBlock.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    const separatorIndex = line.indexOf(":");
-    if (separatorIndex <= 0) {
-      continue;
-    }
-    const key = line.slice(0, separatorIndex).trim().toLowerCase();
-    if (key !== "name" && key !== "description") {
-      continue;
-    }
-    let value = line.slice(separatorIndex + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (value) {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-function isMissingPathError(cause: unknown): boolean {
-  const code = (cause as NodeJS.ErrnoException | undefined)?.code;
-  return code === "ENOENT" || code === "ENOTDIR";
-}
 
 const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(function* (
   input: FilesystemBrowseInput,
@@ -165,7 +121,7 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
   }
 
   if (!isExplicitRelativePath(input.partialPath)) {
-    return path.resolve(WorkspacePaths.expandHomePath(input.partialPath, path));
+    return path.resolve(expandHomePathWith(input.partialPath, path));
   }
 
   if (!input.cwd) {
@@ -173,13 +129,15 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
       partialPath: input.partialPath,
     });
   }
-  return path.resolve(WorkspacePaths.expandHomePath(input.cwd, path), input.partialPath);
+  return path.resolve(expandHomePathWith(input.cwd, path), input.partialPath);
 });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap;
+  const vcsProcess = yield* VcsProcess.VcsProcess;
 
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
@@ -192,33 +150,37 @@ export const make = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(
         Effect.orElseSucceed(() => cwd),
       );
-      if (!(yield* RcMap.has(workspaceSearchIndexes.rcMap, normalizedCwd))) {
-        return;
-      }
-      const recoverRefreshFailure = (
-        cause:
-          | WorkspaceSearchIndex.WorkspaceSearchIndexCreateFailed
-          | WorkspaceSearchIndex.WorkspaceSearchIndexScanTimedOut
-          | WorkspaceSearchIndex.WorkspaceSearchIndexRefreshFailed,
-      ) =>
-        Effect.gen(function* () {
-          yield* Effect.logWarning("Failed to refresh workspace search index", {
-            cwd,
-            cause,
+      for (const variant of WorkspaceSearchIndex.WORKSPACE_SEARCH_INDEX_VARIANTS) {
+        const indexKey = WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, variant);
+        if (!(yield* RcMap.has(workspaceSearchIndexes.rcMap, indexKey))) {
+          continue;
+        }
+        const recoverRefreshFailure = (
+          cause:
+            | WorkspaceSearchIndex.WorkspaceSearchIndexCreateFailed
+            | WorkspaceSearchIndex.WorkspaceSearchIndexScanTimedOut
+            | WorkspaceSearchIndex.WorkspaceSearchIndexRefreshFailed,
+        ) =>
+          Effect.gen(function* () {
+            yield* Effect.logWarning("Failed to refresh workspace search index", {
+              cwd,
+              variant,
+              cause,
+            });
+            yield* workspaceSearchIndexes.invalidate(indexKey);
           });
-          yield* workspaceSearchIndexes.invalidate(normalizedCwd);
-        });
-      yield* Effect.gen(function* () {
-        const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        yield* searchIndex.refresh();
-      }).pipe(
-        Effect.provide(workspaceSearchIndexes.get(normalizedCwd)),
-        Effect.catchTags({
-          WorkspaceSearchIndexCreateFailed: recoverRefreshFailure,
-          WorkspaceSearchIndexScanTimedOut: recoverRefreshFailure,
-          WorkspaceSearchIndexRefreshFailed: recoverRefreshFailure,
-        }),
-      );
+        yield* Effect.gen(function* () {
+          const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
+          yield* searchIndex.refresh();
+        }).pipe(
+          Effect.provide(workspaceSearchIndexes.get(indexKey)),
+          Effect.catchTags({
+            WorkspaceSearchIndexCreateFailed: recoverRefreshFailure,
+            WorkspaceSearchIndexScanTimedOut: recoverRefreshFailure,
+            WorkspaceSearchIndexRefreshFailed: recoverRefreshFailure,
+          }),
+        );
+      }
     },
   );
 
@@ -274,74 +236,144 @@ export const make = Effect.gen(function* () {
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-      const normalizedQuery = input.query
-        .trim()
-        .toLowerCase()
-        .replace(/^[@./]+/, "");
+      const normalizedQuery = normalizeSearchQuery(input.query, {
+        trimLeadingPattern: /^[@./]+/,
+      });
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.search(normalizedQuery, input.limit);
-      }).pipe(Effect.provide(workspaceSearchIndexes.get(normalizedCwd)));
+        return yield* searchIndex.search(normalizedQuery, input.limit, input.kind, input.imageOnly);
+      }).pipe(
+        Effect.provide(
+          workspaceSearchIndexes.get(
+            WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "paths"),
+          ),
+        ),
+      );
     },
   );
+
+  const searchContents: WorkspaceEntries["Service"]["searchContents"] = Effect.fn(
+    "WorkspaceEntries.searchContents",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    return yield* Effect.gen(function* () {
+      const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
+      return yield* searchIndex.searchContents(input);
+    }).pipe(
+      Effect.provide(
+        workspaceSearchIndexes.get(
+          WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "content"),
+        ),
+      ),
+    );
+  });
 
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+      if (input.directoryPath !== undefined) {
+        const directoryPath = input.directoryPath;
+        const toError = (cause: unknown) =>
+          new WorkspaceEntriesReadDirectoryError({
+            cwd: normalizedCwd,
+            partialPath: directoryPath,
+            parentPath: path.resolve(normalizedCwd, directoryPath),
+            cause,
+          });
+        const target =
+          directoryPath === ""
+            ? { absolutePath: normalizedCwd, relativePath: "" }
+            : yield* workspacePaths
+                .resolveRelativePathWithinRoot({
+                  workspaceRoot: normalizedCwd,
+                  relativePath: directoryPath,
+                })
+                .pipe(Effect.mapError(toError));
+        const entries = yield* Effect.tryPromise({
+          try: async () => {
+            const root = await NodeFSP.realpath(normalizedCwd);
+            const directory = await NodeFSP.realpath(target.absolutePath);
+            const relative = path.relative(root, directory);
+            if (
+              relative === ".." ||
+              relative.startsWith(`..${path.sep}`) ||
+              path.isAbsolute(relative) ||
+              relative.split(path.sep).includes(".git") ||
+              target.relativePath.split("/").includes(".git")
+            ) {
+              throw new Error("Directory must be inside the workspace and outside .git.");
+            }
+            const children = await NodeFSP.readdir(directory, { withFileTypes: true });
+            const resolved = await Promise.all(
+              children.map(async (child): Promise<ProjectEntry | null> => {
+                if (child.name === ".git") return null;
+                let kind: ProjectEntry["kind"] | null = null;
+                if (child.isDirectory()) kind = "directory";
+                else if (child.isFile()) kind = "file";
+                else if (child.isSymbolicLink()) {
+                  // List symlinks that point at a file (e.g. a `.env` linked in from
+                  // the main checkout) so they stay openable; symlinked directories
+                  // stay hidden because they could lead outside the workspace.
+                  const targetStat = await NodeFSP.stat(NodePath.join(directory, child.name)).catch(
+                    () => null,
+                  );
+                  if (targetStat?.isFile()) kind = "file";
+                }
+                if (kind === null) return null;
+                return {
+                  path: target.relativePath ? `${target.relativePath}/${child.name}` : child.name,
+                  kind,
+                };
+              }),
+            );
+            return resolved.filter((entry): entry is ProjectEntry => entry !== null);
+          },
+          catch: toError,
+        });
+        // Use stdin so large directories cannot exceed the command-line argument limit.
+        // Ignore classification is optional in non-git workspaces or when git is unavailable.
+        const ignored = new Set<string>();
+        for (let offset = 0; offset < entries.length; offset += 1000) {
+          const chunk = entries.slice(offset, offset + 1000);
+          const result = yield* vcsProcess
+            .run({
+              operation: "WorkspaceEntries.list",
+              command: "git",
+              args: ["-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
+              cwd: normalizedCwd,
+              stdin: `${chunk.map((entry) => entry.path).join("\0")}\0`,
+              allowNonZeroExit: true,
+              timeoutMs: 10_000,
+              maxOutputBytes: 16 * 1024 * 1024,
+            })
+            .pipe(Effect.orElseSucceed(() => undefined));
+          if (!result || (result.exitCode !== 0 && result.exitCode !== 1)) break;
+          for (const ignoredPath of result.stdout.split("\0")) ignored.add(ignoredPath);
+        }
+        return {
+          entries: entries.map((entry) =>
+            ignored.has(entry.path) ? { ...entry, ignored: true } : entry,
+          ),
+          truncated: false,
+        };
+      }
       return yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.list(input.showDotfiles ?? false);
-      }).pipe(Effect.provide(workspaceSearchIndexes.get(normalizedCwd)));
+        return yield* searchIndex.list();
+      }).pipe(
+        Effect.provide(
+          workspaceSearchIndexes.get(
+            WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "paths"),
+          ),
+        ),
+      );
     },
   );
 
-  const listSkills: WorkspaceEntries["Service"]["listSkills"] = Effect.fn(
-    "WorkspaceEntries.listSkills",
-  )(function* (input) {
-    // Best-effort: an unresolvable root simply yields no project skills rather
-    // than surfacing an error into the composer autocomplete path.
-    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd).pipe(
-      Effect.orElseSucceed(() => input.cwd),
-    );
-    const skillsRoot = path.join(normalizedCwd, ...SKILLS_DIRECTORY_SEGMENTS);
-
-    const dirents = yield* Effect.tryPromise(() =>
-      NodeFSP.readdir(skillsRoot, { withFileTypes: true }),
-    ).pipe(Effect.orElseSucceed(() => []));
-
-    const skills: Array<ProjectSkill> = [];
-    for (const dirent of dirents) {
-      if (!dirent.isDirectory() || dirent.name.startsWith(".")) {
-        continue;
-      }
-      const manifestPath = path.join(skillsRoot, dirent.name, SKILL_MANIFEST_FILENAME);
-      const contents = yield* Effect.tryPromise(() =>
-        NodeFSP.readFile(manifestPath, { encoding: "utf8" }),
-      ).pipe(
-        Effect.map((raw) => raw.slice(0, SKILL_MANIFEST_MAX_BYTES)),
-        Effect.catchIf(isMissingPathError, () => Effect.succeed(null)),
-        Effect.orElseSucceed(() => null),
-      );
-      if (contents === null) {
-        // Skills require a SKILL.md manifest; skip directories without one.
-        continue;
-      }
-      const frontmatter = parseSkillFrontmatter(contents);
-      const name = frontmatter.name?.trim() || dirent.name;
-      skills.push({
-        name,
-        path: manifestPath,
-        ...(frontmatter.description ? { description: frontmatter.description } : {}),
-      });
-    }
-
-    skills.sort((left, right) => left.name.localeCompare(right.name));
-    return { skills };
-  });
-
-  return WorkspaceEntries.of({ browse, list, listSkills, refresh, search });
+  return WorkspaceEntries.of({ browse, list, refresh, search, searchContents });
 });
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(
   Layer.provide(WorkspaceSearchIndex.WorkspaceSearchIndexMap.layer),
+  Layer.provide(VcsProcess.layer),
 );

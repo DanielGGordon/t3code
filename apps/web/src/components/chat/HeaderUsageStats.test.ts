@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  type ClaudeAccountUsage,
-  EventId,
-  type OrchestrationThreadActivity,
-  TurnId,
-} from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 import { deriveLatestContextWindowSnapshot } from "~/lib/contextWindow";
+import type { HeaderClaudeUsage } from "~/lib/headerUsageLimits";
 import {
   formatResetCountdown,
   type HeaderUsageStatsVisibility,
@@ -18,29 +13,48 @@ import {
   SPEND_STAT_TOOLTIP,
 } from "./HeaderUsageStats";
 
-function makeActivity(id: string, payload: unknown): OrchestrationThreadActivity {
+type TestProviderTurn = Parameters<typeof deriveLatestContextWindowSnapshot>[3] extends
+  | ReadonlyArray<infer Turn>
+  | undefined
+  ? Turn
+  : never;
+
+function makeTurn(
+  status: TestProviderTurn["status"],
+  usage?: { readonly costUsd?: number; readonly costUsdIncomplete?: boolean },
+): TestProviderTurn {
   return {
-    id: EventId.make(id),
-    tone: "info",
-    kind: "context-window.updated",
-    summary: "context-window.updated",
-    payload,
-    turnId: TurnId.make("turn-1"),
-    createdAt: "2026-03-23T00:00:00.000Z",
+    status,
+    turnTokenUsage:
+      usage === undefined
+        ? undefined
+        : {
+            usageScope: "main_agent",
+            usageStatus: "complete",
+            inputTokens: 1,
+            outputTokens: 1,
+            hasSubagents: false,
+            ...usage,
+          },
   };
 }
 
-const contextWindow = deriveLatestContextWindowSnapshot([
-  makeActivity("activity-1", { usedTokens: 167_000, maxTokens: 200_000, costUsd: 1.416 }),
+const liveUsage = {
+  usedTokens: 167_000,
+  maxTokens: 200_000,
+  updatedAt: "2026-03-23T00:00:00.000Z",
+};
+
+const contextWindow = deriveLatestContextWindowSnapshot([], liveUsage, null, [
+  makeTurn("completed", { costUsd: 1.416 }),
 ]);
 
-const claudeUsage: ClaudeAccountUsage = {
+const claudeUsage: HeaderClaudeUsage = {
   limits: [
     { kind: "session", percent: 42, resetsAt: "2026-03-23T04:36:00.000Z" },
     { kind: "weekly_all", percent: 63.4, resetsAt: "2026-03-26T12:06:00.000Z" },
     { kind: "weekly_scoped", percent: 18, scopeLabel: "Fable" },
   ],
-  fetchedAt: "2026-03-23T00:00:00.000Z",
 };
 
 const allVisible: HeaderUsageStatsVisibility = {
@@ -117,10 +131,10 @@ describe("selectHeaderUsageStats", () => {
   it("marks the spend stat as partial when some usage had no list price", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,
-      contextWindow: deriveLatestContextWindowSnapshot([
-        makeActivity("activity-1", { usedTokens: 10_000, costUsd: 1.416 }),
-        // e.g. a Codex session on a model with no published API list price.
-        makeActivity("activity-2", { usedTokens: 20_000, costUsdIncomplete: true }),
+      contextWindow: deriveLatestContextWindowSnapshot([], liveUsage, null, [
+        makeTurn("completed", { costUsd: 1.416 }),
+        // e.g. a Codex turn on a model with no published API list price.
+        makeTurn("completed", { costUsdIncomplete: true }),
       ]),
       claudeUsage: null,
     });
@@ -144,8 +158,8 @@ describe("selectHeaderUsageStats", () => {
   it("omits the spend stat when no cost data ever arrived", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,
-      contextWindow: deriveLatestContextWindowSnapshot([
-        makeActivity("activity-1", { usedTokens: 167_000, maxTokens: 200_000 }),
+      contextWindow: deriveLatestContextWindowSnapshot([], liveUsage, null, [
+        makeTurn("completed"),
       ]),
       claudeUsage: null,
     });
@@ -179,7 +193,6 @@ describe("selectHeaderUsageStats", () => {
       contextWindow: null,
       claudeUsage: {
         limits: [{ kind: "session", percent: 42 }],
-        fetchedAt: "2026-03-23T00:00:00.000Z",
       },
     });
 
@@ -202,7 +215,6 @@ describe("selectHeaderUsageStats", () => {
       contextWindow: null,
       claudeUsage: {
         limits: [{ kind: "weekly_scoped", percent: 18 }],
-        fetchedAt: "2026-03-23T00:00:00.000Z",
       },
     });
 
@@ -217,17 +229,15 @@ describe("selectHeaderUsageStats", () => {
       contextWindow: null,
       claudeUsage: null,
       codexUsage: {
-        planType: "plus",
-        primary: { usedPercent: 11, resetsAt: null, windowMinutes: 300 },
-        secondary: { usedPercent: 2, resetsAt: null, windowMinutes: 10_080 },
-        capturedAt: 1_783_610_399,
+        primary: { usedPercent: 11 },
+        secondary: { usedPercent: 2 },
       },
     });
 
     const codex = stats.find((stat) => stat.id === "codex");
     expect(codex?.label).toBe("Codex");
     expect(codex?.value).toBe("11%");
-    // resetsAt is null in this fixture, so no countdown segments.
+    // no resetsAt in this fixture, so no countdown segments.
     expect(codex?.tooltip).toBe("5h 11% · Weekly 2%");
   });
 
@@ -355,7 +365,6 @@ describe("resolveScopedWeeklyLabel", () => {
     expect(
       resolveScopedWeeklyLabel({
         limits: [{ kind: "session", percent: 1 }],
-        fetchedAt: "2026-03-23T00:00:00.000Z",
       }),
     ).toBe("Scoped");
   });

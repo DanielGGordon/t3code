@@ -2,7 +2,7 @@ import type { StockQuote, StockQuoteResult } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 // Free, keyless quote sources, tried in order. Cboe's delayed-quotes endpoint
 // is first because Yahoo and Stooq are IP-blocked from datacenter ranges: from

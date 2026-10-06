@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
@@ -7,7 +6,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 // button trigger that reveals a detail popover on hover.
 export function HeaderStatBadge(props: {
   ariaLabel: string;
-  triggerClassName?: string;
+  tone?: "default" | "warning" | "critical";
   trigger: ReactNode;
   children: ReactNode;
 }) {
@@ -21,14 +20,21 @@ export function HeaderStatBadge(props: {
           <Button
             size="xs"
             variant="outline"
-            className={cn("shrink-0 gap-1 text-muted-foreground", props.triggerClassName)}
+            className="shrink-0 text-muted-foreground data-[tone=critical]:text-destructive data-[tone=warning]:text-warning-foreground"
+            data-tone={props.tone ?? "default"}
             aria-label={props.ariaLabel}
           />
         }
       >
         {props.trigger}
       </PopoverTrigger>
-      <PopoverPopup tooltipStyle side="bottom" align="end" className="w-max max-w-none px-3 py-2">
+      <PopoverPopup
+        tooltipStyle
+        side="bottom"
+        align="end"
+        padding="compact"
+        className="w-max max-w-none"
+      >
         {props.children}
       </PopoverPopup>
     </Popover>

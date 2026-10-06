@@ -7,14 +7,14 @@ import {
   type VoiceTranscriptionResult,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import {
   HttpIncomingMessage,
   HttpRouter,
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 
 import { authenticateRawRouteWithScope } from "../http.ts";
 import * as VoiceTranscription from "./VoiceTranscription.ts";
@@ -52,7 +52,7 @@ export const voiceTranscriptionRouteLayer = HttpRouter.add(
     const body = yield* request.arrayBuffer.pipe(
       Effect.provideService(
         HttpIncomingMessage.MaxBodySize,
-        FileSystem.Size(VOICE_TRANSCRIPTION_MAX_BYTES),
+        ByteSize.bytes(VOICE_TRANSCRIPTION_MAX_BYTES),
       ),
       Effect.option,
     );

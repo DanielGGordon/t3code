@@ -15,11 +15,103 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ## Standing policy
 
-- **Android / native mobile: do not pull.** We are not investing in the mobile app on this
-  fork. Skip all upstream Android and native-mobile changes (the app scaffolding, native
-  Kotlin modules, mobile persistence layers, mobile UI polish) unless they are a prerequisite
-  for a web/server change we actually want. This supersedes any of our own earlier hand-rolled
-  Android commits — we are not maintaining them going forward either.
+- **Android / native mobile: taken as-is, not tested.** Since the 2026-07 move to true merges we
+  no longer cherry-pick around upstream's mobile work — `apps/mobile` comes in wholesale with each
+  sync. We are not investing in the mobile app on this fork: mobile changes are not tested, fixed,
+  or maintained here, and resolving a sync never waits on mobile. (Policy updated 2026-10-06 at the
+  user's direction; previously "do not pull".)
+
+---
+
+## 2026-10-06 — True merge of upstream through `ac8e9453c` (2026-10-05): orchestrator v2
+
+The big one: upstream's **new orchestrator** (`de3439142`, #2829 — "orchestration v2") plus
+everything since our last sync — **2737 upstream commits** since `f4c394323`. v2 deleted the
+old engine wholesale (`apps/server/src/orchestration/**`, `decider.ts`, `ProviderService`,
+`ClaudeAdapter`/`CodexAdapter`, `ProviderSessionReaper`, the v1 projection repositories,
+`packages/contracts/src/orchestration.ts`); threads/sessions now live in the
+`orchestration_v2_*` event log + JSON-payload projections, and Claude resume comes from the
+v2 provider thread's `nativeThreadRef`, **not** `provider_session_runtime.resume_cursor_json`.
+88 files conflicted (53 content, 34 modify/delete, 1 rename-location). Composer moved from
+Lexical to Tiptap; Sidebar v2 was promoted to `Sidebar.tsx` (old v1 → `LegacySidebar.tsx`);
+typecheck moved to TS7 `tsc` (`tsgo` is gone).
+
+### Migration numbering (offset re-applied)
+
+Fork keeps id 033. Every upstream migration from 33 on now runs **+1**: upstream 033/034 →
+034/035 (as before), and upstream **035…058 → 036…059** (`OrchestrationV2` lands at 056).
+File names keep upstream's numbers. The v2-preview reconcile gate moved from `>=55` to
+`>=56`. `034_035_ForkMigrationOffset.test.ts` now also covers a prod-state ledger at 35
+applying 36…59 exactly. Three `reconcileV2PreviewMigration` scenarios that seed upstream's
+preview ledger numbering are skipped (that ledger can't exist on a fork DB); a test asserts
+the reconciler is a no-op on fork ledgers. The 2026-07-27 "known hole" still stands: fork
+builds must not open stock-created databases.
+
+### Fork features ported onto v2
+
+- **Claude transcript import / `t3 import sync`** — rewritten to write v2 events
+  (`import/ClaudeTranscriptSync.ts`), same `claude-import-<sessionId>` ids and all guards
+  (tombstones, skipped-owned/worktree/copy/forked, plus new skipped-pending-migration and
+  skipped-missing-cwd). The sync now runs **inside the server** via an operate-scoped
+  `POST /api/fork/import/claude-sync` (`fork/http.ts`); the CLI (`cli/forkLive.ts`) only runs
+  in-process when no server answers. This removes the cross-process zombie-thread problem,
+  so the 2026-07-27 read-model-refresh fix (`ca2eff7ae`) is dropped. Mirroring stops once T3
+  has run a turn in the thread (v2 resumes in place; no fork-on-continue). `t3 import retitle`
+  dropped.
+- **Native resume for imported threads** — fixed an upstream bug (also hits upstream's
+  `AgentSessionImporter`): a provider thread with a known Claude session id and no T3 turns
+  opened with `sessionId:` instead of `resume:`. Fix + tests in `ProviderTurnStartService.ts`.
+  The legacy-summary handoff is skipped for such threads.
+- **v1 → v2 resume restore** — new startup phase
+  `orchestration-v2.legacy-v1.restore-claude-resume` binds migrated v1 Claude threads
+  (incl. `claude-import-*`) to their native session so they resume instead of continuing
+  from a summary. Idempotent; binds even when the transcript is missing so audit flags it.
+- **`t3 session audit|reset`** + the "No conversation found" explanation
+  (`resume_transcript_missing`) — ported to v2 bindings (`import/ClaudeResumeBindings.ts`).
+  Reset detaches the provider thread; the next send gets a full-history handoff.
+- **Thread spend** — per-turn `costUsd`/`costUsdIncomplete` on `TurnTokenUsage`: Claude from
+  the SDK's cumulative `total_cost_usd` (per-process baseline), Codex/others priced via
+  upstream's LiteLLM rate table (`usage/TurnCostEstimator.ts`). Fork `codexPricing.ts` deleted
+  (no gpt-6 prices). Web sums `providerTurns[].turnTokenUsage.costUsd`.
+- **Restart-request flag** — v2 command `thread.restart-request.set` / event
+  `thread.restart-request-updated`, `RestartRequestReactor` (finished run messages only).
+- **Archived threads don't block project deletion** — moved into v2 `ProjectService`;
+  upstream's `cli/project.test.ts` cases asserting the opposite were rewritten.
+- **Stock ticker, voice transcription** — kept; ported to the new Effect APIs.
+- **Claude aliases** — `opus`/`sonnet` → the 5.5 models, now in `provider/model-manifest.json`.
+- **Web**: header usage stats/badges, spend, stock ticker, Features toggles (now applied in
+  upstream's `ThreadDetailsPanel`), host-stats sidebar readout (Segments), Slack-thread mark,
+  color schemes + Solarized, file-viewer invert toggle, explorer re-rooting + dotfiles toggle,
+  symlinked-file opening, voice input, keyboard-on-demand (re-implemented on Tiptap), left-edge
+  message selection. Fork components reworked to pass upstream's new design-system lint
+  (Tooltips instead of `title`, tokens instead of raw colors, `outline-destructive` Toggle).
+
+### Taken from upstream, replacing fork implementations
+
+- Built-in models Opus 5 / Fable 5.1 / Opus 5.5 / Sonnet 5.5 → upstream `model-manifest.json`.
+- Codex usage meter, Claude plan usage → provider snapshot `usageLimits`
+  (`codexUsageLimits`/`claudeUsageLimits`); thread token usage → `TurnTokenUsage`.
+- Server CPU/memory stats → upstream `hostResources` (fork `HostStats` RPC deleted; the
+  fork's sidebar readout UI is kept on top of it).
+- Project skills in the slash menu → upstream provider skill discovery (`listSkills` RPC gone).
+- Deferred model/effort recycles, reaper-busy fix, reaper env knobs → v2 session manager.
+- Shell list stale-cache fix (#40), explorer dotfile listing/cap fix (#38), explorer
+  collapse-by-default, editor focus/undo fix, explorer theme match, image attach button,
+  compact reconnect banner, project favicon → upstream equivalents.
+
+### Dropped
+
+- Undeclared-silent Claude SDK message sets (#53) — v2 has no error row for unknown messages.
+- Solarized code-block theme in `ChatMarkdown` (needs work in upstream's highlighter).
+- Fork `ProviderSessionReaper` docs (file deleted upstream; docs moved to `docs/internals/`).
+
+### Known upstream defects left as-is
+
+- `apps/server/src/process/externalLauncher.test.ts` (`testLayer` undefined) and
+  `apps/desktop/src/preview/Manager.ts` (`crypto.randomUUIDv4`) fail typecheck —
+  byte-identical to upstream.
+- Upstream's `AgentSessionImporter` (UI import) doesn't skip sessions already mirrored as
+  `claude-import-*` threads, so a UI import could duplicate them.
 
 ---
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "@effect/vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { formatVoiceDictationElapsed } from "./useVoiceDictation";
 import {
@@ -19,7 +19,7 @@ function stubBrowserPrimary() {
   });
 }
 
-describe.sequential("transcribeVoiceRecording", () => {
+describe("transcribeVoiceRecording", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, "window");
     vi.unstubAllGlobals();

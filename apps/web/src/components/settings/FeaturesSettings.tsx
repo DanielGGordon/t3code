@@ -19,7 +19,7 @@ import { HOST_STATS_PICKER_STYLES, HOST_STATS_VARIANTS } from "../host-stats/var
 
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
-import { resolveHeaderControlVisibility } from "../chat/ChatHeader";
+import { resolveHeaderControlVisibility } from "../../lib/headerControlVisibility";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import {
