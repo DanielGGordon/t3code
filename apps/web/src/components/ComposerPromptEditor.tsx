@@ -34,6 +34,7 @@ import {
   FOCUS_COMMAND,
   $getRoot,
   HISTORY_MERGE_TAG,
+  SKIP_DOM_SELECTION_TAG,
   DecoratorNode,
   type ElementNode,
   type LexicalNode,
@@ -52,6 +53,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 
 import {
@@ -868,6 +870,14 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
+  /**
+   * Make the editor editable and focus it at the end, raising the on-screen
+   * keyboard. Only meaningful with `keyboardOnDemand`; call it from the tap's
+   * own event handler, since touch browsers ignore a deferred focus.
+   */
+  openKeyboard: () => void;
+  /** Blur the editor, dismissing the on-screen keyboard. */
+  closeKeyboard: () => void;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -882,6 +892,13 @@ interface ComposerPromptEditorProps {
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
+  /**
+   * Keep the editor read-only until `openKeyboard()` is called, so a tap on it
+   * does not raise the on-screen keyboard. It locks again on blur.
+   */
+  keyboardOnDemand?: boolean;
+  /** Reports whether the editor is unlocked for typing under `keyboardOnDemand`. */
+  onKeyboardOpenChange?: (open: boolean) => void;
   placeholder: string;
   className?: string;
   onRemoveTerminalContext: (contextId: string) => void;
@@ -1531,6 +1548,8 @@ function ComposerPromptEditorInner({
   terminalContexts,
   skills,
   disabled,
+  keyboardOnDemand = false,
+  onKeyboardOpenChange,
   placeholder,
   className,
   onRemoveTerminalContext,
@@ -1540,6 +1559,8 @@ function ComposerPromptEditorInner({
   editorRef,
 }: ComposerPromptEditorProps) {
   const [editor] = useLexicalComposerContext();
+  const [keyboardRequested, setKeyboardRequested] = useState(false);
+  const keyboardLocked = keyboardOnDemand && !keyboardRequested;
   const onChangeRef = useRef(onChange);
   const initialCursor = clampCollapsedComposerCursor(value, cursor);
   const terminalContextsSignature = terminalContextSignature(terminalContexts);
@@ -1568,8 +1589,12 @@ function ComposerPromptEditorInner({
   }, [skills]);
 
   useEffect(() => {
-    editor.setEditable(!disabled);
-  }, [disabled, editor]);
+    editor.setEditable(!disabled && !keyboardLocked);
+  }, [disabled, editor, keyboardLocked]);
+
+  useEffect(() => {
+    onKeyboardOpenChange?.(keyboardOnDemand && keyboardRequested);
+  }, [keyboardOnDemand, keyboardRequested, onKeyboardOpenChange]);
 
   useLayoutEffect(() => {
     const normalizedCursor = clampCollapsedComposerCursor(value, cursor);
@@ -1601,16 +1626,22 @@ function ComposerPromptEditorInner({
     }
 
     isApplyingControlledUpdateRef.current = true;
-    editor.update(() => {
-      const shouldRewriteEditorState =
-        previousSnapshot.value !== value || contextsChanged || skillsChanged;
-      if (shouldRewriteEditorState) {
-        $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
-      }
-      if (shouldRewriteEditorState || isFocused) {
-        $setSelectionAtComposerOffset(normalizedCursor);
-      }
-    });
+    editor.update(
+      () => {
+        const shouldRewriteEditorState =
+          previousSnapshot.value !== value || contextsChanged || skillsChanged;
+        if (shouldRewriteEditorState) {
+          $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
+        }
+        if (shouldRewriteEditorState || isFocused) {
+          $setSelectionAtComposerOffset(normalizedCursor);
+        }
+      },
+      // Writing the DOM selection focuses the editor. An unfocused editor
+      // (e.g. a dictated transcript landing) must stay unfocused, or touch
+      // screens raise the on-screen keyboard.
+      isFocused ? undefined : { tag: SKIP_DOM_SELECTION_TAG },
+    );
     queueMicrotask(() => {
       isApplyingControlledUpdateRef.current = false;
     });
@@ -1676,6 +1707,28 @@ function ComposerPromptEditorInner({
     return snapshot;
   }, [editor]);
 
+  const focusAtEnd = useCallback(() => {
+    focusAt(
+      collapseExpandedComposerCursor(snapshotRef.current.value, snapshotRef.current.value.length),
+    );
+  }, [focusAt]);
+
+  const openKeyboard = useCallback(() => {
+    const rootElement = editor.getRootElement();
+    if (!rootElement || disabled) return;
+    setKeyboardRequested(true);
+    editor.setEditable(true);
+    // ContentEditable mirrors editability through React state, which only
+    // lands after this handler returns. Flip the attribute now so the focus
+    // below happens inside the tap and actually raises the keyboard.
+    rootElement.contentEditable = "true";
+    focusAtEnd();
+  }, [disabled, editor, focusAtEnd]);
+
+  const closeKeyboard = useCallback(() => {
+    editor.getRootElement()?.blur();
+  }, [editor]);
+
   useImperativeHandle(
     editorRef,
     () => ({
@@ -1683,17 +1736,12 @@ function ComposerPromptEditorInner({
         focusAt(snapshotRef.current.cursor);
       },
       focusAt,
-      focusAtEnd: () => {
-        focusAt(
-          collapseExpandedComposerCursor(
-            snapshotRef.current.value,
-            snapshotRef.current.value.length,
-          ),
-        );
-      },
+      focusAtEnd,
+      openKeyboard,
+      closeKeyboard,
       readSnapshot,
     }),
-    [focusAt, readSnapshot],
+    [closeKeyboard, focusAt, focusAtEnd, openKeyboard, readSnapshot],
   );
 
   const handleEditorChange = useCallback((editorState: EditorState) => {
@@ -1756,9 +1804,11 @@ function ComposerPromptEditorInner({
                 className,
               )}
               data-testid="composer-editor"
+              data-keyboard-locked={keyboardLocked ? "true" : undefined}
               aria-placeholder={placeholder}
               placeholder={<span />}
               onPaste={onPaste}
+              onBlur={keyboardOnDemand ? () => setKeyboardRequested(false) : undefined}
             />
           }
           placeholder={
@@ -1791,6 +1841,8 @@ export function ComposerPromptEditor({
   terminalContexts,
   skills,
   disabled,
+  keyboardOnDemand,
+  onKeyboardOpenChange,
   placeholder,
   className,
   onRemoveTerminalContext,
@@ -1829,6 +1881,8 @@ export function ComposerPromptEditor({
         terminalContexts={terminalContexts}
         skills={skills}
         disabled={disabled}
+        {...(keyboardOnDemand !== undefined ? { keyboardOnDemand } : {})}
+        {...(onKeyboardOpenChange ? { onKeyboardOpenChange } : {})}
         placeholder={placeholder}
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}

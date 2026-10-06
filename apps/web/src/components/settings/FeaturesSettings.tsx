@@ -2,6 +2,7 @@ import {
   ActivityIcon,
   FileKeyIcon,
   GitBranchIcon,
+  KeyboardIcon,
   PlayIcon,
   SparklesIcon,
   SquareArrowOutUpRightIcon,
@@ -77,6 +78,7 @@ export function FeaturesSettingsPanel() {
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
+    composerKeyboardOnDemand: s.composerKeyboardOnDemand,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
@@ -119,6 +121,24 @@ export function FeaturesSettingsPanel() {
             />
           );
         })}
+      </SettingsSection>
+      <SettingsSection title="Composer">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <KeyboardIcon className="size-3.5" />
+              Keyboard on demand
+            </span>
+          }
+          description="Tapping the message box no longer opens the on-screen keyboard; a keyboard button next to the mic does. For touch screens you mostly dictate on, such as a car display. Stored on this device only."
+          control={
+            <Switch
+              checked={settings.composerKeyboardOnDemand}
+              onCheckedChange={(checked) => updateSettings({ composerKeyboardOnDemand: checked })}
+              aria-label="Open the on-screen keyboard only from the keyboard button"
+            />
+          }
+        />
       </SettingsSection>
       <SettingsSection title="File explorer">
         <SettingsRow

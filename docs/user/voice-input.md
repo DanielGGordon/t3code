@@ -8,7 +8,16 @@ The composer has a microphone button next to send. Tap it to record, then:
 
 The browser records the clip and uploads it to the server
 (`POST /api/voice/transcribe`), which transcribes it with OpenAI and returns the
-text. Recordings stop on their own after 10 minutes.
+text. Recordings stop on their own after 10 minutes. Inserting a transcript does
+not focus the text box, so on a touch screen the on-screen keyboard stays down.
+
+## Keyboard on demand (touch screens)
+
+On a touch screen you mostly dictate on — a car display, say — turn on
+**Settings → Features → Composer → Keyboard on demand**. Tapping the message box
+then no longer raises the on-screen keyboard; a keyboard button next to the mic
+does, and tapping it again (or anywhere outside the box) puts the keyboard away.
+The setting is stored per device.
 
 ## Server setup
 
