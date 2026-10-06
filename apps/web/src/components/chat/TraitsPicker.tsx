@@ -419,6 +419,37 @@ export function buildTraitsTriggerDisplay(input: {
   return { label: labels.join(" · "), showFastModeIcon: input.fastModeEnabled };
 }
 
+/**
+ * The traits trigger display for a selection, or null when the model has no
+ * traits controls. Shared by the picker trigger and summaries elsewhere (the
+ * touch layout's folded composer controls).
+ */
+export function resolveTraitsTriggerDisplay(input: {
+  provider: ProviderDriverKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): { label: string; showFastModeIcon: boolean } | null {
+  const {
+    descriptors,
+    primarySelectDescriptor,
+    ultrathinkPromptControlled,
+    fastModeEnabled,
+    hasAnyControls,
+  } = getTraitsSectionVisibility(input);
+  if (!hasAnyControls) {
+    return null;
+  }
+  return buildTraitsTriggerDisplay({
+    descriptors,
+    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
+    ultrathinkPromptControlled,
+    fastModeEnabled,
+  });
+}
+
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
   instanceId,
@@ -433,34 +464,19 @@ export const TraitsPicker = memo(function TraitsPicker({
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled, fastModeEnabled } =
-    getTraitsSectionVisibility({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-    });
-  if (
-    !shouldRenderTraitsControls({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-    })
-  ) {
+  const triggerDisplay = resolveTraitsTriggerDisplay({
+    provider,
+    models,
+    model,
+    prompt,
+    modelOptions,
+    allowPromptInjectedEffort,
+  });
+  if (!triggerDisplay) {
     return null;
   }
 
-  const { label: triggerLabel, showFastModeIcon } = buildTraitsTriggerDisplay({
-    descriptors,
-    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
-    ultrathinkPromptControlled,
-    fastModeEnabled,
-  });
+  const { label: triggerLabel, showFastModeIcon } = triggerDisplay;
   const fastModeIcon = showFastModeIcon ? (
     <>
       <ZapIcon aria-hidden="true" className="size-3 shrink-0 text-foreground/80 opacity-100" />

@@ -362,27 +362,46 @@ export function selectHeaderUsageStats(input: {
 
 /**
  * Big usage readouts filling the chat header's otherwise-blank middle area.
- * Hidden below the `xl` breakpoint so mobile/tablet layouts are untouched.
+ *
+ * On a regular desktop header they are hidden below the `xl` breakpoint. A
+ * `condensed` header (phone viewport or touch / car layout) always shows them,
+ * in a smaller type that grows back to full size at `xl`, inside a strip that
+ * scrolls horizontally rather than overflowing. On a phone the strip is capped
+ * at half the header so the thread title keeps some room.
  */
-export function HeaderUsageStats(props: { stats: ReadonlyArray<HeaderUsageStatItem> }) {
-  const { stats } = props;
+export function HeaderUsageStats(props: {
+  stats: ReadonlyArray<HeaderUsageStatItem>;
+  condensed?: boolean;
+}) {
+  const { stats, condensed = false } = props;
   if (stats.length === 0) {
     return null;
   }
   const now = Date.now();
   return (
-    <div className="hidden shrink-0 items-center gap-8 xl:flex">
+    <div
+      data-header-usage-stats
+      className={
+        condensed
+          ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:max-w-[50%] md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
+          : "hidden shrink-0 items-center gap-8 xl:flex"
+      }
+    >
       {stats.map((stat) => {
         const resetCountdown = stat.resetsAt ? formatResetCountdown(stat.resetsAt, now) : null;
         const tooltipContent =
           stat.tooltip ?? (resetCountdown ? `Resets in ${resetCountdown}` : null);
         const block = (
-          <div key={stat.id} className="flex flex-col items-start">
-            <span className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+          <div key={stat.id} className="flex shrink-0 flex-col items-start">
+            <span className="whitespace-nowrap text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
               {stat.label}
             </span>
             <span
-              className={cn("text-2xl font-semibold leading-none tabular-nums", stat.colorClass)}
+              className={cn(
+                "whitespace-nowrap font-semibold leading-none tabular-nums",
+                condensed ? "text-base md:text-xl xl:text-2xl" : "text-2xl",
+                stat.colorClass,
+              )}
             >
               {stat.value}
             </span>
@@ -404,15 +423,18 @@ export function HeaderUsageStats(props: { stats: ReadonlyArray<HeaderUsageStatIt
 
 /**
  * Small header-actions menu with one switch per big usage readout. Hidden
- * below `xl` alongside the stats strip it controls.
+ * below `xl` alongside the stats strip it controls, except in a `condensed`
+ * header where the strip is always visible (and this is the only place to
+ * configure it on that device).
  */
 export function HeaderUsageStatsMenu(props: {
   visibility: HeaderUsageStatsVisibility;
   scopedWeeklyLabel: string;
   stockSymbol: string;
   onPatch: (patch: ClientSettingsPatch) => void;
+  condensed?: boolean;
 }) {
-  const { visibility, scopedWeeklyLabel, stockSymbol, onPatch } = props;
+  const { visibility, scopedWeeklyLabel, stockSymbol, onPatch, condensed = false } = props;
   const [symbolDraft, setSymbolDraft] = useState(stockSymbol);
   // Keep the draft in sync when the persisted symbol changes elsewhere.
   useEffect(() => {
@@ -441,13 +463,16 @@ export function HeaderUsageStatsMenu(props: {
                   size="icon-xs"
                   type="button"
                   aria-label="Configure header usage stats"
-                  className="hidden xl:inline-flex"
+                  className={cn(
+                    condensed ? "inline-flex" : "hidden xl:inline-flex",
+                    "touch:size-12",
+                  )}
                 />
               }
             />
           }
         >
-          <ChartNoAxesColumnIcon />
+          <ChartNoAxesColumnIcon className="size-4 sm:size-3.5 touch:size-5" />
         </TooltipTrigger>
         <TooltipPopup>Usage stats</TooltipPopup>
       </Tooltip>
@@ -458,6 +483,7 @@ export function HeaderUsageStatsMenu(props: {
             <Fragment key={definition.id}>
               <MenuCheckboxItem
                 variant="switch"
+                className="touch:min-h-12 touch:text-base"
                 closeOnClick={false}
                 checked={visibility[definition.id]}
                 onCheckedChange={(checked) => onPatch(definition.patch(checked))}

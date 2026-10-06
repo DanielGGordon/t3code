@@ -79,6 +79,11 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerKeyboardToggle } from "./ComposerKeyboardToggle";
 import { ComposerVoiceInput } from "./ComposerVoiceInput";
+import {
+  buildComposerControlsSummary,
+  resolveComposerFooterCompactness,
+} from "./composerTouchLayout";
+import { resolveTraitsTriggerDisplay } from "./TraitsPicker";
 import { isVoiceRecordingSupported } from "../../voice/recorder";
 import { useVoiceDictation } from "../../voice/useVoiceDictation";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
@@ -196,7 +201,7 @@ import {
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { useComposerKeyboardOnDemand } from "../../hooks/useTouchLayout";
+import { useComposerKeyboardOnDemand, useTouchLayout } from "../../hooks/useTouchLayout";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -978,11 +983,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     null,
   );
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
-  const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
-  const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
+  const [measuredComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
+  const [measuredComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] =
+    useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const composerKeyboardOnDemand = useComposerKeyboardOnDemand();
+  const touchLayout = useTouchLayout();
+  const {
+    footerCompact: isComposerFooterCompact,
+    primaryActionsCompact: isComposerPrimaryActionsCompact,
+  } = resolveComposerFooterCompactness({
+    touchLayout,
+    measuredFooterCompact: measuredComposerFooterCompact,
+    measuredPrimaryActionsCompact: measuredComposerPrimaryActionsCompact,
+  });
   const [isComposerKeyboardOpen, setIsComposerKeyboardOpen] = useState(false);
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
@@ -1459,6 +1474,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Footer compact layout observation
   // ------------------------------------------------------------------
   useLayoutEffect(() => {
+    // The touch layout's footer is always compact; no need to measure.
+    if (touchLayout) return;
     const composerForm = composerFormRef.current;
     if (!composerForm) return;
     const measureComposerFormWidth = () => composerForm.clientWidth;
@@ -1499,7 +1516,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return () => {
       observer.disconnect();
     };
-  }, [activeThreadId, composerFooterActionLayoutKey, composerFooterHasWideActions]);
+  }, [activeThreadId, composerFooterActionLayoutKey, composerFooterHasWideActions, touchLayout]);
 
   // ------------------------------------------------------------------
   // Image persist effect
@@ -2295,6 +2312,125 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   // Render
   // ------------------------------------------------------------------
+  // Footer pieces shared by the default and the touch / car layouts.
+  const composerAttachImageDisabled =
+    isConnecting ||
+    isComposerApprovalState ||
+    (environmentUnavailable !== null && activePendingProgress === null) ||
+    pendingUserInputs.length > 0 ||
+    !activeThreadId ||
+    composerImages.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS;
+  const composerImageInput = (
+    <input
+      ref={composerImageInputRef}
+      type="file"
+      accept="image/*"
+      multiple
+      className="hidden"
+      onChange={onComposerImageInputChange}
+    />
+  );
+  const composerModelPicker = noProviderAvailable ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      disabled
+      data-chat-provider-unavailable="true"
+      className="shrink-0 gap-2 px-2 text-muted-foreground/70 sm:px-3 touch:h-14 touch:px-4 touch:text-base"
+    >
+      <CircleAlertIcon className="size-4" />
+      No provider available
+    </Button>
+  ) : (
+    <ProviderModelPicker
+      compact={isComposerFooterCompact}
+      activeInstanceId={selectedInstanceId}
+      model={selectedModelForPickerWithCustomFallback}
+      lockedProvider={lockedProvider}
+      lockedContinuationGroupKey={lockedContinuationGroupKey}
+      instanceEntries={providerInstanceEntries}
+      keybindings={keybindings}
+      modelOptionsByInstance={modelOptionsByInstance}
+      terminalOpen={terminalOpen}
+      open={isComposerModelPickerOpen}
+      triggerClassName="touch:h-14 touch:max-w-56 touch:rounded-full touch:px-4 touch:text-base"
+      {...(composerProviderState.modelPickerIconClassName
+        ? {
+            activeProviderIconClassName: composerProviderState.modelPickerIconClassName,
+          }
+        : {})}
+      onOpenChange={(open) => {
+        setIsComposerModelPickerOpen(open);
+      }}
+      getModelDisabledReason={getModelDisabledReason}
+      onInstanceModelChange={onProviderModelSelect}
+    />
+  );
+  const composerKeyboardToggle =
+    composerKeyboardOnDemand && !isVoiceDictationActive ? (
+      <ComposerKeyboardToggle
+        open={isComposerKeyboardOpen}
+        disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
+        onOpen={() => composerEditorRef.current?.openKeyboard()}
+        onClose={() => composerEditorRef.current?.closeKeyboard()}
+      />
+    ) : null;
+  const composerVoiceInput = voiceInputSupported ? (
+    <ComposerVoiceInput
+      dictation={voiceDictation}
+      disabled={
+        isConnecting ||
+        isComposerApprovalState ||
+        environmentUnavailable !== null ||
+        pendingUserInputs.length > 0 ||
+        projectSelectionRequired
+      }
+      canSend={!isSendBusy}
+      touchLayout={touchLayout}
+    />
+  ) : null;
+  const composerFooterPrimaryActions = (
+    <ComposerFooterPrimaryActions
+      compact={isComposerPrimaryActionsCompact}
+      activeContextWindow={activeContextWindow}
+      activeThreadProviderDisplayName={activeThreadProviderDisplayName}
+      pendingAction={pendingPrimaryAction}
+      isRunning={phase === "running"}
+      showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
+      promptHasText={prompt.trim().length > 0}
+      isSendBusy={isSendBusy}
+      isConnecting={isConnecting}
+      isEnvironmentUnavailable={
+        environmentUnavailable !== null || noProviderAvailable || projectSelectionRequired
+      }
+      isPreparingWorktree={isPreparingWorktree}
+      hasSendableContent={composerSendState.hasSendableContent}
+      preserveComposerFocusOnPointerDown={isMobileViewport}
+      onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+      onInterrupt={handleInterruptPrimaryAction}
+      onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
+    />
+  );
+  // Touch layout: the folded controls trigger spells out the current state.
+  const composerControlsSummary = touchLayout
+    ? buildComposerControlsSummary({
+        traitsLabel: providerTraitsMenuContent
+          ? resolveTraitsTriggerDisplay({
+              provider: selectedProvider,
+              models: selectedProviderModels,
+              model: selectedModel,
+              prompt,
+              modelOptions: composerModelOptions?.[selectedInstanceId],
+            })?.label
+          : null,
+        runtimeMode,
+        interactionMode: composerProviderControls.showInteractionModeToggle
+          ? interactionMode
+          : null,
+      })
+    : undefined;
+
   return (
     <form
       ref={composerFormRef}
@@ -2662,7 +2798,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : []
                 }
                 skills={selectedProviderStatus?.skills ?? []}
-                {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                className={cn(
+                  // Touch / car layout: larger editor text, readable at a glance.
+                  "touch:text-[18px]",
+                  showMobilePendingAnswerActions && "max-sm:pb-11",
+                )}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}
@@ -2722,8 +2862,66 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerPendingApprovalActions
                 requestId={activePendingApproval.requestId}
                 isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                touchLayout={touchLayout}
                 onRespondToApproval={onRespondToApproval}
               />
+            </div>
+          ) : touchLayout ? (
+            // Touch / car layout: the big Speak button and keyboard toggle on the
+            // driver's (left) side, every rarely-changed control folded into one
+            // cluster beside them, send / stop at the far right. While dictating
+            // the recording controls take the whole footer.
+            <div
+              data-chat-composer-footer="true"
+              data-chat-composer-footer-compact="true"
+              data-chat-composer-footer-touch="true"
+              className={cn(
+                "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3",
+                pendingUserInputs.length > 0 && "pt-2",
+                showMobilePendingAnswerActions && "hidden sm:flex",
+              )}
+            >
+              {voiceInputSupported && isVoiceDictationActive ? (
+                composerVoiceInput
+              ) : (
+                <>
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    {composerVoiceInput}
+                    {composerKeyboardToggle}
+                    <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30">
+                      {composerModelPicker}
+                      <Separator orientation="vertical" className="h-8" />
+                      <CompactComposerControlsMenu
+                        touchLayout
+                        summaryLabel={composerControlsSummary}
+                        attachImageDisabled={composerAttachImageDisabled}
+                        onAttachImage={openComposerImagePicker}
+                        activePlan={showPlanSidebarToggle}
+                        interactionMode={interactionMode}
+                        planSidebarLabel={planSidebarLabel}
+                        planSidebarOpen={planSidebarOpen}
+                        runtimeMode={runtimeMode}
+                        showAutoRuntimeMode={showAutoRuntimeMode}
+                        showInteractionModeToggle={
+                          composerProviderControls.showInteractionModeToggle
+                        }
+                        traitsMenuContent={providerTraitsMenuContent}
+                        onToggleInteractionMode={toggleInteractionMode}
+                        onTogglePlanSidebar={togglePlanSidebar}
+                        onRuntimeModeChange={handleRuntimeModeChange}
+                      />
+                    </div>
+                  </div>
+                  <div
+                    data-chat-composer-actions="right"
+                    data-chat-composer-primary-actions-compact="false"
+                    className="flex shrink-0 flex-nowrap items-center justify-end gap-3"
+                  >
+                    {composerFooterPrimaryActions}
+                  </div>
+                </>
+              )}
+              {composerImageInput}
             </div>
           ) : (
             <div
@@ -2737,43 +2935,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {noProviderAvailable ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled
-                    data-chat-provider-unavailable="true"
-                    className="shrink-0 gap-2 px-2 text-muted-foreground/70 sm:px-3"
-                  >
-                    <CircleAlertIcon className="size-4" />
-                    No provider available
-                  </Button>
-                ) : (
-                  <ProviderModelPicker
-                    compact={isComposerFooterCompact}
-                    activeInstanceId={selectedInstanceId}
-                    model={selectedModelForPickerWithCustomFallback}
-                    lockedProvider={lockedProvider}
-                    lockedContinuationGroupKey={lockedContinuationGroupKey}
-                    instanceEntries={providerInstanceEntries}
-                    keybindings={keybindings}
-                    modelOptionsByInstance={modelOptionsByInstance}
-                    terminalOpen={terminalOpen}
-                    open={isComposerModelPickerOpen}
-                    {...(composerProviderState.modelPickerIconClassName
-                      ? {
-                          activeProviderIconClassName:
-                            composerProviderState.modelPickerIconClassName,
-                        }
-                      : {})}
-                    onOpenChange={(open) => {
-                      setIsComposerModelPickerOpen(open);
-                    }}
-                    getModelDisabledReason={getModelDisabledReason}
-                    onInstanceModelChange={onProviderModelSelect}
-                  />
-                )}
+                {composerModelPicker}
 
                 {isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
@@ -2821,14 +2983,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         type="button"
                         className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
                         onClick={openComposerImagePicker}
-                        disabled={
-                          isConnecting ||
-                          isComposerApprovalState ||
-                          (environmentUnavailable !== null && activePendingProgress === null) ||
-                          pendingUserInputs.length > 0 ||
-                          !activeThreadId ||
-                          composerImages.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS
-                        }
+                        disabled={composerAttachImageDisabled}
                         aria-label="Attach image"
                       />
                     }
@@ -2837,14 +2992,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </TooltipTrigger>
                   <TooltipPopup side="top">Attach image</TooltipPopup>
                 </Tooltip>
-                <input
-                  ref={composerImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={onComposerImageInputChange}
-                />
+                {composerImageInput}
               </div>
 
               {/* Right side: send / stop button */}
@@ -2855,53 +3003,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
-                {composerKeyboardOnDemand && !isVoiceDictationActive ? (
-                  <ComposerKeyboardToggle
-                    open={isComposerKeyboardOpen}
-                    disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
-                    onOpen={() => composerEditorRef.current?.openKeyboard()}
-                    onClose={() => composerEditorRef.current?.closeKeyboard()}
-                  />
-                ) : null}
-                {voiceInputSupported ? (
-                  <ComposerVoiceInput
-                    dictation={voiceDictation}
-                    disabled={
-                      isConnecting ||
-                      isComposerApprovalState ||
-                      environmentUnavailable !== null ||
-                      pendingUserInputs.length > 0 ||
-                      projectSelectionRequired
-                    }
-                    canSend={!isSendBusy}
-                  />
-                ) : null}
-                {isVoiceDictationActive && phase !== "running" ? null : (
-                  <ComposerFooterPrimaryActions
-                    compact={isComposerPrimaryActionsCompact}
-                    activeContextWindow={activeContextWindow}
-                    activeThreadProviderDisplayName={activeThreadProviderDisplayName}
-                    pendingAction={pendingPrimaryAction}
-                    isRunning={phase === "running"}
-                    showPlanFollowUpPrompt={
-                      pendingUserInputs.length === 0 && showPlanFollowUpPrompt
-                    }
-                    promptHasText={prompt.trim().length > 0}
-                    isSendBusy={isSendBusy}
-                    isConnecting={isConnecting}
-                    isEnvironmentUnavailable={
-                      environmentUnavailable !== null ||
-                      noProviderAvailable ||
-                      projectSelectionRequired
-                    }
-                    isPreparingWorktree={isPreparingWorktree}
-                    hasSendableContent={composerSendState.hasSendableContent}
-                    preserveComposerFocusOnPointerDown={isMobileViewport}
-                    onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                    onInterrupt={handleInterruptPrimaryAction}
-                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
-                  />
-                )}
+                {composerKeyboardToggle}
+                {composerVoiceInput}
+                {isVoiceDictationActive && phase !== "running"
+                  ? null
+                  : composerFooterPrimaryActions}
               </div>
             </div>
           )}

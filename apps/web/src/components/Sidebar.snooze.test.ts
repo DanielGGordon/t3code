@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveSnoozePresets, snoozeWakeDescription, snoozeWakeLabel } from "./Sidebar.snooze";
+import {
+  resolveSnoozePresets,
+  resolveTouchSnoozePresets,
+  snoozeWakeDescription,
+  snoozeWakeLabel,
+} from "./Sidebar.snooze";
 
 // Local-time constructor so preset math is timezone-stable in tests.
 function localDate(year: number, month: number, day: number, hour: number, minute = 0): Date {
@@ -61,6 +66,34 @@ describe("resolveSnoozePresets", () => {
     const nextWeek = new Date(presets.find((preset) => preset.id === "next-week")!.snoozedUntil);
     expect(nextWeek.getDay()).toBe(1);
     expect(nextWeek.getDate()).toBe(13);
+  });
+});
+
+describe("resolveTouchSnoozePresets", () => {
+  it("always offers the same four presets in a fixed order", () => {
+    for (const hour of [7, 10, 17, 21, 23]) {
+      const now = localDate(2026, 4, 8, hour, 30);
+      const presets = resolveTouchSnoozePresets(now);
+      expect(presets.map((preset) => preset.id)).toEqual([
+        "hour",
+        "three-hours",
+        "tomorrow",
+        "next-week",
+      ]);
+      expect(new Date(presets[0]!.snoozedUntil).getTime() - now.getTime()).toBe(3_600_000);
+      expect(new Date(presets[1]!.snoozedUntil).getTime() - now.getTime()).toBe(3 * 3_600_000);
+    }
+  });
+
+  it("shares the tomorrow and next-week boundaries with the desktop presets", () => {
+    const now = localDate(2026, 4, 8, 10);
+    const desktop = resolveSnoozePresets(now);
+    const touch = resolveTouchSnoozePresets(now);
+    for (const id of ["tomorrow", "next-week"] as const) {
+      expect(touch.find((preset) => preset.id === id)).toEqual(
+        desktop.find((preset) => preset.id === id),
+      );
+    }
   });
 });
 

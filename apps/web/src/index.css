@@ -1524,6 +1524,63 @@ label:has(> select#reasoning-effort) select {
   margin-top: 0.125rem;
 }
 
+/* Touch / car layout: chat text readable at arm's length, code that wraps
+   instead of scrolling sideways under a finger, and finger-sized chrome.
+   Unlayered, so these outrank the `text-sm leading-relaxed` utilities on the
+   markdown root. */
+[data-touch-layout] .chat-markdown {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+[data-touch-layout] .chat-markdown h1 {
+  font-size: 1.5rem;
+}
+
+[data-touch-layout] .chat-markdown h2 {
+  font-size: 1.3125rem;
+}
+
+[data-touch-layout] .chat-markdown h3 {
+  font-size: 1.1875rem;
+}
+
+[data-touch-layout] .chat-markdown h4,
+[data-touch-layout] .chat-markdown h5,
+[data-touch-layout] .chat-markdown h6 {
+  font-size: 1.0625rem;
+}
+
+[data-touch-layout] .chat-markdown :not(pre) > code {
+  font-size: 0.875em;
+}
+
+[data-touch-layout] .chat-markdown pre code,
+[data-touch-layout] .chat-markdown table {
+  font-size: 0.9375rem;
+}
+
+[data-touch-layout] .chat-markdown .chat-markdown-codeblock-title {
+  font-size: 0.8125rem;
+}
+
+/* Code blocks default to wrapped in touch layout (see ChatMarkdown); this also
+   covers bare <pre> blocks, while still honoring an explicit "no wrap" toggle. */
+[data-touch-layout] .chat-markdown pre:not(.chat-markdown-codeblock[data-wrap="false"] pre) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-touch-layout] .chat-markdown .chat-markdown-chrome-action {
+  width: 3rem;
+  height: 3rem;
+}
+
+[data-touch-layout] .chat-markdown .chat-markdown-chrome-action svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 @keyframes provider-update-pill-countdown {
   from {
     transform: scaleX(1);

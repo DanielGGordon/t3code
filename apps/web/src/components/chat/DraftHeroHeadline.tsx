@@ -1,10 +1,11 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { FolderPlusIcon } from "lucide-react";
+import { ChevronDownIcon, FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { useCondensedChrome } from "~/hooks/useTouchLayout";
 import { useClientSettings } from "~/hooks/useSettings";
 import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
@@ -13,6 +14,7 @@ import {
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { cn } from "~/lib/utils";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Menu,
@@ -23,6 +25,16 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
+
+const INLINE_SELECTOR_CLASS =
+  "pointer-events-auto inline cursor-pointer border-current border-b border-dotted underline-offset-8 transition-opacity hover:opacity-75 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring";
+
+/**
+ * Phone / touch-layout variant: a 48px+ pill with a chevron, so the selector
+ * reads as a button and is easy to hit with a finger.
+ */
+const PILL_SELECTOR_CLASS =
+  "pointer-events-auto inline-flex min-h-12 max-w-full cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle transition-colors hover:bg-muted active:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring touch:min-h-14";
 
 interface DraftHeroHeadlineProps {
   readonly activeProjectRef: ScopedProjectRef | null;
@@ -40,6 +52,7 @@ export function DraftHeroHeadline({
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projectSortOrder = useClientSettings((settings) => settings.sidebarProjectSortOrder);
   const handleNewThread = useNewThreadHandler();
+  const pillSelector = useCondensedChrome();
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   const environmentLabelById = useMemo(
@@ -97,15 +110,30 @@ export function DraftHeroHeadline({
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
 
+  const selectorChevron = pillSelector ? (
+    <ChevronDownIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+  ) : null;
+
   const projectSelector = shouldShowProjectMenu ? (
     <Menu>
       <MenuTrigger
         aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
-        className="pointer-events-auto inline cursor-pointer border-current border-b border-dotted text-foreground underline-offset-8 transition-opacity hover:opacity-75 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          pillSelector ? PILL_SELECTOR_CLASS : INLINE_SELECTOR_CLASS,
+          "text-foreground",
+        )}
       >
-        {activeProjectDisplayName ?? "Choose a project"}
+        {pillSelector ? (
+          <span className="min-w-0 truncate">{activeProjectDisplayName ?? "Choose a project"}</span>
+        ) : (
+          (activeProjectDisplayName ?? "Choose a project")
+        )}
+        {selectorChevron}
       </MenuTrigger>
-      <MenuPopup align="center" className="max-h-80 w-64 overflow-y-auto">
+      <MenuPopup
+        align="center"
+        className="max-h-80 w-64 overflow-y-auto touch:max-h-[60vh] touch:w-80"
+      >
         <MenuRadioGroup
           value={activeProjectKey}
           onValueChange={(value) => {
@@ -121,14 +149,19 @@ export function DraftHeroHeadline({
         >
           {projectPickerEntries.map(({ group }) => {
             return (
-              <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
+              <MenuRadioItem
+                key={group.projectKey}
+                value={group.projectKey}
+                closeOnClick
+                className="touch:min-h-12 touch:text-base"
+              >
                 <span className="min-w-0 truncate">{group.displayName}</span>
               </MenuRadioItem>
             );
           })}
         </MenuRadioGroup>
         <MenuSeparator />
-        <MenuItem onClick={openAddProject}>
+        <MenuItem onClick={openAddProject} className="touch:min-h-12 touch:text-base">
           <FolderPlusIcon />
           New project
         </MenuItem>
@@ -138,9 +171,17 @@ export function DraftHeroHeadline({
     <button
       type="button"
       onClick={openAddProject}
-      className="pointer-events-auto inline cursor-pointer border-current border-b border-dotted text-muted-foreground/60 underline-offset-8 transition-opacity hover:opacity-75 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        pillSelector ? PILL_SELECTOR_CLASS : INLINE_SELECTOR_CLASS,
+        "text-muted-foreground/60",
+      )}
     >
-      {activeProjectTitle ?? "Add a project"}
+      {pillSelector ? (
+        <span className="min-w-0 truncate">{activeProjectTitle ?? "Add a project"}</span>
+      ) : (
+        (activeProjectTitle ?? "Add a project")
+      )}
+      {selectorChevron}
     </button>
   );
 

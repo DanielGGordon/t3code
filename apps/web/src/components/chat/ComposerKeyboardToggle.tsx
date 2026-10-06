@@ -6,7 +6,7 @@ import { Button } from "../ui/button";
 /**
  * Raises or dismisses the on-screen keyboard when the composer is in
  * keyboard-on-demand mode (tapping the text box alone does not). Sized for
- * touch, next to the mic.
+ * touch, next to the mic; 56px in the touch / car layout.
  */
 export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props: {
   open: boolean;
@@ -19,7 +19,7 @@ export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props
       type="button"
       size="icon"
       variant="ghost"
-      className="shrink-0 rounded-full text-muted-foreground/70 hover:text-foreground/80"
+      className="shrink-0 rounded-full text-muted-foreground/70 hover:text-foreground/80 touch:size-14 touch:border-input touch:text-foreground/80"
       // Keep focus in the editor so a tap while open closes rather than
       // blurring (which already relocks) and then reopening.
       onPointerDown={(event) => event.preventDefault()}
@@ -29,9 +29,9 @@ export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props
       aria-pressed={props.open}
     >
       {props.open ? (
-        <KeyboardOffIcon aria-hidden="true" className="size-4" />
+        <KeyboardOffIcon aria-hidden="true" className="size-4 touch:size-6" />
       ) : (
-        <KeyboardIcon aria-hidden="true" className="size-4" />
+        <KeyboardIcon aria-hidden="true" className="size-4 touch:size-6" />
       )}
     </Button>
   );

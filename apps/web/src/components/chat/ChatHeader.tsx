@@ -22,7 +22,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { cn } from "~/lib/utils";
-import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useCondensedChrome } from "../../hooks/useTouchLayout";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import {
   HeaderUsageStats,
@@ -64,12 +64,16 @@ interface ChatHeaderProps {
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
 }
 
+/**
+ * `condensed` is true on phone viewports and in the touch / car layout, where
+ * "auto" controls step aside; an explicit "show" or "hide" always wins.
+ */
 export function resolveHeaderControlVisibility(
   visibility: HeaderControlVisibility,
-  isMobile: boolean,
+  condensed: boolean,
 ): boolean {
   if (visibility === "auto") {
-    return !isMobile;
+    return !condensed;
   }
   return visibility === "show";
 }
@@ -118,7 +122,7 @@ export const ChatHeader = memo(function ChatHeader({
   const codexUsage = useCodexUsage(usageStatsVisibility.codex);
   const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
   const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
-  const isMobile = useIsMobile();
+  const condensed = useCondensedChrome();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
     openInEditor: settings.headerOpenInEditorVisibility,
@@ -146,15 +150,15 @@ export const ChatHeader = memo(function ChatHeader({
   });
   const showGitActions = resolveHeaderControlVisibility(
     headerControlVisibility.gitActions,
-    isMobile,
+    condensed,
   );
   const showOpenInEditor = resolveHeaderControlVisibility(
     headerControlVisibility.openInEditor,
-    isMobile,
+    condensed,
   );
   const showProjectScripts = resolveHeaderControlVisibility(
     headerControlVisibility.projectScripts,
-    isMobile,
+    condensed,
   );
   const showOpenInPicker =
     showOpenInEditor &&
@@ -170,14 +174,21 @@ export const ChatHeader = memo(function ChatHeader({
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
         {activeProjectName ? (
-          <span className="inline-flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center gap-2",
+              // On a phone the usage strip competes for width, so the project
+              // name may truncate instead of starving the thread title.
+              condensed ? "min-w-0 shrink max-md:max-w-28" : "shrink-0",
+            )}
+          >
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={activeThreadEnvironmentId}
                 cwd={activeProjectCwd ?? ""}
                 className="size-3.5"
               />
-              <span className="max-w-40 truncate text-sm font-medium text-muted-foreground">
+              <span className="max-w-40 truncate text-sm font-medium text-muted-foreground touch:text-base">
                 {activeProjectName}
               </span>
             </span>
@@ -191,7 +202,7 @@ export const ChatHeader = memo(function ChatHeader({
             render={
               <h2
                 aria-label={activeThreadTitle}
-                className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+                className="min-w-0 flex-1 truncate text-sm font-medium text-foreground touch:text-base"
               >
                 {activeThreadTitle}
               </h2>
@@ -200,21 +211,24 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
       </div>
-      <HeaderUsageStats stats={usageStats} />
+      <HeaderUsageStats stats={usageStats} condensed={condensed} />
       <div
         data-chat-header-actions
         className={cn(
-          "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
+          "flex shrink-0 items-center justify-end gap-2 touch:gap-3 @3xl/header-actions:gap-3",
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
-        {contextWindow && <TokenUsageBadge usage={contextWindow} />}
+        {/* The small badges duplicate the big readouts; condensed headers drop
+            them to make room for the readouts themselves. */}
+        {!condensed && contextWindow && <TokenUsageBadge usage={contextWindow} />}
         {/* The usage RPC reads the primary server's host credentials, so only
             show it for threads that actually run there. */}
-        {claudeAccountUsage && activeThreadEnvironmentId === primaryEnvironmentId && (
+        {!condensed && claudeAccountUsage && activeThreadEnvironmentId === primaryEnvironmentId && (
           <ClaudeAccountUsageBadge usage={claudeAccountUsage} />
         )}
         <HeaderUsageStatsMenu
+          condensed={condensed}
           visibility={usageStatsVisibility}
           scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
           stockSymbol={stockSymbol}
@@ -251,14 +265,14 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipTrigger
             render={
               <Toggle
-                className="shrink-0 data-[pressed]:bg-rose-500/15 data-[pressed]:text-rose-600 dark:data-[pressed]:text-rose-300"
+                className="shrink-0 touch:size-12 touch:min-w-12 data-[pressed]:bg-rose-500/15 data-[pressed]:text-rose-600 dark:data-[pressed]:text-rose-300"
                 pressed={restartRequested}
                 onPressedChange={onToggleRestartRequest}
                 aria-label="Flag this chat as needing a service restart"
                 variant="outline"
                 size="xs"
               >
-                <RotateCcwIcon className="size-3" />
+                <RotateCcwIcon className="size-3 touch:size-5" />
               </Toggle>
             }
           />

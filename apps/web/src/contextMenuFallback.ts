@@ -156,6 +156,10 @@ export function showContextMenuFallback<T extends string>(
       }
     };
 
+    // Touch / car layout (Settings → Features): inline styles below are out of
+    // reach of the `touch:` variant, so size rows for fingers here.
+    const touchLayout = document.documentElement.dataset.touchLayout === "true";
+
     const openMenu = (
       entries: readonly ContextMenuItem<T>[],
       preferredLeft: number,
@@ -205,6 +209,11 @@ export function showContextMenuFallback<T extends string>(
             : `${rowBase} text-foreground hover:bg-accent hover:text-accent-foreground`;
         button.style.cssText =
           "display:flex;width:100%;min-height:1.75rem;align-items:center;gap:0.5rem;border:0;border-radius:var(--radius-sm);background:transparent;padding:0.25rem 0.5rem;color:var(--foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.875rem;line-height:1.25rem;text-align:left;cursor:default;";
+        if (touchLayout) {
+          button.style.minHeight = "3rem";
+          button.style.fontSize = "1rem";
+          button.style.padding = "0.5rem 0.75rem";
+        }
         if (isLeafDestructive) {
           button.style.color = "var(--destructive-foreground)";
         }
@@ -250,7 +259,7 @@ export function showContextMenuFallback<T extends string>(
           });
 
           if (hasChildren) {
-            button.addEventListener("mouseenter", () => {
+            const openSubmenu = () => {
               const rect = button.getBoundingClientRect();
               const nextLeft = rect.right + 4;
               const nextTop = rect.top;
@@ -264,9 +273,12 @@ export function showContextMenuFallback<T extends string>(
               if (childRect.right > window.innerWidth) {
                 clampMenuPosition(childMenu, rect.left - childRect.width - 4, rect.top);
               }
-            });
+            };
+            button.addEventListener("mouseenter", openSubmenu);
+            // Touch has no hover: a tap on the parent row opens its submenu.
             button.addEventListener("click", (event) => {
               event.preventDefault();
+              openSubmenu();
             });
           } else {
             button.addEventListener("mouseenter", () => {

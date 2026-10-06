@@ -53,6 +53,11 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
 
+/**
+ * Send / stop / pending-answer actions at the composer footer's right edge.
+ * In the touch / car layout (the `touch:` variant) every one of them grows to
+ * a 56px target in the same position.
+ */
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
@@ -76,13 +81,15 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   if (pendingAction) {
     return (
-      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+      <div
+        className={cn("flex items-center justify-end touch:gap-3", compact ? "gap-1.5" : "gap-2")}
+      >
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
               size="icon-sm"
               variant="outline"
-              className="rounded-full"
+              className="rounded-full touch:size-14"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
@@ -94,7 +101,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             <Button
               size="sm"
               variant="outline"
-              className="rounded-full"
+              className="rounded-full touch:h-14 touch:px-5 touch:text-base"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
@@ -106,7 +113,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "px-3" : "px-4")}
+          className={cn(
+            "rounded-full touch:h-14 touch:px-6 touch:text-base",
+            compact ? "px-3" : "px-4",
+          )}
           {...pointerFocusProps}
           disabled={
             isEnvironmentUnavailable ||
@@ -129,12 +139,19 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return (
       <button
         type="button"
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none sm:h-8 sm:w-8"
+        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none sm:h-8 sm:w-8 touch:size-14"
         {...pointerFocusProps}
         onClick={onInterrupt}
         aria-label="Stop generation"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="touch:size-5"
+          aria-hidden="true"
+        >
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </button>
@@ -147,7 +164,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
+          className={cn(
+            "rounded-full touch:h-14 touch:px-6 touch:text-base",
+            compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8",
+          )}
           {...pointerFocusProps}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
         >
@@ -161,7 +181,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+          className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8 touch:h-14 touch:px-6 touch:text-base"
           {...pointerFocusProps}
           disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
         >
@@ -173,7 +193,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               <Button
                 size="sm"
                 variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8 touch:h-14 touch:px-4"
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
                 disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
@@ -199,7 +219,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type="submit"
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 touch:size-14",
         stageBackdropVariant
           ? "bg-transparent enabled:shadow-black/24 enabled:hover:brightness-110"
           : "bg-primary/90 enabled:shadow-primary/24 hover:bg-primary",
@@ -224,9 +244,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </span>
       ) : null}
       {isConnecting || isSendBusy ? (
-        <Spinner className="size-3.5" aria-hidden="true" />
+        <Spinner className="size-3.5 touch:size-6" aria-hidden="true" />
       ) : (
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          className="touch:size-6"
+          aria-hidden="true"
+        >
           <path
             d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
             stroke="currentColor"

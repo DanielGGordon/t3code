@@ -8,7 +8,7 @@
  */
 import { parseTimestampDate } from "../timestampFormat";
 
-type SnoozePresetId = "hour" | "evening" | "tomorrow" | "next-week";
+type SnoozePresetId = "hour" | "three-hours" | "evening" | "tomorrow" | "next-week";
 
 export interface SnoozePreset {
   readonly id: SnoozePresetId;
@@ -44,21 +44,45 @@ function addDays(base: Date, days: number): Date {
   return next;
 }
 
+function inHoursPreset(
+  now: Date,
+  hours: number,
+  id: "hour" | "three-hours",
+  label: string,
+): SnoozePreset {
+  const wake = new Date(now.getTime() + hours * HOUR_MS);
+  return { id, label, whenLabel: timeOfDayLabel(wake), snoozedUntil: wake.toISOString() };
+}
+
+function tomorrowPreset(now: Date): SnoozePreset {
+  const tomorrow = atHour(addDays(now, 1), MORNING_HOUR);
+  return {
+    id: "tomorrow",
+    label: "Tomorrow",
+    whenLabel: timeOfDayLabel(tomorrow),
+    snoozedUntil: tomorrow.toISOString(),
+  };
+}
+
+// Next Monday 9:00 (a week out when today is Monday).
+function nextWeekPreset(now: Date): SnoozePreset {
+  const daysUntilMonday = (1 - now.getDay() + 7) % 7 || 7;
+  const nextWeek = atHour(addDays(now, daysUntilMonday), MORNING_HOUR);
+  return {
+    id: "next-week",
+    label: "Next week",
+    whenLabel: `${nextWeek.toLocaleDateString(undefined, { weekday: "short" })} ${timeOfDayLabel(nextWeek)}`,
+    snoozedUntil: nextWeek.toISOString(),
+  };
+}
+
 /**
  * Presets for "snooze until", computed against local time. "This evening"
  * only appears while it is still meaningfully before evening; after that
  * the list starts at "Tomorrow".
  */
 export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
-  const inAnHour = new Date(now.getTime() + HOUR_MS);
-  const presets: SnoozePreset[] = [
-    {
-      id: "hour",
-      label: "In 1 hour",
-      whenLabel: timeOfDayLabel(inAnHour),
-      snoozedUntil: inAnHour.toISOString(),
-    },
-  ];
+  const presets: SnoozePreset[] = [inHoursPreset(now, 1, "hour", "In 1 hour")];
 
   const evening = atHour(now, EVENING_HOUR);
   // Suppress the evening preset once it is within an hour (or past): it
@@ -72,25 +96,22 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
     });
   }
 
-  const tomorrow = atHour(addDays(now, 1), MORNING_HOUR);
-  presets.push({
-    id: "tomorrow",
-    label: "Tomorrow",
-    whenLabel: timeOfDayLabel(tomorrow),
-    snoozedUntil: tomorrow.toISOString(),
-  });
-
-  // Next Monday 9:00 (a week out when today is Monday).
-  const daysUntilMonday = (1 - now.getDay() + 7) % 7 || 7;
-  const nextWeek = atHour(addDays(now, daysUntilMonday), MORNING_HOUR);
-  presets.push({
-    id: "next-week",
-    label: "Next week",
-    whenLabel: `${nextWeek.toLocaleDateString(undefined, { weekday: "short" })} ${timeOfDayLabel(nextWeek)}`,
-    snoozedUntil: nextWeek.toISOString(),
-  });
-
+  presets.push(tomorrowPreset(now), nextWeekPreset(now));
   return presets;
+}
+
+/**
+ * The touch-layout swipe picker: always exactly four presets in a fixed
+ * order, so the targets never shift position between uses (muscle memory
+ * on a car screen beats the time-of-day-aware evening slot).
+ */
+export function resolveTouchSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
+  return [
+    inHoursPreset(now, 1, "hour", "In 1 hour"),
+    inHoursPreset(now, 3, "three-hours", "In 3 hours"),
+    tomorrowPreset(now),
+    nextWeekPreset(now),
+  ];
 }
 
 /**

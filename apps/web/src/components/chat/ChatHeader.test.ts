@@ -1,6 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { resolveCondensedChrome } from "~/hooks/useTouchLayout";
 import { resolveHeaderControlVisibility, shouldShowOpenInPicker } from "./ChatHeader";
 
 describe("resolveHeaderControlVisibility", () => {
@@ -18,6 +19,21 @@ describe("resolveHeaderControlVisibility", () => {
 
   it("hide overrides the desktop default", () => {
     expect(resolveHeaderControlVisibility("hide", false)).toBe(false);
+  });
+
+  it("auto hides the control in the touch layout on a wide screen", () => {
+    const condensed = resolveCondensedChrome({ isMobile: false, touchLayout: true });
+    expect(resolveHeaderControlVisibility("auto", condensed)).toBe(false);
+    expect(resolveHeaderControlVisibility("show", condensed)).toBe(true);
+  });
+});
+
+describe("resolveCondensedChrome", () => {
+  it("is condensed on phones and in the touch layout only", () => {
+    expect(resolveCondensedChrome({ isMobile: false, touchLayout: false })).toBe(false);
+    expect(resolveCondensedChrome({ isMobile: true, touchLayout: false })).toBe(true);
+    expect(resolveCondensedChrome({ isMobile: false, touchLayout: true })).toBe(true);
+    expect(resolveCondensedChrome({ isMobile: true, touchLayout: true })).toBe(true);
   });
 });
 

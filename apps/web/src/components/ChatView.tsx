@@ -5794,9 +5794,9 @@ function ChatViewContent(props: ChatViewProps) {
                     aria-label="Scroll to end"
                     title="Scroll to end"
                     onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                    className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer touch:min-h-14 touch:gap-2 touch:px-6 touch:text-base touch:shadow-md"
                   >
-                    <ChevronDownIcon className="size-3.5" />
+                    <ChevronDownIcon className="size-3.5 touch:size-5" />
                     Scroll to end
                   </button>
                 </div>

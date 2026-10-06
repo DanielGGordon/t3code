@@ -64,6 +64,8 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { TouchCollapsibleBlock } from "./TouchCollapsibleBlock";
+import { useTouchLayout } from "~/hooks/useTouchLayout";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -150,6 +152,8 @@ const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+/** Per-message actions (copy, revert) grow to a 56px finger target in touch layout. */
+const TOUCH_MESSAGE_ACTION_CLASS_NAME = "touch:size-14 touch:px-0 touch:[&_svg]:size-5";
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -524,7 +528,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             // scroll axis hijack left-edge text selection. No test covers this.
             showsHorizontalScrollIndicator={false}
             className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] touch:overscroll-contain sm:px-5",
               topFadeEnabled && "chat-timeline-scroll-fade",
             )}
             ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
@@ -928,7 +932,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                     />
                   </button>
                 ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70 touch:text-[13px]">
                     {image.name}
                   </div>
                 )}
@@ -960,20 +964,29 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100">
+        <div className="flex shrink-0 items-center gap-2 touch:gap-3">
           <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+            <TooltipTrigger
+              render={
+                <p className="text-muted-foreground text-xs tabular-nums touch:text-[13px]" />
+              }
+            >
               {formatShortTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
             </TooltipPopup>
           </Tooltip>
-          <div className="flex items-center gap-0.5">
+          {/* Revert is destructive: keep it well apart from Copy on touch. */}
+          <div className="flex items-center gap-0.5 touch:gap-3">
             {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
             {displayedUserMessage.copyText && (
-              <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
+              <MessageCopyButton
+                text={displayedUserMessage.copyText}
+                variant="ghost"
+                className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
+              />
             )}
           </div>
         </div>
@@ -997,10 +1010,11 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             disabled={activity.isRevertingCheckpoint || activity.isWorking}
             onClick={() => ctx.onRevertUserMessage(messageId)}
             aria-label="Revert to this message"
+            className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
           />
         }
       >
-        <Undo2Icon className="size-3" />
+        <Undo2Icon className="size-3 touch:size-5" />
       </TooltipTrigger>
       <TooltipPopup side="top">Revert to this message</TooltipPopup>
     </Tooltip>
@@ -1018,7 +1032,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
         onClick={() => ctx.onToggleTurnFold(row.turnId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 touch:min-h-12 touch:px-3 touch:text-[15px]"
       >
         <span>{row.label}</span>
         <Icon className="size-3.5" />
@@ -1048,12 +1062,14 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100 touch:gap-3 touch:opacity-100">
             <AssistantCopyButton row={row} />
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                  render={
+                    <p className="text-muted-foreground text-xs tabular-nums touch:text-[13px]" />
+                  }
                 >
                   {formatShortTimestamp(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipTrigger>
@@ -1080,7 +1096,13 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <MessageCopyButton
+      text={assistantCopyState.text ?? ""}
+      variant="ghost"
+      className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
+    />
+  );
 }
 
 function ProposedPlanTimelineRow({
@@ -1106,7 +1128,7 @@ function ProposedPlanTimelineRow({
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   return (
     <div className="py-0.5 pl-1.5">
-      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
+      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums touch:text-[13px]">
         <span className="inline-flex items-center gap-[3px]">
           <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse" />
           <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:200ms]" />
@@ -1182,7 +1204,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
   return (
     <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label={groupLabel}>
       {!onlyToolEntries && (
-        <p className="px-0.5 pb-0.5 font-medium text-[11px] text-muted-foreground/65">
+        <p className="px-0.5 pb-0.5 font-medium text-[11px] text-muted-foreground/65 touch:text-[13px]">
           {groupLabel}
         </p>
       )}
@@ -1216,7 +1238,7 @@ function WorkGroupToggleTimelineRow({
   return (
     <button
       type="button"
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 touch:min-h-12 touch:text-[15px]"
       aria-expanded={row.expanded}
       onClick={(event) => {
         const anchorElement =
@@ -1388,7 +1410,7 @@ function UserMessagePreviewAnnotationCard(props: {
         ) : null}
         <div
           className={cn(
-            "flex items-center gap-2 text-[10px] text-muted-foreground",
+            "flex items-center gap-2 text-[10px] text-muted-foreground touch:text-[13px]",
             props.annotation.comment && "mt-1",
           )}
         >
@@ -1477,7 +1499,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               aria-expanded={expanded}
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85"
+              className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85 touch:h-14 touch:px-4 touch:text-base"
             >
               {expanded ? "Show less" : "Show full message"}
             </Button>
@@ -1659,6 +1681,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
 function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentContext }) {
   const ctx = use(TimelineRowCtx);
+  const touchLayout = useTouchLayout();
   const fenceLanguage = comment.fenceLanguage ?? "diff";
   const renderablePatch = getRenderablePatch(
     buildReviewCommentRenderablePatch(comment),
@@ -1668,15 +1691,15 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-background/70 p-3">
       <div className="space-y-1">
-        <div className="text-xs font-medium text-foreground">
+        <div className="text-xs font-medium text-foreground touch:text-sm">
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-[11px] text-muted-foreground touch:text-[13px]">
           {comment.sectionTitle} · {comment.rangeLabel}
         </div>
       </div>
       {comment.text.length > 0 && (
-        <div className="whitespace-pre-wrap wrap-break-word text-sm">
+        <div className="whitespace-pre-wrap wrap-break-word text-sm touch:text-[17px]">
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}
@@ -1689,23 +1712,32 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           className="text-foreground"
         />
       )}
-      {renderablePatch?.kind === "files" &&
-        renderablePatch.files.map((fileDiff) => (
-          <FileDiff
-            key={resolveFileDiffPath(fileDiff)}
-            fileDiff={fileDiff}
-            options={{
-              collapsed: false,
-              diffStyle: "unified",
-              theme: resolveDiffThemeName(ctx.resolvedTheme),
-            }}
-          />
-        ))}
-      {renderablePatch?.kind === "raw" && (
-        <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
-          {renderablePatch.text}
-        </pre>
-      )}
+      {renderablePatch ? (
+        <TouchCollapsibleBlock
+          text={comment.diff}
+          className="overflow-hidden rounded-md border border-border/60"
+        >
+          {renderablePatch.kind === "files" ? (
+            renderablePatch.files.map((fileDiff) => (
+              <FileDiff
+                key={resolveFileDiffPath(fileDiff)}
+                fileDiff={fileDiff}
+                options={{
+                  collapsed: false,
+                  diffStyle: "unified",
+                  theme: resolveDiffThemeName(ctx.resolvedTheme),
+                  // Wrap instead of finger-scrolling sideways in touch layout.
+                  ...(touchLayout ? { overflow: "wrap" as const } : {}),
+                }}
+              />
+            ))
+          ) : (
+            <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs touch:whitespace-pre-wrap touch:text-[15px] touch:wrap-anywhere">
+              {renderablePatch.text}
+            </pre>
+          )}
+        </TouchCollapsibleBlock>
+      ) : null}
     </div>
   );
 }
@@ -2002,7 +2034,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       )}
       {...rowToggleProps}
     >
-      <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
+      <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200 touch:min-h-11">
         <span className={iconWrapperClass}>
           <WorkEntryIconSvg
             name={entryIconName}
@@ -2011,7 +2043,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex min-w-0 w-full items-baseline gap-1.5 text-[12px] leading-5">
+            <p className="flex min-w-0 w-full items-baseline gap-1.5 text-[12px] leading-5 touch:text-[15px] touch:leading-6">
               <span className={cn("min-w-0 shrink truncate", headingClass)}>{heading}</span>
               {preview && (
                 <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{preview}</span>
@@ -2083,9 +2115,12 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
+          <TouchCollapsibleBlock text={expandedBody}>
+            {/* Touch layout drops the nested scroll box; bodies tall once wrapped collapse instead. */}
+            <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text touch:max-h-none touch:text-[13px]">
+              {expandedBody}
+            </pre>
+          </TouchCollapsibleBlock>
         </div>
       ) : null}
     </div>

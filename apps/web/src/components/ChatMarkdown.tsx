@@ -81,6 +81,7 @@ import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { TouchCollapsibleBlock } from "./chat/TouchCollapsibleBlock";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
   isBrowserPreviewFile,
@@ -321,8 +322,11 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
+// The touch / car layout wraps by default: horizontal finger-scrolling inside
+// a code block or table fights the timeline's vertical scroll.
 function readInitialWordWrapSetting(): boolean {
-  return getClientSettings().wordWrap;
+  const settings = getClientSettings();
+  return settings.wordWrap || settings.touchLayout;
 }
 
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
@@ -615,7 +619,7 @@ function MarkdownCodeBlock({
             theme={theme}
           />
         </span>
-        <span className="flex items-center gap-0.5">
+        <span className="flex items-center gap-0.5 touch:gap-3">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -653,7 +657,7 @@ function MarkdownCodeBlock({
           </Tooltip>
         </span>
       </div>
-      {children}
+      <TouchCollapsibleBlock text={code}>{children}</TouchCollapsibleBlock>
     </div>
   );
 }
