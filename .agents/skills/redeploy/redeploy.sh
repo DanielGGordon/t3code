@@ -95,8 +95,11 @@ echo "    now at $TARGET_SHORT — $TARGET_SUBJ"
 echo "==> Installing dependencies"
 ( cd "$DEPLOY_DIR" && pnpm install --prefer-offline )
 
-echo "==> Building"
-( cd "$DEPLOY_DIR" && pnpm build )
+echo "==> Building web bundle"
+# Prod runs the server from source and serves apps/web/dist, so only the web
+# bundle is needed (same as test-deploy). The root `pnpm build` also builds the
+# Electron desktop app, which needs libsecret headers this headless box lacks.
+( cd "$DEPLOY_DIR" && pnpm --filter @t3tools/web build )
 
 echo "==> Build OK. Firing detached restart of $SERVICE"
 echo "    (this chat's session will drop when the server restarts)"
@@ -111,7 +114,7 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
   sleep 2
   systemctl --user restart $SERVICE
   for i in \$(seq 1 40); do
-    code=\$(curl -s -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null || echo 000)
+    code=\$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null || echo 000)
     [ \"\$code\" = '200' ] && break
     sleep 1
   done
@@ -120,8 +123,8 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
     echo \"redeploy \$(date -Is)\"
     echo \"target=$TARGET_SHORT ($TARGET_SUBJ)\"
     echo \"service-active=\$(systemctl --user is-active $SERVICE)\"
-    echo \"loopback-3773=\$(curl -s -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null)\"
-    echo \"public-7443=\$(curl -sk -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
+    echo \"loopback-3773=\$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null)\"
+    echo \"public-7443=\$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
     echo \"served-commit=\$(git -C '$DEPLOY_DIR' rev-parse --short HEAD)\"
     echo \"import-timer=\$(systemctl --user is-active '$IMPORT_TIMER' 2>/dev/null) (paused-by-redeploy=$TIMER_PAUSED)\"
   } > '$STATUS_LOG' 2>&1
