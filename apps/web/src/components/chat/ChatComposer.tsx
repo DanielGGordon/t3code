@@ -1135,6 +1135,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
+import { useComposerKeyboardOnDemand } from "../../hooks/useTouchLayout";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
@@ -2431,7 +2432,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Refs
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
-  const composerKeyboardOnDemand = settings.composerKeyboardOnDemand;
+  const composerKeyboardOnDemand = useComposerKeyboardOnDemand();
   const [isComposerKeyboardOpen, setIsComposerKeyboardOpen] = useState(false);
   const pasteAsTextShortcutUntilRef = useRef(0);
   const pastedTextFileNamesRef = useRef<{ targetKey: string; names: Set<string> }>({

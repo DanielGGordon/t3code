@@ -222,6 +222,7 @@ function RootRouteView() {
         <EnvironmentThemeSync />
         <GlassAppearanceSync />
         <FontAppearanceSync />
+        <TouchLayoutSync />
         <ProviderAuthCallbackCoordinator />
         <ChatGptWelcomeCoordinator />
         <FirstRunGate
@@ -331,6 +332,20 @@ function FontAppearanceSync() {
     fontSizePrompt,
     fontSmoothing,
   ]);
+
+  return null;
+}
+
+// Mirrors the per-device touch layout setting onto <html> so the `touch:`
+// Tailwind variant (index.css) applies anywhere without prop drilling.
+function TouchLayoutSync() {
+  const touchLayout = useClientSettings((settings) => settings.touchLayout);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (touchLayout) root.dataset.touchLayout = "true";
+    else delete root.dataset.touchLayout;
+  }, [touchLayout]);
 
   return null;
 }
