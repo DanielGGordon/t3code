@@ -80,3 +80,13 @@ To roll the code back, force-push `main` to the pre-merge commit
 (`77d79ff4a`) — do **not** `git revert -m 1` the merge. A revert leaves ancestry
 claiming upstream is merged while the content is gone, so the next
 `git merge upstream/main` would never restore the reverted files.
+
+## Later syncs: rolling back across the orchestration-v2 cutover
+
+From the 2026-10-06 upstream sync on, a v2 build keeps its data in
+`statev2.sqlite`, seeded once from `state.sqlite` and never re-seeded. A
+v2 → v1 → v2 round trip therefore silently reuses a stale `statev2.sqlite` and
+hides everything written while the v1 build served. The remedy (move
+`statev2.sqlite*` aside while the v1 build is still serving, then redeploy) is
+in `.claude/skills/redeploy/SKILL.md` → "Rolling back across the
+orchestration-v2 cutover".

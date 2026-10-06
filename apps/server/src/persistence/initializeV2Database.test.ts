@@ -9,13 +9,18 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "./Sqlite.ts";
 import { runMigrations } from "./Migrations.ts";
-import { initializeV2Database } from "./initializeV2Database.ts";
+import {
+  allowLegacySeed,
+  initializeV2Database,
+  V2DatabaseNotInitializedError,
+} from "./initializeV2Database.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -107,6 +112,7 @@ it.effect(
         assert.equal((yield* sql`SELECT title FROM projection_threads`)[0]?.title, "V1 thread");
       }).pipe(Effect.provide(layerDatabase));
     }).pipe(
+      allowLegacySeed,
       Effect.provide(
         ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),
       ),
@@ -149,6 +155,7 @@ it.effect("includes committed WAL data and does not publish a failed snapshot", 
       source.close();
     }
   }).pipe(
+    allowLegacySeed,
     Effect.provide(NodeServices.layer),
     Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
   );
@@ -168,27 +175,107 @@ it.effect("uses statev2.sqlite for default and explicit development paths", () =
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("starts fresh without V1 and never imports over existing V2 state", () => {
-  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-fresh-"));
-  const destinationPath = NodePath.join(directory, "userdata", "statev2.sqlite");
+it.effect(
+  "CLI on a fresh install creates an empty V2 and never imports over existing V2 state",
+  () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-fresh-"));
+    const destinationPath = NodePath.join(directory, "userdata", "statev2.sqlite");
+    return Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const layerDatabase = SqlitePersistence.layerConfig.pipe(
+        Layer.provide(ServerConfig.layer({ ...config, dbPath: destinationPath })),
+      );
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`CREATE TABLE v2_work (text TEXT)`;
+        yield* sql`INSERT INTO v2_work VALUES ('fresh V2 work')`;
+      }).pipe(Effect.provide(layerDatabase));
+      assert.isTrue(NodeFS.existsSync(destinationPath));
+      const sourcePath = NodePath.join(NodePath.dirname(destinationPath), "state.sqlite");
+      assert.isFalse(NodeFS.existsSync(sourcePath));
+      NodeFS.writeFileSync(sourcePath, "This source must never be opened once V2 exists");
+      yield* initializeV2Database(destinationPath);
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        assert.equal((yield* sql`SELECT text FROM v2_work`)[0]?.text, "fresh V2 work");
+      }).pipe(Effect.provide(layerDatabase));
+    }).pipe(
+      Effect.provide(
+        ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true })),
+      ),
+    );
+  },
+);
+
+const seedLegacyDatabase = (sourcePath: string) => {
+  const legacy = new NodeSqlite.DatabaseSync(sourcePath);
+  try {
+    legacy.exec(
+      "PRAGMA journal_mode=WAL; CREATE TABLE messages(text TEXT); INSERT INTO messages VALUES ('legacy');",
+    );
+  } finally {
+    legacy.close();
+  }
+};
+
+it.effect("CLI entrypoints refuse to seed V2 from a live legacy database and write nothing", () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-cli-refuse-"));
+  const sourcePath = NodePath.join(directory, "state.sqlite");
+  const destinationPath = NodePath.join(directory, "statev2.sqlite");
   return Effect.gen(function* () {
+    seedLegacyDatabase(sourcePath);
+    const before = NodeFS.readdirSync(directory).toSorted();
+    const original = NodeFS.readFileSync(sourcePath);
+
+    const direct = yield* Effect.flip(initializeV2Database(destinationPath));
+    assert.instanceOf(direct, V2DatabaseNotInitializedError);
+    assert.include(direct.message, "Start the T3 Code server once");
+
+    // The same refusal through the persistence layer every CLI command builds.
     const config = yield* ServerConfig.ServerConfig;
     const layerDatabase = SqlitePersistence.layerConfig.pipe(
       Layer.provide(ServerConfig.layer({ ...config, dbPath: destinationPath })),
     );
+    const viaLayer = yield* Effect.exit(Effect.scoped(Layer.build(Layer.fresh(layerDatabase))));
+    assert.isTrue(Exit.isFailure(viaLayer));
+    assert.include(
+      String(Exit.isFailure(viaLayer) ? viaLayer.cause : ""),
+      "V2DatabaseNotInitializedError",
+    );
+
+    assert.isFalse(NodeFS.existsSync(destinationPath));
+    assert.deepEqual(NodeFS.readdirSync(directory).toSorted(), before);
+    assert.deepEqual(NodeFS.readFileSync(sourcePath), original);
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
+  );
+});
+
+it.effect("the server runtime seeds V2 from the legacy database when building its layers", () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v2-server-seed-"));
+  const sourcePath = NodePath.join(directory, "state.sqlite");
+  const destinationPath = NodePath.join(directory, "statev2.sqlite");
+  return Effect.gen(function* () {
+    seedLegacyDatabase(sourcePath);
+    const config = yield* ServerConfig.ServerConfig;
+    const layerDatabase = SqlitePersistence.layerConfig.pipe(
+      Layer.provide(ServerConfig.layer({ ...config, dbPath: destinationPath })),
+    );
+    // Mirrors runServer: allowLegacySeed wraps the effect that builds the layer graph.
     yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* sql`CREATE TABLE v2_work (text TEXT)`;
-      yield* sql`INSERT INTO v2_work VALUES ('fresh V2 work')`;
-    }).pipe(Effect.provide(layerDatabase));
-    const sourcePath = NodePath.join(NodePath.dirname(destinationPath), "state.sqlite");
-    assert.isFalse(NodeFS.existsSync(sourcePath));
-    NodeFS.writeFileSync(sourcePath, "This source must never be opened once V2 exists");
-    yield* initializeV2Database(destinationPath);
-    yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      assert.equal((yield* sql`SELECT text FROM v2_work`)[0]?.text, "fresh V2 work");
-    }).pipe(Effect.provide(layerDatabase));
+      assert.deepEqual(
+        (yield* sql<{ text: string }>`SELECT text FROM messages`).map((row) => row.text),
+        ["legacy"],
+      );
+    }).pipe(Effect.provide(layerDatabase), allowLegacySeed);
+    assert.isTrue(NodeFS.existsSync(destinationPath));
   }).pipe(
     Effect.provide(
       ServerConfig.layerTest(directory, directory).pipe(Layer.provideMerge(NodeServices.layer)),

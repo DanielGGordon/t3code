@@ -133,6 +133,17 @@ Optional size knobs (off by default): `--prefer-imported` biases the thread pick
 toward small `claude-import-*` chats; `--max-events-per-thread K` drops threads
 whose event count exceeds `K` (a live coding thread is 5-10× an imported chat).
 
+**Orchestration v2.** After the v2 cutover prod writes `statev2.sqlite`, and
+`state.sqlite` is a frozen pre-cutover snapshot. The refresh reads `statev2.sqlite`
+whenever it exists and only falls back to `state.sqlite` before the cutover. The
+prune is still authored for the v1 schema only, so on a v2 prod it **refuses**
+rather than publish a stale or unsanitized seed. Until a v2 prune exists, deploy
+with `--seed minimal` (or `--seed copy`). It also refuses whenever prod's schema
+is newer than `PRUNE_SCHEMA_VERSION` (35), which v1 prod already passed. An existing
+v1-era template still works: a v2 test server seeds its own `statev2.sqlite` from
+the template's `state.sqlite` on first boot. The data is just as old as the template.
+`--seed copy` clones the whole userdata dir, so `statev2.sqlite` comes along.
+
 Deploy prints the template's age and schema at each run. It never auto-refreshes
 — rebuild it yourself when prod has changed or the DB schema has moved. If no
 template exists, deploys fall back to `minimal` and tell you to build one.

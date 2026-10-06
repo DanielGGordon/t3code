@@ -32,6 +32,7 @@ import {
   parseRefreshArgs,
   pruneCuratedDb,
   renameCuratedTitles,
+  resolveProdDbSource,
   rewriteCuratedEventPayloads,
   runRefresh,
   selectKeptSets,
@@ -559,6 +560,25 @@ describe("runRefresh end-to-end (prod read-only)", () => {
     assert.isNull(resolveSeedTemplate());
   });
 
+  it("after the v2 cutover, refuses instead of snapshotting the frozen state.sqlite", async () => {
+    const userdata = buildFakeProd(prodRoot);
+    const v1Db = join(userdata, "state.sqlite");
+    const v2Db = join(userdata, "statev2.sqlite");
+    cpSync(v1Db, v2Db);
+    const before = [sha256(v1Db), sha256(v2Db)];
+    let err: Error | null = null;
+    try {
+      await runRefresh(DEFAULT_OPTS);
+    } catch (e) {
+      err = e as Error;
+    }
+    assert.isNotNull(err);
+    assert.match(err!.message, /orchestration v2/);
+    assert.include(err!.message, v2Db);
+    assert.isNull(resolveSeedTemplate());
+    assert.deepEqual([sha256(v1Db), sha256(v2Db)], before);
+  });
+
   it("builds an empty-but-valid template for empty prod", async () => {
     // Empty prod: schema present, no projects/threads.
     const userdata = join(prodRoot, "userdata");
@@ -583,6 +603,26 @@ describe("runRefresh end-to-end (prod read-only)", () => {
       "ok",
     );
     tdb.close();
+  });
+});
+
+describe("resolveProdDbSource", () => {
+  it("prefers statev2.sqlite, falls back to state.sqlite pre-cutover, and throws on neither", () => {
+    const userdata = join(prodRoot, "userdata");
+    mkdirSync(userdata, { recursive: true });
+    assert.throws(() => resolveProdDbSource(userdata), /neither statev2.sqlite nor state.sqlite/);
+    writeFileSync(join(userdata, "state.sqlite"), "");
+    assert.deepEqual(resolveProdDbSource(userdata), {
+      generation: "v1",
+      fileName: "state.sqlite",
+      path: join(userdata, "state.sqlite"),
+    });
+    writeFileSync(join(userdata, "statev2.sqlite"), "");
+    assert.deepEqual(resolveProdDbSource(userdata), {
+      generation: "v2",
+      fileName: "statev2.sqlite",
+      path: join(userdata, "statev2.sqlite"),
+    });
   });
 });
 

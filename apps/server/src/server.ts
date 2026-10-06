@@ -178,6 +178,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
+import { allowLegacySeed } from "./persistence/initializeV2Database.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
 // 100-character default for one path segment.
@@ -1092,4 +1093,7 @@ const layerMakeServer = Layer.unwrap(
 );
 
 // The CLI supplies configuration.
-export const runServer = Layer.launch(layerMakeServer);
+// Only the long-running server may snapshot state.sqlite into statev2.sqlite; every
+// other entrypoint (CLI commands, the import timer) fails fast instead of seeding
+// from a legacy DB that a still-running older server may be writing to.
+export const runServer = Layer.launch(layerMakeServer).pipe(allowLegacySeed);
