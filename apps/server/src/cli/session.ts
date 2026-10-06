@@ -1,169 +1,93 @@
-import { type OrchestrationThread, ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+/**
+ * `t3 session audit|reset` — inspect and repair which native Claude session a
+ * thread resumes. Logic lives in `import/ClaudeResumeBindings.ts`.
+ *
+ * `audit` is read-only SQL + filesystem checks, safe while the server runs.
+ * `reset` writes an event, so it goes through the running server when there
+ * is one (`cli/forkLive.ts`). The ClaudeAdapterV2 missing-transcript error
+ * tells users to run `t3 session reset <threadId>`; keep the command names.
+ */
+import { ThreadId } from "@t3tools/contracts";
 import * as Console from "effect/Console";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
-import * as References from "effect/References";
 import * as Schema from "effect/Schema";
-import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
+import { Argument, Command, Flag } from "effect/cli";
 
-import * as ServerConfig from "../config.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { expandHomePath } from "../os-jank.ts";
-import { claudeTranscriptRelativePath } from "../provider/claudeSessionTranscript.ts";
-import {
-  ProviderSessionDirectory,
-  type ProviderRuntimeBinding,
-} from "../provider/Services/ProviderSessionDirectory.ts";
-import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
-import { OfflineCliRuntimeLive } from "./offlineRuntime.ts";
+import { decodeSessionResetResponse, FORK_SESSION_RESET_ROUTE_PATH } from "../fork/http.ts";
+import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
+import { expandHomePath } from "../pathExpansion.ts";
+import { projectLocationFlags } from "./config.ts";
+import { ForkCliError, postForkRoute, runLiveOrOffline, runOfflineRead } from "./forkLive.ts";
 
-const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
-const encodeJsonString = Schema.encodeSync(Schema.UnknownFromJsonString);
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-class SessionCommandError extends Data.TaggedError("SessionCommandError")<{
-  readonly message: string;
-}> {}
-
-/**
- * A Claude thread whose persisted binding will make the next send pass
- * `--resume <sessionId>` to Claude Code.
- */
-export interface ClaudeResumeTarget {
-  readonly threadId: ThreadId;
-  readonly sessionId: string;
-  readonly cwd: string | undefined;
-}
-
-function readStringField(value: unknown, key: string): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const raw = (value as Record<string, unknown>)[key];
-  if (typeof raw !== "string") return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-/**
- * Extract the resume target from a binding, or `undefined` for non-Claude
- * bindings and bindings without a resume session id (a fresh session will be
- * generated for those, so there is nothing to audit).
- */
-export function readClaudeResumeTarget(
-  binding: ProviderRuntimeBinding,
-): ClaudeResumeTarget | undefined {
-  if (binding.provider !== CLAUDE_DRIVER_KIND) return undefined;
-  const sessionId = readStringField(binding.resumeCursor, "resume");
-  if (sessionId === undefined) return undefined;
-  return {
-    threadId: binding.threadId,
-    sessionId,
-    cwd: readStringField(binding.runtimePayload, "cwd"),
-  };
-}
-
-export type ThreadLifecycle = "active" | "archived" | "deleted" | "unknown";
-
-export function threadLifecycle(thread: OrchestrationThread | undefined): ThreadLifecycle {
-  if (thread === undefined) return "unknown";
-  if (thread.deletedAt !== null) return "deleted";
-  if (thread.archivedAt !== null) return "archived";
-  return "active";
-}
-
-export type TranscriptLocation =
-  | { readonly kind: "present"; readonly path: string }
-  | { readonly kind: "relocated"; readonly expectedPath: string | undefined; readonly path: string }
-  | { readonly kind: "missing"; readonly expectedPath: string | undefined };
-
-export interface SessionAuditRow {
-  readonly threadId: ThreadId;
-  readonly title: string | undefined;
-  readonly lifecycle: ThreadLifecycle;
-  readonly sessionId: string;
-  readonly cwd: string | undefined;
-  readonly location: TranscriptLocation;
-}
-
-export function formatAuditRow(row: SessionAuditRow): string {
-  const parts = [
-    `thread=${row.threadId}`,
-    `lifecycle=${row.lifecycle}`,
-    `title=${encodeJsonString(row.title ?? "")}`,
-    `session=${row.sessionId}`,
-    `cwd=${row.cwd ?? "?"}`,
-  ];
-  switch (row.location.kind) {
-    case "missing":
-      parts.push(`expected=${row.location.expectedPath ?? "?"}`);
-      break;
-    case "relocated":
-      parts.push(`expected=${row.location.expectedPath ?? "?"}`, `found=${row.location.path}`);
-      break;
-    case "present":
-      parts.push(`path=${row.location.path}`);
-      break;
-  }
-  return parts.join(" ");
-}
-
-/**
- * Where Claude Code will look for the transcript. The expected location is
- * derived from the persisted cwd; as a fallback every project folder is
- * searched, because a transcript that moved (cwd renamed, worktree path
- * changed) is recoverable without copying anything.
- */
-const locateTranscript = Effect.fn("locateTranscript")(function* (
-  projectsRoot: string,
-  projectDirs: ReadonlyArray<string>,
-  target: ClaudeResumeTarget,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const expectedPath =
-    target.cwd !== undefined
-      ? path.join(projectsRoot, claudeTranscriptRelativePath(target.cwd, target.sessionId))
-      : undefined;
-  if (expectedPath !== undefined) {
-    const exists = yield* fs.exists(expectedPath).pipe(Effect.orElseSucceed(() => false));
-    if (exists) {
-      return { kind: "present", path: expectedPath } satisfies TranscriptLocation;
-    }
-  }
-  const fileName = `${target.sessionId}.jsonl`;
-  for (const dir of projectDirs) {
-    const candidate = path.join(projectsRoot, dir, fileName);
-    if (candidate === expectedPath) continue;
-    const exists = yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false));
-    if (exists) {
-      return { kind: "relocated", expectedPath, path: candidate } satisfies TranscriptLocation;
-    }
-  }
-  return { kind: "missing", expectedPath } satisfies TranscriptLocation;
-});
-
-const projectsDirFlag = Flag.string("projects-dir").pipe(
+const projectsDirFlag = Flag.String("projects-dir").pipe(
   Flag.withDescription(
     "Directory containing Claude project transcript folders (defaults to ~/.claude/projects).",
   ),
   Flag.optional,
 );
 
-const jsonFlag = Flag.boolean("json").pipe(
+const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print the audit as JSON, one object per line per reported thread."),
+  Flag.withDefault(false),
 );
 
-const includeDeletedFlag = Flag.boolean("include-deleted").pipe(
+const includeDeletedFlag = Flag.Boolean("include-deleted").pipe(
   Flag.withDescription("Also report threads that were deleted in T3."),
+  Flag.withDefault(false),
 );
 
-const allFlag = Flag.boolean("all").pipe(
+const allFlag = Flag.Boolean("all").pipe(
   Flag.withDescription(
-    "Report every Claude thread with a resume cursor, including those whose transcript is present.",
+    "Report every Claude thread with a resume target, including those whose transcript is present.",
   ),
+  Flag.withDefault(false),
 );
+
+/** Human-readable audit report (the JSON form is one row per line). */
+export function formatAuditReport(input: {
+  readonly rows: ReadonlyArray<ClaudeResumeBindings.SessionAuditRow>;
+  readonly projectsRoot: string;
+  readonly includeDeleted: boolean;
+  readonly all: boolean;
+}): ReadonlyArray<string> {
+  const { rows } = input;
+  const missing = rows.filter((row) => row.location.kind === "missing");
+  const relocated = rows.filter((row) => row.location.kind === "relocated");
+  const present = rows.filter((row) => row.location.kind === "present");
+  const reported = input.all ? rows : rows.filter((row) => row.location.kind !== "present");
+  const lines = [
+    `Claude threads with a resume target: ${rows.length} ` +
+      `(${present.length} transcript present, ${relocated.length} relocated, ${missing.length} missing)` +
+      (input.includeDeleted ? "" : "; deleted threads not included") +
+      `. Projects root: ${input.projectsRoot}`,
+    ...reported.map(ClaudeResumeBindings.formatAuditRow),
+  ];
+  if (missing.length > 0) {
+    lines.push(
+      "\nMissing transcripts: sending in these threads fails with " +
+        '"No conversation found with session ID". Copy each .jsonl back to the ' +
+        "`expected=` path (e.g. from the machine where the conversation ran) and simply " +
+        "send again, or run `t3 session reset <threadId> --yes` to start a fresh Claude session " +
+        "with the thread's T3 history as context. Nothing is changed by this audit.",
+    );
+  }
+  if (rows.some((row) => row.source === "legacy")) {
+    lines.push(
+      "\n`binding=legacy` rows are v1 resume cursors not bound yet; the next server start binds " +
+        "the eligible ones (Claude threads with no T3 runs since the upgrade).",
+    );
+  }
+  if (relocated.length > 0) {
+    lines.push(
+      "\nRelocated transcripts exist under a different project folder than the thread's " +
+        "cwd; if sending fails, copy the `found=` file to the `expected=` path.",
+    );
+  }
+  return lines;
+}
 
 const sessionAuditCommand = Command.make("audit", {
   ...projectLocationFlags,
@@ -173,224 +97,82 @@ const sessionAuditCommand = Command.make("audit", {
   all: allFlag,
 }).pipe(
   Command.withDescription(
-    "List Claude threads whose resume cursor points at a transcript that is missing from this machine (sending in them fails until the .jsonl is restored or the thread is reset).",
+    "List Claude threads whose resume target points at a transcript missing from this machine (sending in them fails until the .jsonl is restored or the thread is reset). Read-only.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveCliAuthConfig({ baseDir: flags.baseDir }, logLevel);
-      const minimumLogLevel = config.logLevel;
-
-      const fs = yield* FileSystem.FileSystem;
-      const projectsRoot = Option.isSome(flags.projectsDir)
-        ? flags.projectsDir.value
-        : yield* expandHomePath("~/.claude/projects");
-      const projectDirs = yield* fs
-        .readDirectory(projectsRoot)
-        .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
-
-      const rows = yield* Effect.gen(function* () {
-        const directory = yield* ProviderSessionDirectory;
-        const snapshotQuery = yield* ProjectionSnapshotQuery;
-        const snapshot = yield* snapshotQuery.getSnapshot().pipe(
-          Effect.mapError(
-            (cause) =>
-              new SessionCommandError({
-                message: `Failed to read orchestration snapshot: ${String(cause)}.`,
-              }),
-          ),
-        );
-        const threadsById = new Map(snapshot.threads.map((thread) => [thread.id, thread]));
-        const bindings = yield* directory.listBindings().pipe(
-          Effect.mapError(
-            (cause) =>
-              new SessionCommandError({
-                message: `Failed to read provider session bindings: ${String(cause)}.`,
-              }),
-          ),
-        );
-
-        const collected: Array<SessionAuditRow> = [];
-        for (const binding of bindings) {
-          const target = readClaudeResumeTarget(binding);
-          if (target === undefined) continue;
-          const thread = threadsById.get(target.threadId);
-          const lifecycle = threadLifecycle(thread);
-          if (lifecycle === "deleted" && !flags.includeDeleted) continue;
-          const location = yield* locateTranscript(projectsRoot, projectDirs, target);
-          collected.push({
-            threadId: target.threadId,
-            title: thread?.title,
-            lifecycle,
-            sessionId: target.sessionId,
-            cwd: target.cwd,
-            location,
-          });
-        }
-        return collected;
-      }).pipe(
-        Effect.provide(
-          OfflineCliRuntimeLive.pipe(
-            Layer.provide(ServerConfig.layer(config)),
-            Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
-          ),
-        ),
+      const projectsRoot = expandHomePath(
+        Option.isSome(flags.projectsDir) ? flags.projectsDir.value : "~/.claude/projects",
       );
-
-      const missing = rows.filter((row) => row.location.kind === "missing");
-      const relocated = rows.filter((row) => row.location.kind === "relocated");
-      const present = rows.filter((row) => row.location.kind === "present");
-      const lifecycleOrder: Record<ThreadLifecycle, number> = {
-        active: 0,
-        archived: 1,
-        unknown: 2,
-        deleted: 3,
-      };
-      const byLifecycle = (a: SessionAuditRow, b: SessionAuditRow) =>
-        lifecycleOrder[a.lifecycle] - lifecycleOrder[b.lifecycle] ||
-        a.threadId.localeCompare(b.threadId);
-      const reported = (flags.all ? rows : [...missing, ...relocated]).sort(byLifecycle);
-
+      const rows = yield* runOfflineRead(flags, () =>
+        ClaudeResumeBindings.auditClaudeResumeTargets({
+          projectsRoot,
+          includeDeleted: flags.includeDeleted,
+        }),
+      );
       if (flags.json) {
-        for (const row of reported) {
-          yield* Console.log(encodeJsonString(row));
-        }
+        const reported = flags.all ? rows : rows.filter((row) => row.location.kind !== "present");
+        for (const row of reported) yield* Console.log(encodeJsonString(row));
         return;
       }
-
-      yield* Console.log(
-        `Claude threads with a resume cursor: ${rows.length} ` +
-          `(${present.length} transcript present, ${relocated.length} relocated, ${missing.length} missing)` +
-          (flags.includeDeleted ? "" : "; deleted threads not included") +
-          `. Projects root: ${projectsRoot}`,
-      );
-      for (const row of reported) {
-        yield* Console.log(formatAuditRow(row));
-      }
-      if (missing.length > 0) {
-        yield* Console.log(
-          "\nMissing transcripts: sending in these threads fails with " +
-            '"No conversation found with session ID". Copy each .jsonl back to the ' +
-            "`expected=` path (e.g. from the machine where the conversation ran) and simply " +
-            "send again, or run `t3 session reset <threadId>` to start a fresh Claude session " +
-            "without the earlier context. Nothing is changed by this audit.",
-        );
-      }
-      if (relocated.length > 0) {
-        yield* Console.log(
-          "\nRelocated transcripts exist under a different project folder than the thread's " +
-            "cwd; Claude Code usually resolves these on its own. If sending still fails, copy the " +
-            "`found=` file to the `expected=` path.",
-        );
+      for (const line of formatAuditReport({
+        rows,
+        projectsRoot,
+        includeDeleted: flags.includeDeleted,
+        all: flags.all,
+      })) {
+        yield* Console.log(line);
       }
     }),
   ),
 );
 
-const yesFlag = Flag.boolean("yes").pipe(
+const yesFlag = Flag.Boolean("yes").pipe(
   Flag.withDescription(
-    "Actually clear the resume cursor. Without this flag the command only reports what it would do.",
+    "Actually reset the thread. Without this flag the command only reports what it would do.",
   ),
+  Flag.withDefault(false),
 );
 
 const sessionResetCommand = Command.make("reset", {
   ...projectLocationFlags,
   yes: yesFlag,
-  threadId: Argument.string("threadId").pipe(
-    Argument.withDescription("T3 thread id whose provider resume cursor should be cleared."),
+  threadId: Argument.String("threadId").pipe(
+    Argument.withDescription("T3 thread id whose provider session binding should be reset."),
   ),
 }).pipe(
   Command.withDescription(
-    "Clear a thread's persisted resume cursor so its next message starts a fresh provider session (use after `t3 session audit`; the thread's T3 history is kept, the provider-side context is not).",
+    "Detach a thread from its native provider session so its next message starts a fresh session with the thread's T3 history as context (use after `t3 session audit`).",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveCliAuthConfig({ baseDir: flags.baseDir }, logLevel);
-      const minimumLogLevel = config.logLevel;
       const trimmed = flags.threadId.trim();
       if (trimmed.length === 0) {
-        return yield* new SessionCommandError({ message: "threadId cannot be empty." });
+        return yield* new ForkCliError({ detail: "threadId cannot be empty." });
       }
-      const threadId = ThreadId.make(trimmed);
-
-      yield* Effect.gen(function* () {
-        const directory = yield* ProviderSessionDirectory;
-        const binding = Option.getOrUndefined(
-          yield* directory.getBinding(threadId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SessionCommandError({
-                  message: `Failed to read the provider session binding: ${String(cause)}.`,
-                }),
-            ),
-          ),
-        );
-        if (binding === undefined) {
-          return yield* new SessionCommandError({
-            message: `Thread ${threadId} has no provider session binding; nothing to reset.`,
-          });
-        }
-        if (binding.resumeCursor === null || binding.resumeCursor === undefined) {
-          yield* Console.log(
-            `Thread ${threadId} (${binding.provider}) has no resume cursor; its next message already starts a fresh session.`,
-          );
-          return;
-        }
-
-        const cursorJson = encodeJsonString(binding.resumeCursor);
-        yield* Console.log(
-          [
-            `Thread ${threadId} (${binding.provider}${binding.providerInstanceId ? `, instance ${binding.providerInstanceId}` : ""})`,
-            `  current resume cursor: ${cursorJson}`,
-            `  keep this line if you may want to restore the cursor by hand later.`,
-          ].join("\n"),
-        );
-
-        if (!flags.yes) {
-          yield* Console.log(
-            "Dry run: no changes made. Re-run with --yes to clear the cursor. " +
-              "If the transcript can still be recovered from another machine, restore it instead of resetting.",
-          );
-          return;
-        }
-
-        yield* directory
-          .upsert({
-            threadId,
-            provider: binding.provider,
-            ...(binding.providerInstanceId !== undefined
-              ? { providerInstanceId: binding.providerInstanceId }
-              : {}),
-            resumeCursor: null,
-            status: "stopped",
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new SessionCommandError({
-                  message: `Failed to clear the resume cursor: ${String(cause)}.`,
-                }),
-            ),
-          );
-        yield* Console.log(
-          `Cleared the resume cursor for thread ${threadId}. Its next message starts a fresh ${binding.provider} session ` +
-            "(T3 history stays; provider-side context does not). Takes effect on the next session start — " +
-            "if the server currently holds a live provider process for this thread, stop that thread first.",
-        );
-      }).pipe(
-        Effect.provide(
-          OfflineCliRuntimeLive.pipe(
-            Layer.provide(ServerConfig.layer(config)),
-            Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
-          ),
-        ),
-      );
+      const result = yield* runLiveOrOffline({
+        flags,
+        live: ({ origin, token }) =>
+          postForkRoute({
+            origin,
+            token,
+            path: FORK_SESSION_RESET_ROUTE_PATH,
+            body: { threadId: trimmed, apply: flags.yes },
+            decodeResponse: decodeSessionResetResponse,
+          }),
+        offline: Effect.gen(function* () {
+          const bindings = yield* ClaudeResumeBindings.ClaudeResumeBindings;
+          return yield* bindings
+            .reset({ threadId: ThreadId.make(trimmed), apply: flags.yes })
+            .pipe(Effect.mapError((error) => new ForkCliError({ detail: error.message })));
+        }),
+      });
+      for (const line of result.lines) yield* Console.log(line);
     }),
   ),
 );
 
 export const sessionCommand = Command.make("session").pipe(
-  Command.withDescription("Inspect and repair provider session bindings (resume cursors)."),
+  Command.withDescription("Inspect and repair provider session bindings (Claude resume targets)."),
   Command.withSubcommands([sessionAuditCommand, sessionResetCommand]),
 );

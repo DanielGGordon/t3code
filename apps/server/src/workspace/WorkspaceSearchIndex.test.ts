@@ -1,8 +1,10 @@
-import { FileFinder } from "@ff-labs/fff-node";
-// @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import {
+  FileFinder,
+  type FileItem,
+  type GrepCursor,
+  type GrepOptions,
+  type GrepResult,
+} from "@ff-labs/fff-node";
 import { afterEach, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -14,6 +16,54 @@ import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+function fileItem(relativePath: string): FileItem {
+  return {
+    relativePath,
+    fileName: relativePath.slice(relativePath.lastIndexOf("/") + 1),
+    size: 1,
+    modified: 0,
+    accessFrecencyScore: 0,
+    modificationFrecencyScore: 0,
+    totalFrecencyScore: 0,
+    gitStatus: "clean",
+  };
+}
+
+it.effect("filters image searches before applying the result limit", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const items = [
+        ...Array.from({ length: 200 }, (_, index) => fileItem(`src/file-${index}.ts`)),
+        fileItem("public/icon.svg"),
+      ];
+      const fileSearch = vi.fn(() => ({
+        ok: true as const,
+        value: {
+          items,
+          scores: [],
+          totalMatched: items.length,
+          totalFiles: items.length,
+        },
+      }));
+      const finder = {
+        destroy: vi.fn(),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
+        fileSearch,
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
+      const resultWithoutKind = yield* searchIndex.search("", 200, undefined, true);
+      const resultWithDirectoryKind = yield* searchIndex.search("", 200, "directory", true);
+
+      expect(resultWithoutKind.entries).toEqual([{ kind: "file", path: "public/icon.svg" }]);
+      expect(resultWithDirectoryKind.entries).toEqual([{ kind: "file", path: "public/icon.svg" }]);
+      expect(fileSearch).toHaveBeenCalledTimes(2);
+      expect(fileSearch).toHaveBeenCalledWith("", { pageSize: 25_002 });
+    }),
+  ),
+);
 
 it.effect("preserves unexpected FileFinder creation failures", () =>
   Effect.gen(function* () {
@@ -55,6 +105,109 @@ it.effect("keeps returned FileFinder creation diagnostics out of the cause chain
   }),
 );
 
+it.effect("waits for the full content index warmup before returning", () =>
+  Effect.gen(function* () {
+    const waitForIndexReady = vi.fn(async () => ({ ok: true as const, value: true }));
+    const finder = {
+      destroy: vi.fn(),
+      waitForIndexReady,
+    } as unknown as FileFinder;
+    vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+    yield* Effect.scoped(WorkspaceSearchIndex.make("/workspace/project", "content"));
+
+    expect(waitForIndexReady).toHaveBeenCalledWith(15_000);
+  }),
+);
+
+it.effect("preserves a full-index warmup timeout as a structured error", () =>
+  Effect.gen(function* () {
+    const finder = {
+      destroy: vi.fn(),
+      waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: false })),
+    } as unknown as FileFinder;
+    vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+    const error = yield* Effect.flip(
+      Effect.scoped(WorkspaceSearchIndex.make("/workspace/project", "content")),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "WorkspaceSearchIndexScanTimedOut",
+      cwd: "/workspace/project",
+      timeout: "15 seconds",
+    });
+  }),
+);
+
+it.effect("returns partial path results when the initial scan times out", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const mixedSearch = vi.fn(() => ({
+        ok: true as const,
+        value: {
+          items: [
+            {
+              type: "directory" as const,
+              item: { relativePath: "src", fileName: "src", fileCount: 1 },
+            },
+            { type: "file" as const, item: fileItem("src/index.ts") },
+          ],
+          scores: [],
+          totalMatched: 2,
+          totalFiles: 1,
+        },
+      }));
+      let scanning = true;
+      const finder = {
+        destroy: vi.fn(),
+        isScanning: vi.fn(() => scanning),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: false })),
+        mixedSearch,
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project", "paths");
+      const list = yield* searchIndex.list();
+      const search = yield* searchIndex.search("src", 10);
+      scanning = true;
+      mixedSearch.mockImplementationOnce(() => {
+        scanning = false;
+        return {
+          ok: true as const,
+          value: {
+            items: [
+              {
+                type: "directory" as const,
+                item: { relativePath: "src", fileName: "src", fileCount: 1 },
+              },
+              { type: "file" as const, item: fileItem("src/index.ts") },
+            ],
+            scores: [],
+            totalMatched: 2,
+            totalFiles: 1,
+          },
+        };
+      });
+      const searchCompletingDuringQuery = yield* searchIndex.search("src", 10);
+      scanning = false;
+      const completedSearch = yield* searchIndex.search("src", 10);
+
+      expect(list).toEqual({
+        entries: [
+          { kind: "directory", path: "src" },
+          { kind: "file", path: "src/index.ts" },
+        ],
+        truncated: true,
+      });
+      expect(search.truncated).toBe(true);
+      expect(searchCompletingDuringQuery.truncated).toBe(true);
+      expect(completedSearch.truncated).toBe(false);
+      expect(mixedSearch).toHaveBeenCalledTimes(4);
+    }),
+  ),
+);
+
 it.effect("preserves FileFinder destroy failures as structured defects", () =>
   Effect.gen(function* () {
     const cause = new Error("native destroy failed");
@@ -62,7 +215,7 @@ it.effect("preserves FileFinder destroy failures as structured defects", () =>
       destroy: vi.fn(() => {
         throw cause;
       }),
-      isScanning: vi.fn(() => false),
+      waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
     } as unknown as FileFinder;
     vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
@@ -89,11 +242,15 @@ it.effect("preserves search and refresh failures with operation context", () =>
     Effect.gen(function* () {
       const searchCause = new Error("native search failed");
       const refreshCause = new Error("native scan failed");
+      const contentSearchCause = new Error("native grep failed");
       const finder = {
         destroy: vi.fn(),
-        isScanning: vi.fn(() => false),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
         mixedSearch: vi.fn(() => {
           throw searchCause;
+        }),
+        grep: vi.fn(() => {
+          throw contentSearchCause;
         }),
         scanFiles: vi.fn(() => {
           throw refreshCause;
@@ -104,6 +261,15 @@ it.effect("preserves search and refresh failures with operation context", () =>
       const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
       const query = "authorization: Bearer secret-token";
       const searchError = yield* Effect.flip(searchIndex.search(query, 3));
+      const contentSearchError = yield* Effect.flip(
+        searchIndex.searchContents({
+          query,
+          limit: 3,
+          caseSensitive: false,
+          wholeWord: false,
+          useRegex: false,
+        }),
+      );
       const refreshError = yield* Effect.flip(searchIndex.refresh());
 
       expect(searchError).toMatchObject({
@@ -116,6 +282,16 @@ it.effect("preserves search and refresh failures with operation context", () =>
       });
       expect(searchError).not.toHaveProperty("query");
       expect(searchError.message).not.toMatch(/Bearer|secret-token/);
+      expect(contentSearchError).toMatchObject({
+        _tag: "WorkspaceSearchIndexSearchFailed",
+        cwd: "/workspace/project",
+        queryLength: query.length,
+        pageSize: 3,
+        reason: "FileFinder.grep threw unexpectedly.",
+        cause: contentSearchCause,
+      });
+      expect(contentSearchError).not.toHaveProperty("query");
+      expect(contentSearchError.message).not.toMatch(/Bearer|secret-token/);
       expect(refreshError).toMatchObject({
         _tag: "WorkspaceSearchIndexRefreshFailed",
         cwd: "/workspace/project",
@@ -131,7 +307,7 @@ it.effect("keeps returned search diagnostics out of the cause chain", () =>
     Effect.gen(function* () {
       const finder = {
         destroy: vi.fn(),
-        isScanning: vi.fn(() => false),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
         mixedSearch: vi.fn(() => ({ ok: false, error: "native query rejected" })),
         scanFiles: vi.fn(() => ({ ok: false, error: "native refresh rejected" })),
       } as unknown as FileFinder;
@@ -162,82 +338,79 @@ it.effect("keeps returned search diagnostics out of the cause chain", () =>
   ),
 );
 
-it.effect("walks dot-directories without descending into .git", () =>
+it.effect("continues whole-word searches after a filtered grep page", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const cwd = yield* Effect.acquireRelease(
-        Effect.tryPromise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-"))),
-        (directory) =>
-          Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
-      );
-      yield* Effect.promise(async () => {
-        await NodeFSP.mkdir(NodePath.join(cwd, ".github", "workflows"), { recursive: true });
-        await NodeFSP.mkdir(NodePath.join(cwd, ".git"), { recursive: true });
-        await NodeFSP.writeFile(NodePath.join(cwd, ".github", "workflows", "ci.yml"), "name: CI");
-        await NodeFSP.writeFile(NodePath.join(cwd, ".git", "config"), "secret");
-        await NodeFSP.writeFile(NodePath.join(cwd, ".env"), "TOKEN=test");
+      const nextCursor = {
+        __brand: "GrepCursor",
+        _offset: 1,
+      } as GrepCursor;
+      const grepResult = (
+        lineContent: string,
+        matchRanges: Array<[number, number]>,
+        cursor: GrepCursor | null,
+      ): GrepResult => ({
+        items: [
+          {
+            relativePath: "src/words.ts",
+            fileName: "words.ts",
+            gitStatus: "unmodified",
+            size: lineContent.length,
+            modified: 0,
+            isBinary: false,
+            totalFrecencyScore: 0,
+            accessFrecencyScore: 0,
+            modificationFrecencyScore: 0,
+            lineNumber: 1,
+            col: 0,
+            byteOffset: 0,
+            lineContent,
+            matchRanges,
+          },
+        ],
+        totalMatched: 1,
+        totalFilesSearched: 1,
+        totalFiles: 1,
+        filteredFileCount: 1,
+        nextCursor: cursor,
       });
-      const finder = {
-        destroy: vi.fn(),
-        isScanning: vi.fn(() => false),
-        mixedSearch: vi.fn(() => ({
-          ok: true,
-          value: { items: [], totalMatched: 0 },
-        })),
-      } as unknown as FileFinder;
-      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
-
-      const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
-      const result = yield* searchIndex.list(true);
-
-      expect(result.entries).toEqual([
-        { path: ".env", kind: "file" },
-        { path: ".github", kind: "directory" },
-        { path: ".github/workflows", kind: "directory" },
-        { path: ".github/workflows/ci.yml", kind: "file" },
-      ]);
-      expect(result.truncated).toBe(false);
-    }),
-  ),
-);
-
-it.effect("surfaces dotfiles even when the native results already fill the entry cap", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const cwd = yield* Effect.acquireRelease(
-        Effect.tryPromise(() =>
-          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-dotfiles-cap-")),
-        ),
-        (directory) =>
-          Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
-      );
-      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(cwd, ".env"), "TOKEN=test"));
-
-      // Simulate a tree (e.g. the home directory) whose gitignore-filtered
-      // native scan alone reaches the entry cap. Before dotfiles were given
-      // priority, this starved dotfile discovery so `.env` never appeared.
-      const nativeItems = Array.from(
-        { length: WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES },
-        (_, index) => ({ type: "file", item: { relativePath: `native-${index}.txt` } }),
+      const grep = vi.fn((_query: string, options?: GrepOptions) =>
+        options?.cursor
+          ? { ok: true as const, value: grepResult("needle", [[0, 6]], null) }
+          : {
+              ok: true as const,
+              value: grepResult("needleSuffix", [[0, 6]], nextCursor),
+            },
       );
       const finder = {
         destroy: vi.fn(),
-        isScanning: vi.fn(() => false),
-        mixedSearch: vi.fn(() => ({
-          ok: true,
-          value: { items: nativeItems, totalMatched: nativeItems.length },
-        })),
+        waitForIndexReady: vi.fn(async () => ({ ok: true as const, value: true })),
+        grep,
       } as unknown as FileFinder;
       vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
-      const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
-      const result = yield* searchIndex.list(true);
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project", "content");
+      const result = yield* searchIndex.searchContents({
+        query: "needle",
+        limit: 1,
+        caseSensitive: true,
+        wholeWord: true,
+        useRegex: false,
+      });
 
-      expect(result.entries).toContainEqual({ path: ".env", kind: "file" });
-      expect(result.entries.length).toBeLessThanOrEqual(
-        WorkspaceSearchIndex.WORKSPACE_INDEX_MAX_ENTRIES,
-      );
-      expect(result.truncated).toBe(true);
+      expect(result).toEqual({
+        matches: [
+          {
+            path: "src/words.ts",
+            lineNumber: 1,
+            lineContent: "needle",
+            matchRanges: [{ start: 0, end: 6 }],
+          },
+        ],
+        truncated: false,
+      });
+      expect(grep).toHaveBeenCalledTimes(2);
+      expect(grep.mock.calls[1]?.[1]?.cursor).toBe(nextCursor);
     }),
   ),
 );

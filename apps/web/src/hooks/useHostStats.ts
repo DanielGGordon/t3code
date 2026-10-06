@@ -1,5 +1,5 @@
-import type { ServerHostStatsResult, ServerHostStatsSnapshot } from "@t3tools/contracts";
-import { useEffect, useRef, useState } from "react";
+import type { HostResourcesSnapshot } from "@t3tools/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentQuery } from "../state/query";
@@ -14,11 +14,11 @@ const REFRESH_INTERVAL_MS = 5_000;
  * Polls on a short interval, but only while `enabled`, so the readout costs
  * nothing when the sidebar toggle is off.
  */
-export function useHostStats(enabled: boolean): ServerHostStatsResult {
+export function useHostStats(enabled: boolean): HostStatsSnapshot | null {
   const environmentId = usePrimaryEnvironmentId();
   const query = useEnvironmentQuery(
     enabled && environmentId !== null
-      ? serverEnvironment.hostStats({ environmentId, input: {} })
+      ? serverEnvironment.hostResources({ environmentId, input: {} })
       : null,
   );
   const refresh = query.refresh;
@@ -35,7 +35,31 @@ export function useHostStats(enabled: boolean): ServerHostStatsResult {
     };
   }, [enabled, refresh]);
 
-  return query.data;
+  return useMemo(() => toHostStatsSnapshot(query.data), [query.data]);
+}
+
+/** Sidebar-readout view of the server's `hostResources` snapshot. */
+export interface HostStatsSnapshot {
+  /** Whole-host CPU busy percentage, 0-100 (0 until the first sample exists). */
+  readonly cpuPercent: number;
+  readonly cpuCount: number;
+  readonly memUsedBytes: number;
+  readonly memTotalBytes: number;
+}
+
+function toHostStatsSnapshot(
+  resources: HostResourcesSnapshot | null | undefined,
+): HostStatsSnapshot | null {
+  if (resources === null || resources === undefined) {
+    return null;
+  }
+  return {
+    // `cpuUtilization` is a 0-1 fraction, null before the first sample.
+    cpuPercent: (resources.cpuUtilization ?? 0) * 100,
+    cpuCount: resources.cpuCount,
+    memUsedBytes: Math.max(0, resources.totalMemoryBytes - resources.availableMemoryBytes),
+    memTotalBytes: resources.totalMemoryBytes,
+  };
 }
 
 /** One retained host-stats sample; `at` is the client receive time (ms epoch). */
@@ -50,7 +74,7 @@ export interface HostStatsSample {
 const HISTORY_LIMIT = 24;
 
 export interface HostStatsWithHistory {
-  readonly stats: ServerHostStatsSnapshot | null;
+  readonly stats: HostStatsSnapshot | null;
   /** Oldest→newest rolling window of recent samples, including `stats`. */
   readonly history: readonly HostStatsSample[];
 }
@@ -67,7 +91,7 @@ let cachedHistory: readonly HostStatsSample[] = [];
 export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory {
   const stats = useHostStats(enabled);
   const [history, setHistory] = useState<readonly HostStatsSample[]>(cachedHistory);
-  const lastSampleRef = useRef<ServerHostStatsSnapshot | null>(null);
+  const lastSampleRef = useRef<HostStatsSnapshot | null>(null);
 
   useEffect(() => {
     if (!enabled) {

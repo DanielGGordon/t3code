@@ -1,4 +1,4 @@
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, eq, isNull, ne } from "drizzle-orm";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 
 import * as RelayDb from "../db.ts";
 import {
+  relayEnvironmentLinks,
   relayManagedEndpointAllocations,
   relayManagedTunnelLimits,
 } from "../persistence/schema.ts";
@@ -16,7 +17,7 @@ import {
  */
 export const DEFAULT_MANAGED_TUNNEL_LIMIT = 3;
 
-export class ManagedTunnelLimitPersistenceError extends Schema.TaggedErrorClass<ManagedTunnelLimitPersistenceError>()(
+export class ManagedTunnelLimitPersistenceError extends Schema.TaggedError<ManagedTunnelLimitPersistenceError>()(
   "ManagedTunnelLimitPersistenceError",
   {
     operation: Schema.Literals(["load-limit", "count-tunnels"]),
@@ -29,7 +30,7 @@ export class ManagedTunnelLimitPersistenceError extends Schema.TaggedErrorClass<
   }
 }
 
-export class ManagedTunnelLimitExceeded extends Schema.TaggedErrorClass<ManagedTunnelLimitExceeded>()(
+export class ManagedTunnelLimitExceeded extends Schema.TaggedError<ManagedTunnelLimitExceeded>()(
   "ManagedTunnelLimitExceeded",
   {
     userId: Schema.String,
@@ -81,10 +82,19 @@ export const make = Effect.gen(function* () {
       const counted = yield* db
         .select({ activeTunnels: count() })
         .from(relayManagedEndpointAllocations)
+        .innerJoin(
+          relayEnvironmentLinks,
+          and(
+            eq(relayEnvironmentLinks.userId, relayManagedEndpointAllocations.userId),
+            eq(relayEnvironmentLinks.environmentId, relayManagedEndpointAllocations.environmentId),
+          ),
+        )
         .where(
           and(
             eq(relayManagedEndpointAllocations.userId, input.userId),
             ne(relayManagedEndpointAllocations.environmentId, input.environmentId),
+            isNull(relayEnvironmentLinks.revokedAt),
+            eq(relayEnvironmentLinks.managedTunnelsEnabled, true),
           ),
         )
         .pipe(

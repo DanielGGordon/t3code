@@ -3,7 +3,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as VoiceTranscription from "./VoiceTranscription.ts";
@@ -11,10 +11,16 @@ import * as VoiceTranscription from "./VoiceTranscription.ts";
 interface CapturedRequest {
   readonly url: string;
   readonly authorization: string | undefined;
-  readonly model: FormDataEntryValue | null;
+  readonly model: File | string | null;
   readonly fileName: string | undefined;
   readonly fileType: string | undefined;
 }
+
+/** The layer can also fail with a ConfigError; these cases expect the domain error. */
+const expectVoiceError = (error: { readonly _tag: string }) => {
+  assert.instanceOf(error, VoiceTranscription.VoiceTranscriptionError);
+  return error as VoiceTranscription.VoiceTranscriptionError;
+};
 
 const makeHarness = (options: {
   readonly storedKey?: string;
@@ -35,11 +41,7 @@ const makeHarness = (options: {
       });
       return HttpClientResponse.fromWeb(
         request,
-        options.respond?.() ??
-          new Response(JSON.stringify({ text: "  hello world  " }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          }),
+        options.respond?.() ?? Response.json({ text: "  hello world  " }, { status: 200 }),
       );
     }),
   );
@@ -121,7 +123,7 @@ describe("VoiceTranscription", () => {
   it.effect("fails as not_configured without calling upstream when no key exists", () =>
     Effect.gen(function* () {
       const harness = makeHarness({});
-      const error = yield* Effect.flip(harness.transcribe());
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
       assert.equal(error.reason, "not_configured");
       assert.equal(harness.captured.length, 0);
     }),
@@ -130,7 +132,7 @@ describe("VoiceTranscription", () => {
   it.effect("rejects empty recordings", () =>
     Effect.gen(function* () {
       const harness = makeHarness({ storedKey: "sk-stored" });
-      const error = yield* Effect.flip(harness.transcribe(new Uint8Array()));
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe(new Uint8Array())));
       assert.equal(error.reason, "empty_audio");
       assert.equal(harness.captured.length, 0);
     }),
@@ -142,7 +144,7 @@ describe("VoiceTranscription", () => {
         storedKey: "sk-stored",
         respond: () => new Response('{"error":{"message":"bad key"}}', { status: 401 }),
       });
-      const error = yield* Effect.flip(harness.transcribe());
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
       assert.equal(error.reason, "upstream_error");
       assert.include(error.message, "401");
     }),

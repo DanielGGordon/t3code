@@ -6,16 +6,25 @@ import { cn } from "~/lib/utils";
 
 const alertVariants = cva("relative rounded-xl border px-3.5 py-3 text-card-foreground text-sm", {
   defaultVariants: {
+    surface: "default",
     variant: "default",
   },
   variants: {
+    // "glass" floats the alert over content; alert-glass tints from data-variant.
+    surface: {
+      default: "",
+      glass: "alert-glass",
+    },
     variant: {
       default: "bg-transparent dark:bg-input/32 [&_svg]:text-muted-foreground",
+      sidebar:
+        "rounded-lg border-sidebar-border bg-sidebar-control-surface px-2 py-1.5 text-[11px] leading-4 [&_[data-slot=alert-description]]:block [&_[data-slot=alert-description]]:text-sidebar-muted-foreground",
       error:
-        "border-destructive/32 bg-destructive/4 text-destructive-foreground [&_[data-slot=alert-description]]:text-destructive-foreground/80 [&_svg]:text-destructive",
+        "border-error/32 bg-error-surface text-error-foreground [&_[data-slot=alert-description]]:text-error-foreground/80 [&_svg]:text-error",
       info: "border-info/32 bg-info/4 [&_svg]:text-info",
       success: "border-success/32 bg-success/4 [&_svg]:text-success",
-      warning: "border-warning/32 bg-warning/4 [&_svg]:text-warning",
+      warning:
+        "border-warning/32 bg-warning-surface text-warning-foreground [&_[data-slot=alert-description]]:text-warning-foreground/80 [&_svg]:text-warning",
     },
   },
 });
@@ -42,9 +51,14 @@ function alertChildSlot(child: React.ReactElement): string | undefined {
 function Alert({
   className,
   variant,
+  surface,
+  controlAlignment = "center",
   children,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof alertVariants> & {
+    controlAlignment?: "center" | "first-line";
+  }) {
   const icon: React.ReactNode[] = [];
   const content: React.ReactNode[] = [];
   const action: React.ReactNode[] = [];
@@ -66,21 +80,46 @@ function Alert({
 
   return (
     <div
-      className={cn(alertVariants({ variant }), className)}
+      className={cn(alertVariants({ surface, variant }), className)}
       data-slot="alert"
+      data-variant={variant ?? "default"}
       role="alert"
       {...props}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        className={cn(
+          "flex gap-2",
+          controlAlignment === "first-line" ? "items-start" : "items-center",
+          controlAlignment === "first-line" &&
+            action.length > 0 &&
+            "min-h-7 pt-1 sm:min-h-6 sm:pt-0.5",
+        )}
+      >
         {icon.length > 0 && (
-          <div className="flex size-4 shrink-0 items-center justify-center [&>svg]:size-full">
+          <div
+            className={cn(
+              "flex shrink-0 items-center justify-center",
+              controlAlignment === "first-line"
+                ? "h-lh w-4 [&>svg]:size-4"
+                : "size-4 [&>svg]:size-full",
+            )}
+          >
             {icon}
           </div>
         )}
         {content.length > 0 && (
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">{content}</div>
         )}
-        {action}
+        {action.length > 0 && (
+          <div
+            className={cn(
+              "flex shrink-0 items-center",
+              controlAlignment === "first-line" ? "h-lh self-start" : "self-center",
+            )}
+          >
+            {action}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -101,13 +140,7 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
 }
 
 function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn("flex shrink-0 items-center gap-1 self-center", className)}
-      data-slot="alert-action"
-      {...props}
-    />
-  );
+  return <div className={cn("flex gap-1", className)} data-slot="alert-action" {...props} />;
 }
 
 AlertTitle.displayName = "AlertTitle";

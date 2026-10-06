@@ -570,7 +570,7 @@ export function verifyCuratedDb(db: DatabaseSync, sandboxPath: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Online-backup prod's state.sqlite into `dstDbPath`, opening prod strictly
+ * Online-backup prod's live DB (see resolveProdDbSource) into `dstDbPath`, opening prod strictly
  * read-only (SQLITE_OPEN_READONLY). Returns the sqlite lib used. Prefers the
  * built-in node:sqlite backup(); falls back to the proven python3 read-only
  * backup one-liner if node:sqlite's backup() is unavailable/broken.
@@ -741,14 +741,68 @@ function assertProdReadOnlyGuards(prodUserdata: string): void {
     );
   }
 
-  if (!existsSync(join(prodUserdata, "state.sqlite"))) {
-    throw new Error(`Prod userdata has no state.sqlite at ${join(prodUserdata, "state.sqlite")}.`);
+  resolveProdDbSource(prodUserdata);
+}
+
+// ---------------------------------------------------------------------------
+// Prod DB source (orchestration v1 state.sqlite vs v2 statev2.sqlite)
+// ---------------------------------------------------------------------------
+
+export interface ProdDbSource {
+  /** "v2" once prod has cut over to orchestration v2; "v1" before. */
+  readonly generation: "v1" | "v2";
+  /** File name inside userdata — also the name the template DB is published under. */
+  readonly fileName: "state.sqlite" | "statev2.sqlite";
+  readonly path: string;
+}
+
+/**
+ * Pick the DB prod is actually writing. Orchestration v2 seeds `statev2.sqlite`
+ * from `state.sqlite` exactly once and then never touches `state.sqlite` again,
+ * so after the cutover `state.sqlite` is a FROZEN pre-cutover snapshot —
+ * snapshotting it would publish an arbitrarily stale seed. `statev2.sqlite` is
+ * self-contained (the legacy tables v2 imports transcripts from lazily were
+ * copied into it), so it needs no companion file beyond its own -wal, which the
+ * online backup already folds in.
+ */
+export function resolveProdDbSource(prodUserdata: string): ProdDbSource {
+  const v2 = join(prodUserdata, "statev2.sqlite");
+  if (existsSync(v2)) {
+    return { generation: "v2", fileName: "statev2.sqlite", path: v2 };
+  }
+  const v1 = join(prodUserdata, "state.sqlite");
+  if (existsSync(v1)) {
+    return { generation: "v1", fileName: "state.sqlite", path: v1 };
+  }
+  throw new Error(`Prod userdata has neither statev2.sqlite nor state.sqlite at ${prodUserdata}.`);
+}
+
+/**
+ * The curated prune/strip/neutralize pipeline below is authored against the v1
+ * projection + `orchestration_events` schema only. A v2 DB keeps those tables
+ * (as the frozen legacy-import source) but its live data — and every prod
+ * workspace path / resume binding the safety pass must neutralize — lives in the
+ * `orchestration_v2_*` tables, which nothing here prunes. Until a v2 prune is
+ * authored and verified, refuse rather than ship either a stale v1 seed or a v2
+ * copy carrying live prod paths and provider bindings.
+ */
+function assertPruneSupportsSource(source: ProdDbSource): void {
+  if (source.generation === "v2") {
+    throw new Error(
+      `prod is on orchestration v2 (${source.path}); the curated prune is authored for the v1 ` +
+        "schema only and would leave the orchestration_v2_* tables (live prod workspace paths, " +
+        "provider session bindings) unpruned. Refusing rather than publishing a stale seed from " +
+        "the frozen state.sqlite. Author a v2 prune in test-seed-refresh.ts, or deploy with " +
+        "--seed minimal / --seed copy meanwhile.",
+    );
   }
 }
 
 export async function runRefresh(opts: RefreshOptions): Promise<SeedManifest> {
   const prodUserdata = prodUserdataDir();
   assertProdReadOnlyGuards(prodUserdata);
+  const source = resolveProdDbSource(prodUserdata);
+  assertPruneSupportsSource(source);
 
   // Bootstrap the registry tree BEFORE acquiring the lock — the mkdir lock lives
   // under the registry root, which must exist first.
@@ -768,8 +822,8 @@ export async function runRefresh(opts: RefreshOptions): Promise<SeedManifest> {
     const buildUserdata = join(buildDir, "userdata");
     mkdirSync(buildUserdata, { recursive: true, mode: 0o700 });
 
-    const prodDbPath = join(prodUserdata, "state.sqlite");
-    const workDbPath = join(buildUserdata, "state.sqlite");
+    const prodDbPath = source.path;
+    const workDbPath = join(buildUserdata, source.fileName);
 
     // 1. Safe snapshot (prod read-only, WAL-safe online backup).
     const sqliteLib = await snapshotProdDb(prodDbPath, workDbPath);

@@ -19,7 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
@@ -29,13 +29,13 @@ const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcription
 const TRANSCRIPTION_TIMEOUT = Duration.seconds(90);
 
 const VoiceTranscriptionEnvConfig = Config.all({
-  apiKey: Config.redacted("OPENAI_API_KEY").pipe(Config.option),
-  model: Config.string("T3CODE_VOICE_TRANSCRIPTION_MODEL").pipe(
+  apiKey: Config.Redacted("OPENAI_API_KEY").pipe(Config.option),
+  model: Config.String("T3CODE_VOICE_TRANSCRIPTION_MODEL").pipe(
     Config.withDefault(DEFAULT_VOICE_TRANSCRIPTION_MODEL),
   ),
 });
 
-export class VoiceTranscriptionError extends Schema.TaggedErrorClass<VoiceTranscriptionError>()(
+export class VoiceTranscriptionError extends Schema.TaggedError<VoiceTranscriptionError>()(
   "VoiceTranscriptionError",
   {
     reason: VoiceTranscriptionFailureReasonSchema,

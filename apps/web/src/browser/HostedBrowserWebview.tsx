@@ -1,18 +1,28 @@
 "use client";
 
-import type { PreviewViewportSetting, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  DesktopPreviewColorScheme,
+  PreviewViewportSetting,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
-import { cn } from "~/lib/utils";
+import { useClientSettingsHydrated } from "~/hooks/useSettings";
+import { cn, isMacPlatform } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
-import { browserViewportSettingKey, resolveBrowserViewportLayout } from "./browserViewportLayout";
+import { useActiveBrowserRecordingTabIds } from "./browserRecording";
+import {
+  browserViewportSettingKey,
+  resolveBrowserViewportLayout,
+  resolveFittedBrowserViewport,
+} from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
-import { acquireDesktopTab, type AcquiredDesktopTab } from "./desktopTabLifetime";
+import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
@@ -40,12 +50,41 @@ declare global {
 export function HostedBrowserWebview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
+  readonly runtimeTabId: string;
   readonly initialUrl: string | null;
   readonly viewport: PreviewViewportSetting;
+  readonly pictureInPicture: boolean;
+  /**
+   * Fixed for the tab's lifetime: Electron only honours `partition` before the
+   * guest attaches, so a live change here would not move the tab anyway.
+   */
+  readonly profileId: string | undefined;
   readonly zoomFactor: number;
+  /** A tab of the desktop's own server; the server drives this webview's page. */
+  readonly serverDriven?: boolean;
+  /**
+   * For a server-driven tab, the appearance and zoom its environment published,
+   * which this webview follows so every client and agent sees one state.
+   */
+  readonly serverRendering?: {
+    readonly colorScheme: DesktopPreviewColorScheme;
+    readonly zoomFactor: number;
+  };
 }) {
-  const { threadRef, tabId, initialUrl, viewport, zoomFactor } = props;
-  const config = usePreviewWebviewConfig(threadRef.environmentId);
+  const {
+    threadRef,
+    tabId,
+    runtimeTabId,
+    initialUrl,
+    viewport,
+    pictureInPicture,
+    zoomFactor,
+    profileId,
+    serverDriven = false,
+    serverRendering,
+  } = props;
+  const clientSettingsHydrated = useClientSettingsHydrated();
+  const config = usePreviewWebviewConfig(threadRef.environmentId, profileId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -54,27 +93,52 @@ export function HostedBrowserWebview(props: {
   const [aspectRatioLocked, setAspectRatioLocked] = useState(false);
   const presentation = useBrowserSurfaceStore(
     useShallow((state) => {
-      const current = state.byTabId[tabId];
+      const current = state.byTabId[runtimeTabId];
       return {
+        content: current?.content ?? null,
         cornerRadius: current?.cornerRadius ?? 0,
         fitSourceContent: current?.fitSourceContent ?? false,
         fittedSourceContent: current?.fittedSourceContent ?? null,
-        rect: resolveBrowserSurfacePanelRect(state.byTabId, tabId),
+        rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
+        zIndex: current?.zIndex ?? 30,
       };
     }),
   );
-  usePreviewBridge({ threadRef, tabId });
+  const backgroundActivity = useBrowserSurfaceStore(
+    (state) => (state.activityByTabId[runtimeTabId] ?? 0) > 0,
+  );
+  const recordingActive = useActiveBrowserRecordingTabIds().has(runtimeTabId);
+  usePreviewBridge({ threadRef, tabId, runtimeTabId, serverDriven });
+
+  const serverColorScheme = serverRendering?.colorScheme;
+  const serverZoomFactor = serverRendering?.zoomFactor;
 
   useEffect(() => {
+    if (!clientSettingsHydrated) return;
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
-    const lease = acquireDesktopTab(tabId);
+    const lease = acquireDesktopTab(
+      runtimeTabId,
+      serverDriven ? { threadId: threadRef.threadId, tabId } : undefined,
+    );
     tabLeaseRef.current = lease;
     return () => {
       if (tabLeaseRef.current === lease) tabLeaseRef.current = null;
       lease.release();
     };
-  }, [tabId]);
+  }, [clientSettingsHydrated, runtimeTabId, serverDriven, tabId, threadRef.threadId]);
+
+  // A server tab looks the way its environment published, once the desktop tab exists.
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview;
+    if (!bridge || serverColorScheme === undefined) return;
+    withDesktopTab(runtimeTabId, () => bridge.setColorScheme(runtimeTabId, serverColorScheme));
+  }, [runtimeTabId, serverColorScheme]);
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview;
+    if (!bridge || serverZoomFactor === undefined) return;
+    withDesktopTab(runtimeTabId, () => bridge.setZoomFactor(runtimeTabId, serverZoomFactor));
+  }, [runtimeTabId, serverZoomFactor]);
 
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
@@ -86,13 +150,12 @@ export function HostedBrowserWebview(props: {
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
-    if (node && !node.hasAttribute("allowpopups")) node.setAttribute("allowpopups", "true");
   }, []);
 
   useEffect(() => {
     const webview = webviewRef.current;
     const bridge = previewBridge;
-    if (!webview || !config || !bridge) return;
+    if (!clientSettingsHydrated || !webview || !config || !bridge) return;
     let disposed = false;
     let recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
     const register = () => {
@@ -107,7 +170,7 @@ export function HostedBrowserWebview(props: {
           if (disposed || webviewRef.current !== webview) return;
           const webContentsId = webview.getWebContentsId();
           if (Number.isInteger(webContentsId) && webContentsId > 0) {
-            await bridge.registerWebview(tabId, webContentsId);
+            await bridge.registerWebview(runtimeTabId, webContentsId);
           }
         } catch {
           // did-attach/dom-ready will retry if the guest was not ready yet.
@@ -127,9 +190,18 @@ export function HostedBrowserWebview(props: {
         }
       }, recovery.delayMs);
     };
+    // A click inside the guest only reaches this document as a webview focus
+    // event, so open menus and popovers never see the outside press that
+    // would dismiss them. Replay it as a pointerdown on the webview itself.
+    const dismissHostPopups = () => {
+      webview.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
+      );
+    };
     webview.addEventListener("did-attach", register);
     webview.addEventListener("dom-ready", register);
     webview.addEventListener("render-process-gone", recoverGuest);
+    webview.addEventListener("focus", dismissHostPopups);
     register();
     return () => {
       disposed = true;
@@ -137,8 +209,9 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("did-attach", register);
       webview.removeEventListener("dom-ready", register);
       webview.removeEventListener("render-process-gone", recoverGuest);
+      webview.removeEventListener("focus", dismissHostPopups);
     };
-  }, [config, initialSrc, tabId, webviewGeneration]);
+  }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, webviewGeneration]);
 
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
@@ -152,13 +225,22 @@ export function HostedBrowserWebview(props: {
   const handleAspectRatioChange = useCallback((aspectRatio: number | null) => {
     setAspectRatioLocked(aspectRatio !== null);
   }, []);
+  const hiddenContentSize = presentation.content
+    ? {
+        width: presentation.content.width / presentation.content.scale,
+        height: presentation.content.height / presentation.content.scale,
+      }
+    : null;
   const hiddenSize =
     viewport._tag !== "fill"
       ? {
           width: viewport.width * normalizedZoomFactor,
           height: viewport.height * normalizedZoomFactor,
         }
-      : { width: lastRect?.width ?? 1280, height: lastRect?.height ?? 800 };
+      : {
+          width: hiddenContentSize?.width ?? lastRect?.width ?? 1280,
+          height: hiddenContentSize?.height ?? lastRect?.height ?? 800,
+        };
   const containerSize = active && lastRect ? lastRect : hiddenSize;
   const deviceToolbarVisible = active && viewport._tag !== "fill" && !presentation.fitSourceContent;
   const {
@@ -169,7 +251,7 @@ export function HostedBrowserWebview(props: {
     handleResizePointerDown,
     layout: viewportLayout,
   } = useBrowserViewportResize({
-    tabId,
+    tabId: runtimeTabId,
     viewport,
     zoomFactor,
     containerSize,
@@ -178,31 +260,11 @@ export function HostedBrowserWebview(props: {
   });
   const fittedSourceViewport =
     presentation.fitSourceContent && lastRect
-      ? presentation.fittedSourceContent
-        ? {
-            _tag: "freeform" as const,
-            width: Math.max(
-              1,
-              Math.round(
-                presentation.fittedSourceContent.width /
-                  presentation.fittedSourceContent.scale /
-                  normalizedZoomFactor,
-              ),
-            ),
-            height: Math.max(
-              1,
-              Math.round(
-                presentation.fittedSourceContent.height /
-                  presentation.fittedSourceContent.scale /
-                  normalizedZoomFactor,
-              ),
-            ),
-          }
-        : {
-            _tag: "freeform" as const,
-            width: viewport._tag === "fill" ? 1280 : viewport.width,
-            height: viewport._tag === "fill" ? 800 : viewport.height,
-          }
+      ? resolveFittedBrowserViewport(
+          viewport,
+          presentation.fittedSourceContent,
+          normalizedZoomFactor,
+        )
       : null;
   const layout =
     fittedSourceViewport && lastRect
@@ -212,7 +274,7 @@ export function HostedBrowserWebview(props: {
   const syncContentPresentation = useCallback(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    useBrowserSurfaceStore.getState().presentContent(tabId, {
+    useBrowserSurfaceStore.getState().presentContent(runtimeTabId, {
       x: layout.viewportX,
       y: layout.viewportY,
       width: layout.viewportWidth,
@@ -221,7 +283,7 @@ export function HostedBrowserWebview(props: {
       scrollLeft: wrapper.scrollLeft,
       scrollTop: wrapper.scrollTop,
     });
-  }, [layout, tabId]);
+  }, [layout, runtimeTabId]);
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(syncContentPresentation);
@@ -232,13 +294,20 @@ export function HostedBrowserWebview(props: {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
     wrapper.scrollTo({ left: 0, top: 0 });
-  }, [tabId, viewport._tag, viewportHeight, viewportWidth]);
+  }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
 
-  if (!config) return null;
+  if (!clientSettingsHydrated || !config) return null;
 
+  const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
+    renderingActive,
+    // Electron 43 can permanently blank a macOS webview after `visibility: hidden`.
+    // Inactive macOS guests intentionally remain paintable offscreen; other platforms still
+    // suspend them, and automation continues to see the macOS guests as inactive.
+    keepPaintableWhenInactive: isMacPlatform(navigator.platform),
     cornerRadius: presentation.cornerRadius,
+    zIndex: presentation.zIndex,
     rect: lastRect,
     hiddenSize,
   });
@@ -249,7 +318,8 @@ export function HostedBrowserWebview(props: {
       className="fixed overflow-hidden bg-muted/35"
       style={{ ...wrapperStyle, overscrollBehavior: "contain" }}
       onScroll={syncContentPresentation}
-      data-preview-viewport={tabId}
+      data-preview-rendering={renderingActive ? "active" : "suspended"}
+      data-preview-viewport={runtimeTabId}
     >
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
         {deviceToolbarVisible && effectiveViewport._tag !== "fill" ? (
@@ -264,11 +334,18 @@ export function HostedBrowserWebview(props: {
         <webview
           key={webviewGeneration}
           ref={setWebviewRef}
+          // Must be an attribute on the element itself: Electron reads it when the
+          // guest attaches, so setting it from the ref callback lands too late and
+          // the guest attaches with popups disabled. React types `allowpopups` as a
+          // boolean, but react-dom drops boolean values for unrecognized attributes,
+          // so the literal string has to be spread past the type.
+          {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
-          data-preview-tab={tabId}
+          data-preview-tab={runtimeTabId}
+          data-preview-server-tab={tabId}
           data-preview-viewport-mode={effectiveViewport._tag}
           data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
           data-preview-css-width={
@@ -287,7 +364,7 @@ export function HostedBrowserWebview(props: {
           }
           aria-hidden={active ? undefined : true}
           className={cn(
-            "absolute flex overflow-hidden bg-background",
+            "absolute flex overflow-hidden bg-white",
             active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
           )}
           style={{
@@ -309,7 +386,7 @@ export function HostedBrowserWebview(props: {
             />
             {activeDrag ? (
               <div
-                className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md border border-border/80 bg-background/95 px-2 py-1 text-[11px] font-medium tabular-nums text-foreground shadow-md backdrop-blur-sm"
+                className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md border border-border/80 bg-background/95 px-2 py-1 text-2xs font-medium tabular-nums text-foreground shadow-md backdrop-blur-sm"
                 style={{
                   left: layout.viewportX + layout.viewportWidth / 2,
                   top: layout.viewportY + 10,

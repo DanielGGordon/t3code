@@ -1,6 +1,4 @@
-import type { ServerHostStatsSnapshot } from "@t3tools/contracts";
-
-import type { HostStatsSample } from "../../hooks/useHostStats";
+import type { HostStatsSample, HostStatsSnapshot } from "../../hooks/useHostStats";
 
 /**
  * Props every sidebar-footer host-stats variant receives. `stats` is the
@@ -13,7 +11,7 @@ import type { HostStatsSample } from "../../hooks/useHostStats";
  * carry its own `title`/`aria-label` detail text.
  */
 export interface HostStatsVariantProps {
-  readonly stats: ServerHostStatsSnapshot;
+  readonly stats: HostStatsSnapshot;
   readonly history: readonly HostStatsSample[];
 }
 
@@ -25,7 +23,7 @@ export function formatFooterGigabytes(bytes: number): string {
 }
 
 /** Shared hover/aria detail line so every variant reads the same to a screen reader. */
-export function hostStatsDetail(stats: ServerHostStatsSnapshot): string {
+export function hostStatsDetail(stats: HostStatsSnapshot): string {
   const coreLabel = stats.cpuCount === 1 ? "1 core" : `${stats.cpuCount} cores`;
   return `Server load — CPU ${stats.cpuPercent.toFixed(1)}% of ${coreLabel} · memory ${formatFooterGigabytes(stats.memUsedBytes)} of ${formatFooterGigabytes(stats.memTotalBytes)} GB`;
 }

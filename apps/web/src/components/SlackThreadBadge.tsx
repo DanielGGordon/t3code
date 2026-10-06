@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { SlackIcon } from "./Icons";
 import { getThreadChannel, stripThreadChannelPrefix } from "~/lib/threadChannel";
 import { cn } from "~/lib/utils";
@@ -41,26 +42,32 @@ export function SlackThreadBadge({
 }) {
   return (
     <>
-      <span
-        role="img"
-        aria-label="Slack conversation"
-        title="Bridged from Slack"
-        className={cn(
-          "inline-flex size-3.5 align-[-0.15em] transition-[opacity,filter] duration-150",
-          density === "v1" ? "mr-1" : "mr-1.5",
-          isMuted
-            ? "opacity-65 saturate-[0.8] dark:opacity-55"
-            : isActive
-              ? "opacity-100"
-              : "opacity-90",
-          isMuted &&
-            density !== "v1" &&
-            "group-hover/v2-row:opacity-100 group-hover/v2-row:saturate-100",
-          className,
-        )}
-      >
-        <SlackIcon aria-hidden focusable="false" className="size-full shrink-0" />
-      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label="Slack conversation"
+              className={cn(
+                "inline-flex size-3.5 align-[-0.15em] transition-[opacity,filter] duration-150",
+                density === "v1" ? "mr-1" : "mr-1.5",
+                isMuted
+                  ? "opacity-65 saturate-80 dark:opacity-55"
+                  : isActive
+                    ? "opacity-100"
+                    : "opacity-90",
+                isMuted &&
+                  density !== "v1" &&
+                  "group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:saturate-100",
+                className,
+              )}
+            >
+              <SlackIcon aria-hidden focusable="false" className="size-full shrink-0" />
+            </span>
+          }
+        />
+        <TooltipPopup side="top">Bridged from Slack</TooltipPopup>
+      </Tooltip>
       <span className="sr-only">Slack: </span>
     </>
   );

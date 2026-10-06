@@ -31,7 +31,7 @@ export function TokenUsageDetails(props: { usage: ContextWindowSnapshot; heading
 
   return (
     <div className="space-y-1.5 leading-tight">
-      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
         {heading}
       </div>
       {maxTokens !== null && usedPercentage ? (

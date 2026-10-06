@@ -1,9 +1,9 @@
-import type { ClaudeAccountUsage, ClaudeAccountUsageLimit } from "@t3tools/contracts";
 import { GaugeIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import type { HeaderClaudeUsage, HeaderUsageLimit } from "~/lib/headerUsageLimits";
 import { HeaderStatBadge } from "./HeaderStatBadge";
 
-function limitLabel(limit: ClaudeAccountUsageLimit): string {
+function limitLabel(limit: HeaderUsageLimit): string {
   switch (limit.kind) {
     case "session":
       return "Session (5h)";
@@ -32,6 +32,12 @@ function formatResetTime(resetsAt: string | undefined): string | null {
   });
 }
 
+function percentTone(percent: number): "default" | "warning" | "critical" {
+  if (percent >= 90) return "critical";
+  if (percent >= 70) return "warning";
+  return "default";
+}
+
 function percentToneClass(percent: number): string {
   if (percent >= 90) {
     return "text-destructive";
@@ -42,18 +48,15 @@ function percentToneClass(percent: number): string {
   return "";
 }
 
-function headlineLimit(usage: ClaudeAccountUsage): ClaudeAccountUsageLimit | null {
+function headlineLimit(usage: HeaderClaudeUsage): HeaderUsageLimit | null {
   const limits = usage.limits;
   if (limits.length === 0) {
     return null;
   }
-  return (
-    limits.find((limit) => limit.isActive === true) ??
-    limits.reduce((max, limit) => (limit.percent > max.percent ? limit : max))
-  );
+  return limits.reduce((max, limit) => (limit.percent > max.percent ? limit : max));
 }
 
-export function ClaudeAccountUsageBadge(props: { usage: ClaudeAccountUsage }) {
+export function ClaudeAccountUsageBadge(props: { usage: HeaderClaudeUsage }) {
   const { usage } = props;
   const headline = headlineLimit(usage);
   if (!headline) {
@@ -63,7 +66,7 @@ export function ClaudeAccountUsageBadge(props: { usage: ClaudeAccountUsage }) {
   return (
     <HeaderStatBadge
       ariaLabel={`Claude plan usage ${Math.round(headline.percent)}% (${limitLabel(headline)})`}
-      triggerClassName={percentToneClass(headline.percent)}
+      tone={percentTone(headline.percent)}
       trigger={
         <>
           <GaugeIcon className="size-3" />
@@ -72,7 +75,7 @@ export function ClaudeAccountUsageBadge(props: { usage: ClaudeAccountUsage }) {
       }
     >
       <div className="space-y-1.5 leading-tight">
-        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
           Claude plan usage
         </div>
         {usage.limits.map((limit) => {

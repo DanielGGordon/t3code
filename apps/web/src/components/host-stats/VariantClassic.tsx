@@ -1,3 +1,4 @@
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { formatFooterGigabytes, hostStatsDetail, type HostStatsVariantProps } from "./types";
 
 // The original plain-text readout: "CPU 12%  MEM 3.2/15.6G".
@@ -7,13 +8,19 @@ export function VariantClassic({ stats }: HostStatsVariantProps) {
   const detail = hostStatsDetail(stats);
 
   return (
-    <div
-      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-[10px] tabular-nums text-muted-foreground/70"
-      title={detail}
-      aria-label={detail}
-    >
-      <span>CPU {cpuLabel}</span>
-      <span>MEM {memLabel}</span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <div
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-3xs tabular-nums text-muted-foreground/70"
+            aria-label={detail}
+          />
+        }
+      >
+        <span>CPU {cpuLabel}</span>
+        <span>MEM {memLabel}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">{detail}</TooltipPopup>
+    </Tooltip>
   );
 }
