@@ -1140,7 +1140,11 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
-import { useComposerKeyboardOnDemand, useTouchLayout } from "../../hooks/useTouchLayout";
+import {
+  useComposerKeyboardOnDemand,
+  useDriveMode,
+  useTouchLayout,
+} from "../../hooks/useTouchLayout";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
@@ -2416,6 +2420,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Touch layout: a fixed footer (big Speak, folded controls, big send) that
   // never rests or collapses, so it ignores the width measurements below.
   const touchLayout = useTouchLayout();
+  // Drive density: the long placeholder wraps to two lines in the car's
+  // half-size viewport, and its keyboard hints (@, $, /) do not apply there.
+  const driveMode = useDriveMode();
   const {
     footerCompact: isComposerFooterCompact,
     primaryActionsCompact: isComposerPrimaryActionsCompact,
@@ -7628,9 +7635,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Choose a project above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                : driveMode
+                                  ? "Ask anything..."
+                                  : phase === "disconnected"
+                                    ? DISCONNECTED_COMPOSER_PLACEHOLDER
+                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||
