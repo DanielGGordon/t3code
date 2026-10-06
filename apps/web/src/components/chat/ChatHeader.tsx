@@ -33,7 +33,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
-import { useCondensedChrome } from "../../hooks/useTouchLayout";
+import { useCondensedChrome, useDriveMode } from "../../hooks/useTouchLayout";
 import {
   HeaderUsageStats,
   HeaderUsageStatsMenu,
@@ -113,6 +113,10 @@ export const ChatHeader = memo(function ChatHeader({
   // Phones and the touch / car layout keep the big usage readouts visible and
   // drop the small badges that duplicate them.
   const condensed = useCondensedChrome();
+  // Drive density (car-sized touch viewport): the usage readouts fold into a
+  // compact stack that never collapses, so the ticker and the session/weekly
+  // percentages stay readable at a glance.
+  const driveMode = useDriveMode();
   const usageStats = selectHeaderUsageStats({
     visibility: usageStatsVisibility,
     contextWindow,
@@ -274,8 +278,10 @@ export const ChatHeader = memo(function ChatHeader({
     <div
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
-        // Room for the fixed panel toggles, which grow to 48px in the touch layout.
-        rightPanelOpen ? "pr-10 touch:pr-16" : "pr-24 touch:pr-44",
+        // Room for the fixed panel toggles. The touch layout keeps only the
+        // 48px thread-details toggle (ChatView hides the other two).
+        rightPanelOpen ? "pr-10" : "pr-24",
+        "touch:pr-16",
       )}
       onContextMenu={handleHeaderContextMenu}
     >
@@ -317,7 +323,9 @@ export const ChatHeader = memo(function ChatHeader({
                     project={activeProject}
                     className={cn("size-3.5 touch:size-5", condensed && "size-4.5")}
                   />
-                  <WorkspaceBreadcrumbText className="max-w-40">
+                  {/* Drive density keeps only the favicon: the sidebar already
+                      names the project, and the title needs the width. */}
+                  <WorkspaceBreadcrumbText className="max-w-40 drive:hidden">
                     {activeProjectName}
                   </WorkspaceBreadcrumbText>
                 </TooltipTrigger>
@@ -393,10 +401,12 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      <HeaderUsageStats stats={usageStats} condensed={condensed} />
+      <HeaderUsageStats stats={usageStats} condensed={condensed} compact={driveMode} />
+      {/* Drive density hides the configuration and restart-flag buttons: both
+          are parked-time actions, and the width goes to the readouts. */}
       <div
         data-chat-header-actions
-        className="flex shrink-0 items-center justify-end gap-2 touch:gap-3"
+        className="flex shrink-0 items-center justify-end gap-2 touch:gap-3 drive:hidden"
       >
         {/* The small badges duplicate the big readouts; condensed headers drop
             them to make room for the readouts themselves. */}

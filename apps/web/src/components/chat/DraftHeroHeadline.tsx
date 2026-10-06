@@ -52,7 +52,7 @@ const NO_PROJECT_VALUE = "no-project";
  * dotted word inside the sentence.
  */
 const PILL_SELECTOR_CLASS =
-  "pointer-events-auto inline-flex min-h-12 max-w-80 cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:bg-muted data-popup-open:bg-muted touch:min-h-14 touch:px-6";
+  "pointer-events-auto inline-flex min-h-12 max-w-80 cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:bg-muted data-popup-open:bg-muted touch:min-h-14 touch:px-6 drive:min-h-12 drive:px-4";
 
 // Finger-sized rows for the project menu in the touch layout.
 const TOUCH_MENU_ITEM_CLASS = "touch:min-h-12";
@@ -408,7 +408,9 @@ export function DraftHeroHeadline({
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
       <h1
         aria-label={headingLabel}
-        className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
+        // Drive density: a one-line caption so the composer and Speak button
+        // own the car's half-size viewport instead of the headline.
+        className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl drive:text-lg"
       >
         {isScratchDraft ? (
           <>What should we work on?</>
@@ -427,7 +429,7 @@ export function DraftHeroHeadline({
           className={cn(
             "mt-2 flex items-center text-sm",
             // The pill / finger-sized link is taller than the inline line.
-            pillSelector ? "min-h-14 touch:text-base" : "h-6",
+            pillSelector ? "min-h-14 touch:text-base drive:min-h-12 drive:text-sm" : "h-6",
           )}
         >
           {isScratchDraft ? projectSelector : orStartWithoutProject}

@@ -98,6 +98,24 @@ describe("selectHeaderUsageStats", () => {
     ]);
   });
 
+  it("gives the compact (drive) strip short labels for the Claude windows", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow,
+      claudeUsage,
+      stockSymbol: "tsla",
+    });
+
+    expect(stats.map((stat) => [stat.id, stat.shortLabel ?? stat.label])).toEqual([
+      ["stock", "TSLA"],
+      ["context", "Ctx"],
+      ["spend", "Spend"],
+      ["session", "5h"],
+      ["weekly", "Wk"],
+      ["scopedWeekly", "Fable"],
+    ]);
+  });
+
   it("threads each limit's resetsAt through to the matching stat", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,

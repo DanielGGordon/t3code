@@ -178,8 +178,10 @@ const SidebarHostStats = memo(function SidebarHostStats() {
   }
 
   const { Component } = HOST_STATS_VARIANTS[style];
+  // Ambient telemetry is parked-time reading; the car's half-size viewport
+  // squashes it, so drive density hides it (it returns with the full window).
   return (
-    <div className="ml-auto flex h-full min-w-0 flex-1 items-center justify-end">
+    <div className="ml-auto flex h-full min-w-0 flex-1 items-center justify-end drive:hidden">
       <Component stats={stats} history={history} />
     </div>
   );

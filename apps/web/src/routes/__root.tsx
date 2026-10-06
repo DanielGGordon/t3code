@@ -54,6 +54,7 @@ import { cn } from "../lib/utils";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
+import { useDriveMode } from "../hooks/useTouchLayout";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -337,15 +338,24 @@ function FontAppearanceSync() {
 }
 
 // Mirrors the per-device touch layout setting onto <html> so the `touch:`
-// Tailwind variant (index.css) applies anywhere without prop drilling.
+// Tailwind variant (index.css) applies anywhere without prop drilling, and
+// the automatic drive density (touch layout in a car-sized viewport) the same
+// way for the `drive:` variant.
 function TouchLayoutSync() {
   const touchLayout = useClientSettings((settings) => settings.touchLayout);
+  const driveMode = useDriveMode();
 
   useEffect(() => {
     const root = document.documentElement;
     if (touchLayout) root.dataset.touchLayout = "true";
     else delete root.dataset.touchLayout;
   }, [touchLayout]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (driveMode) root.dataset.driveMode = "true";
+    else delete root.dataset.driveMode;
+  }, [driveMode]);
 
   return null;
 }

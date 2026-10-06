@@ -6,6 +6,9 @@
 @custom-variant wco (&:is(.wco, .wco *));
 /* Touch / car layout (Settings → Features), set on <html> by TouchLayoutSync. */
 @custom-variant touch (&:is([data-touch-layout], [data-touch-layout] *));
+/* Drive density: touch layout in a car-sized viewport (lib/driveMode.ts), set
+   on <html> by TouchLayoutSync. Declared after `touch` so `drive:` wins ties. */
+@custom-variant drive (&:is([data-drive-mode], [data-drive-mode] *));
 
 /* Secondary hovering pointers reveal sidebar actions on touch-primary devices. */
 @custom-variant any-hover {

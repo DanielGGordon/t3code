@@ -124,6 +124,8 @@ export interface HeaderUsageStatItem {
   readonly id: HeaderUsageStatId;
   /** Small muted caption rendered above the value (uppercased by CSS). */
   readonly label: string;
+  /** Terse caption for the compact (drive) strip, e.g. "5h"; falls back to `label`. */
+  readonly shortLabel?: string;
   /** Big formatted readout, e.g. "167k" or "42%". */
   readonly value: string;
   readonly colorClass: string;
@@ -293,6 +295,7 @@ export function selectHeaderUsageStats(input: {
           stats.push({
             id: definition.id,
             label: "Context",
+            shortLabel: "Ctx",
             value: formatContextWindowTokens(contextWindow.usedTokens),
             colorClass: definition.colorClass,
           });
@@ -319,6 +322,7 @@ export function selectHeaderUsageStats(input: {
           stats.push({
             id: definition.id,
             label: "Session",
+            shortLabel: "5h",
             value: formatLimitPercent(limit),
             colorClass: definition.colorClass,
             ...(limit.resetsAt ? { resetsAt: limit.resetsAt } : {}),
@@ -332,6 +336,7 @@ export function selectHeaderUsageStats(input: {
           stats.push({
             id: definition.id,
             label: "Weekly",
+            shortLabel: "Wk",
             value: formatLimitPercent(limit),
             colorClass: definition.colorClass,
             ...(limit.resetsAt ? { resetsAt: limit.resetsAt } : {}),
@@ -365,12 +370,19 @@ export function selectHeaderUsageStats(input: {
  * in a smaller type that grows back to full size at `xl`, inside a strip that
  * scrolls horizontally rather than overflowing. On a phone the strip is capped
  * at half the header so the thread title keeps some room.
+ *
+ * `compact` (drive density: the touch layout in a car-sized viewport) trades
+ * the big readouts for "LABEL value" pairs that wrap into a right-aligned
+ * stack at most two lines tall inside the 52px header, e.g. the ticker on one
+ * line and "5H 42%  WK 61%" under it. The stack never shrinks, so the thread
+ * title truncates before the readouts do.
  */
 export function HeaderUsageStats(props: {
   stats: ReadonlyArray<HeaderUsageStatItem>;
   condensed?: boolean;
+  compact?: boolean;
 }) {
-  const { stats, condensed = false } = props;
+  const { stats, condensed = false, compact = false } = props;
   if (stats.length === 0) {
     return null;
   }
@@ -379,16 +391,32 @@ export function HeaderUsageStats(props: {
     <div
       data-header-usage-stats
       className={
-        condensed
-          ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:max-w-1/2 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
-          : "hidden shrink-0 items-center gap-8 xl:flex"
+        compact
+          ? "flex max-h-[var(--workspace-topbar-height)] max-w-32 shrink-0 flex-wrap items-center justify-end gap-x-2.5 overflow-hidden"
+          : condensed
+            ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:max-w-1/2 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
+            : "hidden shrink-0 items-center gap-8 xl:flex"
       }
     >
       {stats.map((stat) => {
         const resetCountdown = stat.resetsAt ? formatResetCountdown(stat.resetsAt, now) : null;
         const tooltipContent =
           stat.tooltip ?? (resetCountdown ? `Resets in ${resetCountdown}` : null);
-        const block = (
+        const block = compact ? (
+          <div key={stat.id} className="flex shrink-0 items-baseline gap-1 leading-tight">
+            <span className="whitespace-nowrap text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+              {stat.shortLabel ?? stat.label}
+            </span>
+            <span
+              className={cn(
+                "whitespace-nowrap text-sm font-semibold tabular-nums",
+                stat.colorClass,
+              )}
+            >
+              {stat.value}
+            </span>
+          </div>
+        ) : (
           <div key={stat.id} className="flex shrink-0 flex-col items-start">
             <span className="whitespace-nowrap text-3xs font-medium uppercase leading-tight tracking-wider text-muted-foreground">
               {stat.label}
