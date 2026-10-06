@@ -3005,7 +3005,8 @@ export default function SidebarV2() {
           <DialogFooter variant="bare">
             <Button
               variant="outline"
-              className="h-14 w-full text-base"
+              size="2xl"
+              className="w-full text-base"
               onClick={() => setTouchSnoozeTarget(null)}
             >
               Cancel
