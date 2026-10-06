@@ -11,6 +11,7 @@
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import { reconcileMigrationLedger } from "./reconcileMigrationLedger.ts";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 // Import all migrations statically
@@ -196,8 +197,14 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= 56
       ? yield* reconcileV2PreviewMigration()
       : [];
+  // Order matters: the preview reconcile repairs upstream-numbered V2 preview
+  // ledgers into upstream's canonical numbering; the name-aware reconcile then
+  // maps any foreign numbering (stock upstream, or that preview result) onto
+  // this fork's ids and runs skipped gaps, before the ordinal Migrator.
+  const ledgerGapMigrations = yield* reconcileMigrationLedger(migrationEntries);
   const executedMigrations = [
     ...previewMigrations,
+    ...ledgerGapMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);

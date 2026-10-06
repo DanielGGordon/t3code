@@ -44,8 +44,37 @@ File names keep upstream's numbers. The v2-preview reconcile gate moved from `>=
 `>=56`. `034_035_ForkMigrationOffset.test.ts` now also covers a prod-state ledger at 35
 applying 36…59 exactly. Three `reconcileV2PreviewMigration` scenarios that seed upstream's
 preview ledger numbering are skipped (that ledger can't exist on a fork DB); a test asserts
-the reconciler is a no-op on fork ledgers. The 2026-07-27 "known hole" still stands: fork
-builds must not open stock-created databases.
+the reconciler is a no-op on fork ledgers.
+
+**Prod ledger finding (2026-10-06).** Production's `effect_sql_migrations` was *not* at the
+fork's 35: ids 1–35 are fork numbering, but 36–54 were recorded under **upstream** numbering
+(36 `ProjectionThreadsPinned` … 54 `ProjectionThreadsAutoSettleDisabledAt`) by an
+unidentified stock-numbered process, in two batches on 2026-09-10 and 2026-10-06 02:44 UTC.
+Upstream's 035 `ProjectionThreadTitleRegeneration` was therefore skipped by id and its
+columns (`title_regeneration_request_id` / `_started_at`) are missing on prod. Booted as-is,
+this build would see max=54 and skip its own 36 (TitleRegeneration) forever.
+
+**Fix: name-aware ledger reconcile** (`persistence/reconcileMigrationLedger.ts`, called from
+`runMigrations` after `reconcileV2PreviewMigration` and before the Migrator, every startup).
+Read-only no-op when every recorded (id, name) is canonical and nothing at or below the max
+is missing. Otherwise, in one `BEGIN IMMEDIATE` transaction: renumber each recorded name to
+this build's id (two-phase via negative ids; `created_at` kept), then run every canonical
+migration absent from the ledger at or below its max ("gaps") in id order and record it;
+logs `Migration ledger reconciled by name` with `renumbered` / `gapMigrationsRun`. Unknown
+names are never guessed: above this build's last id, or in a ledger that needs renumbering,
+startup fails (`MigrationError` BadState, "newer or foreign build") with no writes; otherwise
+they stay upstream's tolerated site-local rows (id consumed, divergence warning — what
+`LegacyV1Cutover.integration.test.ts` pins). No upstream migration rename exists in history.
+On prod this renumbers 36–54 → 37–55 and runs 36 TitleRegeneration as a gap; a stock-created
+DB gets the fork's 033 as a gap — **the 2026-07-27 "known hole" is closed.** Gap safety: every
+plausible gap (fork 033, upstream 033–058 = ours 034–059) is column-/table-/index-guarded or
+an idempotent data repair (044 ClearAutomaticProjectModelDefaults, 046
+RepairAutomaticSettlementTimestamps, 050 PR backfill via `INSERT OR IGNORE`), except
+unguarded 052 TitleState, 055 OrchestrationV2 and 057 ScheduledTaskWebhooks, which fail loudly
+and roll the whole reconcile back if their schema already exists (and 055/057 cannot be gaps
+anyway: 056+ cannot have run without them). Tests: `reconcileMigrationLedger.test.ts` (exact
+prod ledger, stock DB, no-op, unknown-name refusals, rollback); the preview-over-fork-ledger
+scenario in `reconcileV2PreviewMigration.test.ts` is un-skipped.
 
 ### Fork features ported onto v2
 
