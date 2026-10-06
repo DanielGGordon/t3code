@@ -566,6 +566,40 @@ export function buildTraitsTriggerDisplay(input: {
   return { label: labels.join(" · ") };
 }
 
+/**
+ * The traits trigger label for a selection, or null when the model has no
+ * traits controls. Shared by the picker trigger and summaries elsewhere (the
+ * touch layout's folded composer controls).
+ */
+export function resolveTraitsTriggerDisplay(input: {
+  provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId | undefined;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  reportedModelSelection?: ModelSelection | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+  planModeEnabled: boolean;
+}): { label: string } | null {
+  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled, hasAnyControls } =
+    getTraitsSectionVisibility(input);
+  if (!hasAnyControls) {
+    return null;
+  }
+  return buildTraitsTriggerDisplay({
+    provider: input.provider,
+    descriptors,
+    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
+    ultrathinkPromptControlled,
+    modelSelection:
+      input.instanceId && input.model
+        ? { instanceId: input.instanceId, model: input.model, options: input.modelOptions ?? [] }
+        : null,
+    reportedModelSelection: input.reportedModelSelection,
+  });
+}
+
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
   instanceId,
@@ -589,38 +623,22 @@ export const TraitsPicker = memo(function TraitsPicker({
   }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [isMenuOpen, setIsMenuOpen] = useComposerMenuState(hidden);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
-    getTraitsSectionVisibility({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    });
-  if (
-    !shouldRenderTraitsControls({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    })
-  ) {
+  const triggerDisplay = resolveTraitsTriggerDisplay({
+    provider,
+    instanceId,
+    models,
+    model,
+    prompt,
+    modelOptions,
+    reportedModelSelection,
+    allowPromptInjectedEffort,
+    planModeEnabled,
+  });
+  if (!triggerDisplay) {
     return null;
   }
 
-  const { label: triggerLabel } = buildTraitsTriggerDisplay({
-    provider,
-    descriptors,
-    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
-    ultrathinkPromptControlled,
-    modelSelection: instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null,
-    reportedModelSelection,
-  });
+  const { label: triggerLabel } = triggerDisplay;
   const isCodexStyle = provider === "codex";
 
   return (

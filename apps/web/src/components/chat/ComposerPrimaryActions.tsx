@@ -74,10 +74,18 @@ const formatPendingPrimaryActionLabel = (input: {
 const messageActionPillClassName =
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-message-action font-medium text-base text-message-action-foreground shadow-xs shadow-message-action/24 outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none sm:text-sm";
 
+// Touch layout: the labelled pills grow to 56px targets.
+const touchPillClassName = "touch:h-14 touch:px-6 touch:text-base";
+
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
 
+/**
+ * Send / stop / pending-answer actions at the composer footer's right edge.
+ * In the touch layout (the `touch:` variant) every one of them grows to a
+ * 56px target in the same position.
+ */
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
@@ -129,6 +137,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             className={cn(
               "flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
               insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
+              "touch:size-14",
             )}
             {...pointerFocusProps}
             onClick={onInterrupt}
@@ -136,7 +145,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           />
         }
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="touch:size-5"
+          aria-hidden="true"
+        >
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </TooltipTrigger>
@@ -146,24 +162,28 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   if (pendingAction) {
     return (
-      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+      <div
+        className={cn("flex items-center justify-end touch:gap-3", compact ? "gap-1.5" : "gap-2")}
+      >
         {canInterrupt ? renderStopGenerationButton(true) : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
               size="icon-sm"
               variant="outline"
+              className="touch:size-14"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
               aria-label="Previous question"
             >
-              <ChevronLeftIcon className="size-3.5" />
+              <ChevronLeftIcon className="size-3.5 touch:size-6" />
             </Button>
           ) : (
             <Button
               size="sm"
               variant="outline"
+              className="touch:h-14"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
@@ -174,7 +194,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         ) : null}
         <button
           type="submit"
-          className={cn(messageActionPillClassName, "h-8 sm:h-7", compact ? "px-3" : "px-4")}
+          className={cn(
+            messageActionPillClassName,
+            "h-8 sm:h-7",
+            compact ? "px-3" : "px-4",
+            touchPillClassName,
+          )}
           {...pointerFocusProps}
           disabled={
             isEnvironmentUnavailable ||
@@ -198,7 +223,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       return (
         <button
           type="submit"
-          className={cn(messageActionPillClassName, "h-9 sm:h-8", compact ? "px-3" : "px-4")}
+          className={cn(
+            messageActionPillClassName,
+            "h-9 sm:h-8",
+            compact ? "px-3" : "px-4",
+            touchPillClassName,
+          )}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
@@ -211,7 +241,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <div data-chat-composer-implement-actions="true" className="flex items-center justify-end">
         <button
           type="submit"
-          className={cn(messageActionPillClassName, "h-9 rounded-r-none px-4 sm:h-8")}
+          className={cn(
+            messageActionPillClassName,
+            "h-9 rounded-r-none px-4 sm:h-8",
+            touchPillClassName,
+          )}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
@@ -224,7 +258,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 type="button"
                 className={cn(
                   messageActionPillClassName,
-                  "h-9 rounded-l-none border-l border-message-action-foreground/20 px-2 sm:h-8",
+                  "h-9 rounded-l-none border-l border-message-action-foreground/20 px-2 sm:h-8 touch:h-14 touch:px-4",
                 )}
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
@@ -232,7 +266,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               />
             }
           >
-            <ChevronDownIcon className="size-3.5" />
+            <ChevronDownIcon className="size-3.5 touch:size-5" />
           </MenuTrigger>
           <MenuPopup align="end" side="top" {...composerFloatingLayerProps}>
             <MenuItem
@@ -283,7 +317,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 touch:size-14 [&_svg]:pointer-events-none",
         stageBackdropVariant
           ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
@@ -305,15 +339,22 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </span>
       ) : null}
       {isConnecting || isSendBusy ? (
-        <Spinner size="sm" aria-hidden="true" />
+        <Spinner size="sm" className="touch:size-6" aria-hidden="true" />
       ) : showResume ? (
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+        <PlayIcon className="size-4 fill-current touch:size-6" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
-        <CheckIcon className="size-4" aria-hidden="true" />
+        <CheckIcon className="size-4 touch:size-6" aria-hidden="true" />
       ) : isRunning ? (
-        <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
+        <MorphIcon className="size-4 touch:size-6" icon={isQueuing ? ListPlus : CornerUpRight} />
       ) : (
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          className="touch:size-6"
+          aria-hidden="true"
+        >
           <path
             d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
             stroke="currentColor"

@@ -51,16 +51,16 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
 }: PanelLayoutControlsProps) {
   const threadPanelToggle = (
     <Toggle
-      className="relative shrink-0 [-webkit-app-region:no-drag]"
+      className="relative shrink-0 touch:size-12 touch:min-w-12 [-webkit-app-region:no-drag]"
       pressed={threadPanelOpen}
       aria-label="Toggle thread details panel"
       variant="ghost"
       size="sm"
     >
-      <SquareMenuIcon className="size-4" />
+      <SquareMenuIcon className="size-4 touch:size-5" />
       {threadPanelHasAttention ? (
         <span
-          className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-background"
+          className="absolute right-1 top-1 size-1.5 rounded-full touch:right-2 touch:top-2 touch:size-2 bg-warning ring-2 ring-background"
           aria-hidden="true"
         />
       ) : null}
@@ -81,7 +81,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
 
   return (
     <div
-      className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
+      className="flex h-full shrink-0 items-center gap-1 touch:gap-2 [-webkit-app-region:no-drag]"
       data-panel-layout-controls
     >
       {showThreadPanelControl
@@ -95,7 +95,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>
             <Toggle
-              className="shrink-0 [-webkit-app-region:no-drag]"
+              className="shrink-0 touch:size-12 touch:min-w-12 [-webkit-app-region:no-drag]"
               pressed={terminalOpen}
               onPressedChange={onToggleTerminal}
               aria-label="Toggle terminal drawer"
@@ -103,7 +103,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               size="sm"
               disabled={!terminalAvailable}
             >
-              <PanelBottomIcon className="size-4" />
+              <PanelBottomIcon className="size-4 touch:size-5" />
             </Toggle>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
@@ -117,7 +117,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>
             <Toggle
-              className="shrink-0 [-webkit-app-region:no-drag]"
+              className="shrink-0 touch:size-12 touch:min-w-12 [-webkit-app-region:no-drag]"
               pressed={rightPanelOpen}
               onPressedChange={onToggleRightPanel}
               aria-label="Toggle right panel"
@@ -125,7 +125,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               size="sm"
               disabled={!rightPanelAvailable}
             >
-              <PanelRightIcon className="size-4" />
+              <PanelRightIcon className="size-4 touch:size-5" />
             </Toggle>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
@@ -152,14 +152,14 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
       <TooltipTrigger
         render={
           <Toggle
-            className="shrink-0 [-webkit-app-region:no-drag]"
+            className="shrink-0 touch:size-12 touch:min-w-12 [-webkit-app-region:no-drag]"
             pressed={maximized}
             onPressedChange={onToggle}
             aria-label={label}
             variant="ghost"
             size="sm"
           >
-            <MorphIcon className="size-4" icon={maximized ? Minimize2 : Maximize2} />
+            <MorphIcon className="size-4 touch:size-5" icon={maximized ? Minimize2 : Maximize2} />
           </Toggle>
         }
       />

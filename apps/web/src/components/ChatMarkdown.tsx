@@ -140,6 +140,7 @@ import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { GitHubIcon } from "./Icons";
 import { createIncrementalHighlightedDocument } from "../lib/incrementalHighlighting";
 import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
+import { TouchCollapsibleBlock } from "./chat/TouchCollapsibleBlock";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { MermaidDiagram } from "./chat/MermaidDiagram";
 import { useTheme } from "../hooks/useTheme";
@@ -750,8 +751,14 @@ function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
 }
 
+/** Code block and table actions grow to a 56px finger target in the touch layout. */
+const MARKDOWN_CHROME_ACTION_CLASS_NAME = "touch:size-14 touch:[&_svg]:size-5";
+
+// The touch layout wraps by default: horizontal finger-scrolling inside a code
+// block or table fights the timeline's vertical scroll.
 function readInitialWordWrapSetting(): boolean {
-  return getClientSettings().wordWrap;
+  const settings = getClientSettings();
+  return settings.wordWrap || settings.touchLayout;
 }
 
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
@@ -842,6 +849,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                 type="button"
                 variant={expanded ? "secondary" : "ghost-muted"}
                 size="icon-xs"
+                className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
                 aria-pressed={expanded}
                 onClick={toggleExpanded}
                 aria-label={expandLabel}
@@ -862,6 +870,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                       type="button"
                       variant="ghost-muted"
                       size="icon-xs"
+                      className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
                       aria-label={copyLabel}
                     />
                   }
@@ -1057,6 +1066,7 @@ function MarkdownCodeBlock({
             type="button"
             variant="ghost-muted"
             size="icon-xs"
+            className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
             onClick={handleCopy}
             aria-label={copyLabel}
           />
@@ -1087,14 +1097,18 @@ function MarkdownCodeBlock({
       data-wrap={wrapped ? "true" : "false"}
     >
       <div className="chat-markdown-codeblock-header flex items-center justify-between gap-2 pt-1.5 pr-1.5 pb-0 pl-3 select-none">
-        <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-2xs">
+        <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-2xs touch:text-sm">
           <MarkdownCodeBlockTitleContent
             fenceTitle={fenceTitle}
             language={language}
             theme={theme}
           />
         </span>
-        <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+        <span
+          className="flex items-center gap-0.5 touch:gap-3"
+          role="toolbar"
+          aria-label="Code block actions"
+        >
           {leadingActions}
           {canWrap ? (
             <Tooltip>
@@ -1104,6 +1118,7 @@ function MarkdownCodeBlock({
                     type="button"
                     variant={wrapped ? "secondary" : "ghost-muted"}
                     size="icon-xs"
+                    className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
                     aria-pressed={wrapped}
                     onClick={() => setWrapped((value) => !value)}
                     aria-label={wrapLabel}
@@ -1123,6 +1138,7 @@ function MarkdownCodeBlock({
                     type="button"
                     variant="ghost-muted"
                     size="icon-xs"
+                    className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
                     onClick={() => onRunShellCommand(command)}
                     aria-label="Run in terminal"
                   />
@@ -1136,7 +1152,7 @@ function MarkdownCodeBlock({
           {copyButton}
         </span>
       </div>
-      {children}
+      <TouchCollapsibleBlock text={code}>{children}</TouchCollapsibleBlock>
     </div>
   );
 }
@@ -1181,6 +1197,7 @@ function MarkdownMermaidCodeBlock({
                   type="button"
                   variant="ghost-muted"
                   size="icon-xs"
+                  className={MARKDOWN_CHROME_ACTION_CLASS_NAME}
                   onClick={() => setShowCode((value) => !value)}
                   aria-label={toggleLabel}
                 />

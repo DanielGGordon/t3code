@@ -19,7 +19,12 @@ import type { ReactNode } from "react";
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import type { ComposerControlSize } from "./ComposerControl";
-import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
+import {
+  resolveTraitsTriggerDisplay,
+  shouldRenderTraitsControls,
+  TraitsMenuContent,
+  TraitsPicker,
+} from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
   provider: ProviderDriverKind;
@@ -229,4 +234,36 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
 
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
   return renderTraitsControl(TraitsPicker, input);
+}
+
+/**
+ * The traits picker's trigger label for the same input, or null when no
+ * traits control would render. Used where the traits are summarised rather
+ * than shown as their own control (the touch layout's folded controls).
+ */
+export function resolveProviderTraitsLabel(input: TraitsRenderInput): string | null {
+  const { provider, instanceId, threadRef, draftId, model, models, modelOptions, planModeEnabled } =
+    input;
+  if (threadRef === undefined && draftId === undefined) {
+    return null;
+  }
+  const { selections } = resolveComposerOptionSelections(
+    models,
+    model,
+    provider,
+    modelOptions,
+    planModeEnabled,
+  );
+  return (
+    resolveTraitsTriggerDisplay({
+      provider,
+      instanceId,
+      models,
+      model,
+      prompt: input.prompt,
+      modelOptions: selections,
+      reportedModelSelection: input.reportedModelSelection,
+      planModeEnabled,
+    })?.label ?? null
+  );
 }

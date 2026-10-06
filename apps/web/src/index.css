@@ -2110,6 +2110,59 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Touch layout (Settings -> Features -> Touch screens): chat text readable at
+   arm's length, code that wraps instead of scrolling sideways under a finger.
+   Unlayered, so these outrank the `text-sm leading-relaxed` utilities on the
+   markdown root. Sizes stay rem-based so the interface font size setting
+   still scales them; code never drops below 14px but honors a larger code
+   font size preference. */
+[data-touch-layout] {
+  --font-size-code-touch: max(var(--font-size-code, 0.875rem), 14px);
+}
+
+[data-touch-layout] .chat-markdown {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+[data-touch-layout] .chat-markdown h1 {
+  font-size: 1.5rem;
+}
+
+[data-touch-layout] .chat-markdown h2 {
+  font-size: 1.3125rem;
+}
+
+[data-touch-layout] .chat-markdown h3 {
+  font-size: 1.1875rem;
+}
+
+[data-touch-layout] .chat-markdown h4,
+[data-touch-layout] .chat-markdown h5,
+[data-touch-layout] .chat-markdown h6 {
+  font-size: 1.0625rem;
+}
+
+[data-touch-layout] .chat-markdown :not(pre) > code {
+  font-size: 0.875em;
+}
+
+[data-touch-layout] .chat-markdown .chat-markdown-shiki .shiki,
+[data-touch-layout] .chat-markdown pre code {
+  font-size: var(--font-size-code-touch);
+}
+
+[data-touch-layout] .chat-markdown table {
+  font-size: 0.9375rem;
+}
+
+/* Code blocks start wrapped in the touch layout (see ChatMarkdown); this also
+   covers bare <pre> blocks while still honoring an explicit "no wrap" toggle. */
+[data-touch-layout] .chat-markdown pre:not(.chat-markdown-codeblock[data-wrap="false"] pre) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 :root {
   --diff-addition: var(--success);
   --diff-deletion: var(--destructive);

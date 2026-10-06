@@ -78,10 +78,10 @@ export function SidebarThreadHeader({
     : "New thread";
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 touch:gap-2">
       <div
         ref={searchFieldRef}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground touch:h-12 touch:text-base"
       >
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput
@@ -123,7 +123,7 @@ export function SidebarThreadHeader({
       {/* Unfilled like the search field beside it: the buttons carry their own
           hover states, and a background well reads far louder on themed
           palettes than on the base light and dark ones. */}
-      <div className="flex shrink-0 items-center">
+      <div className="flex shrink-0 items-center touch:gap-1">
         {hasProjects ? (
           <>
             {projectScope}
@@ -187,7 +187,11 @@ export function SidebarHeaderIconButton({
             type="button"
             aria-label={label}
             {...rest}
-            className={cn("relative size-7 shrink-0", className)}
+            className={cn(
+              // Touch layout: 48px targets for the header's frequent controls.
+              "relative size-7 shrink-0 touch:size-12 touch:[&>svg]:size-6",
+              className,
+            )}
           />
         }
       >

@@ -52,6 +52,7 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import {
+  type ContextMenuItem,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -138,6 +139,10 @@ import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
+import { useTouchLayout } from "../hooks/useTouchLayout";
+import { useSwipeAction, type SwipeDirection } from "../hooks/useSwipeAction";
+import { useLongPress } from "../hooks/useLongPress";
+import { composePointerHandlers, isGesturePointer } from "../hooks/touchGestures";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -170,7 +175,11 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { buildDraftActionMenuItems, buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import {
+  buildDraftActionMenuItems,
+  buildThreadActionMenuItems,
+  type ThreadActionMenuId,
+} from "./threadActionMenu.logic";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -232,6 +241,7 @@ import {
   nextThreadChangeRequestSnapshot,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
+  resolveThreadPullRequestBadgePresentation,
   terminalStatusFromRunningIds,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
@@ -239,7 +249,12 @@ import {
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
-import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
+import {
+  resolveSnoozePresets,
+  resolveTouchSnoozePresets,
+  snoozeWakeLabel,
+  type SnoozePreset,
+} from "./Sidebar.snooze";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
@@ -267,6 +282,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { TouchSnoozePicker, type TouchSnoozePickerTarget } from "./sidebar/TouchSnoozePicker";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -778,7 +794,11 @@ function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("mx-0.5 h-8", props.className)}
+      // Touch layout: 48px shelf toggles (the header button is h-8 itself).
+      className={cn(
+        "mx-0.5 h-8 touch:h-12 touch:[&>button]:h-12 touch:[&>button]:text-sm",
+        props.className,
+      )}
     >
       <CollapsibleSectionHeader
         onClick={props.toggle.onToggle}
@@ -834,7 +854,19 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
-  const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
+  // Touch rows carry no inline discard button: press-and-hold opens the
+  // same menu as right-click, whose last item is "Discard draft".
+  const touchLayout = useTouchLayout();
+  const longPress = useLongPress({
+    enabled: touchLayout,
+    onLongPress: (position) => onContextMenu(draftId, position),
+  });
+  const consumeLongPressClick = longPress.consumeSuppressedClick;
+  const handleActivate = useCallback(() => {
+    // A hold never navigates.
+    if (consumeLongPressClick()) return;
+    onNavigate(draftId);
+  }, [consumeLongPressClick, draftId, onNavigate]);
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
       // Keys targeting the nested discard button belong to the button:
@@ -878,40 +910,47 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         className={cn(
           "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
+          touchLayout && "touch-pan-y [-webkit-touch-callout:none]",
         )}
+        {...longPress.handlers}
         onClick={handleActivate}
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
       >
         <span className="sr-only">{preview}</span>
-        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
+        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) touch:h-[5.75rem] touch:px-3">
           <div className="flex h-5 min-w-0 items-center gap-1.5">
             <SquarePenIcon aria-hidden className={draftPenClassName} />
             {props.project ? (
               <ProjectFavicon project={props.project} className="size-4 shrink-0" />
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label">
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label touch:text-sm">
               {props.projectDisplayName}
             </span>
-            <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Discard draft"
-                      onClick={handleDiscard}
-                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="top">Discard draft</TooltipPopup>
-              </Tooltip>
-            </span>
+            {touchLayout ? null : (
+              <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Discard draft"
+                        onClick={handleDiscard}
+                        className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    }
+                  />
+                  <TooltipPopup side="top">Discard draft</TooltipPopup>
+                </Tooltip>
+              </span>
+            )}
           </div>
-          <div aria-hidden className="mt-0.5 truncate text-sm font-medium text-foreground/90">
+          <div
+            aria-hidden
+            className="mt-0.5 truncate text-sm font-medium text-foreground/90 touch:mt-1.5 touch:text-base"
+          >
             {preview}
           </div>
         </div>
@@ -1072,6 +1111,66 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   ),
 };
 
+/** Row-only context the list's menu can't derive from the shell. */
+interface ThreadContextMenuExtras {
+  // Touch rows show their PR as a passive label, so press-and-hold (and a
+  // mouse right-click on a touch row) offers it from the menu instead.
+  readonly openPullRequest?: { readonly label: string; readonly open: () => void };
+  // Touch rows render Woke as a passive label (a tap must open the thread),
+  // so dismissing the wake moves into the hold menu.
+  readonly acknowledgeWoke?: { readonly open: () => void };
+}
+
+type ThreadRowSwipeAction = "snooze" | SidebarSweepAction;
+
+const SWIPE_REVEAL_PRESENTATION = {
+  snooze: { label: "Snooze", Icon: ClockIcon, className: "bg-blue-600 dark:bg-blue-500" },
+  settle: { label: "Settle", Icon: CheckIcon, className: "bg-emerald-600 dark:bg-emerald-500" },
+  unsettle: { label: "Un-settle", Icon: Undo2Icon, className: "bg-slate-500 dark:bg-slate-600" },
+  unsnooze: { label: "Wake", Icon: AlarmClockOffIcon, className: "bg-amber-600 dark:bg-amber-500" },
+} satisfies Record<ThreadRowSwipeAction, unknown>;
+
+/**
+ * The colored strip a swiped touch row uncovers. It only ever spans the
+ * exposed gap (never sits under the row), so translucent row surfaces don't
+ * show it through at rest.
+ */
+function SwipeReveal(props: { action: ThreadRowSwipeAction; offset: number; armed: boolean }) {
+  const { label, Icon, className } = SWIPE_REVEAL_PRESENTATION[props.action];
+  const fromLeft = props.offset > 0;
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute inset-y-0 flex items-center overflow-hidden rounded-md px-4 text-sm font-semibold text-white",
+        fromLeft ? "left-0 justify-start" : "right-0 justify-end",
+        className,
+      )}
+      style={{ width: Math.abs(props.offset) }}
+    >
+      <span
+        className={cn(
+          "inline-flex shrink-0 items-center gap-2 transition-transform duration-150 motion-reduce:transition-none",
+          props.armed ? "scale-110" : "opacity-80",
+        )}
+      >
+        <Icon className="size-5" />
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// Touch rows have no PR button; a synthetic plain click reuses the badge's
+// own open path (right panel beside a thread, PR page otherwise).
+const SYNTHETIC_PLAIN_CLICK = {
+  currentTarget: null,
+  metaKey: false,
+  ctrlKey: false,
+  preventDefault: () => {},
+  stopPropagation: () => {},
+} as unknown as ReactMouseEvent<HTMLElement>;
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
@@ -1125,7 +1224,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
-  onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  onContextMenu: (
+    threadRef: ScopedThreadRef,
+    position: { x: number; y: number },
+    extras?: ThreadContextMenuExtras,
+  ) => void;
+  // Touch layout replaces every inline row button with gestures: swipe
+  // left to snooze, right for the row's lifecycle action, press-and-hold
+  // for the menu.
+  touchLayout: boolean;
+  // Swipe-left snooze opens the list's big-target picker (one dialog, not
+  // one per row).
+  onRequestSnoozePicker: (threadRef: ScopedThreadRef, title: string) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onActionSweepStart: (
     threadRef: ScopedThreadRef,
@@ -1154,6 +1264,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onAcknowledgeWoke,
     onFileDropThreads,
     onRenameTitleChange,
+    onRequestSnoozePicker,
     onSettle,
     onActionSweepStart,
     onSnooze,
@@ -1166,6 +1277,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
+    touchLayout,
     variant,
     variantAction,
   } = props;
@@ -1357,12 +1469,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     />
   );
 
-  const handleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      onThreadClick(event, threadRef);
-    },
-    [onThreadClick, threadRef],
-  );
   const handleAcknowledgeWokeClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -1371,13 +1477,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onAcknowledgeWoke(threadRef, props.wokeAt);
     },
     [onAcknowledgeWoke, props.wokeAt, threadRef],
-  );
-  const handleContextMenu = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
-    },
-    [onContextMenu, threadRef],
   );
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -1558,10 +1657,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     // color are stacked as background images.
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
+    // Vertical panning stays native (and cancels the row gestures);
+    // horizontal movement goes to the swipe recognizer. No iOS hold callout.
+    touchLayout && "touch-pan-y [-webkit-touch-callout:none]",
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
   const sortable = props.sortable;
+  // Touch layout: fingers swipe and hold instead of reordering, so only the
+  // mouse picks rows up (dnd-kit would otherwise claim the horizontal swipe).
+  const sortableListeners = useMemo(() => {
+    const listeners = sortable?.listeners;
+    if (!touchLayout || !listeners?.onPointerDown) return listeners;
+    const onPointerDown = listeners.onPointerDown;
+    return {
+      ...listeners,
+      onPointerDown: (event: ReactPointerEvent) => {
+        if (isGesturePointer(event.pointerType)) return;
+        onPointerDown(event);
+      },
+    };
+  }, [sortable?.listeners, touchLayout]);
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
@@ -1575,7 +1691,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ? ("hidden" as const)
               : undefined,
         },
-        ...sortable.listeners,
+        ...sortableListeners,
       }
     : {};
   // Sweeps reuse the corresponding row-drop action badge.
@@ -1615,13 +1731,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onBlur={handleRenameBlur}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
-      className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
+      className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground touch:text-base"
     />
   ) : (
     <span
       aria-hidden
       className={cn(
-        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none touch:text-base",
         shouldRecede ? "font-normal" : "font-medium",
         variant === "card"
           ? cn(
@@ -1687,6 +1803,164 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onOpenPullRequest={handlePrClick}
       />
     ) : null;
+  const opensPullRequestList =
+    prBadgeShape !== null && (prBadgeShape.kind === "stack" || prBadgeShape.others > 0);
+  const pullRequestUrl = pr?.url ?? currentLinkedPr?.url;
+  // Touch layout: the PR badge is a passive status label (a tap lands on
+  // the row anyway), and the PR opens from the hold menu instead.
+  const touchPrPresentation = touchLayout
+    ? resolveThreadPullRequestBadgePresentation({
+        badge: prBadgeShape,
+        number: pr?.number ?? currentLinkedPr?.number,
+        url: pullRequestUrl,
+        status: prStatus,
+      })
+    : null;
+  const touchPrBadge =
+    prBadge !== null && touchPrPresentation !== null ? (
+      <span
+        role="img"
+        aria-label={touchPrPresentation.label}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1 text-xs tabular-nums touch:text-sm",
+          touchPrPresentation.toneClassName,
+        )}
+      >
+        <touchPrPresentation.Icon aria-hidden className="size-3 shrink-0 touch:size-3.5" />
+        <span>{touchPrPresentation.text}</span>
+      </span>
+    ) : null;
+  const wokeAt = props.wokeAt;
+  const contextMenuExtras = useMemo<ThreadContextMenuExtras | undefined>(() => {
+    if (!touchLayout) return undefined;
+    const acknowledgeWoke =
+      isWoke && wokeAt !== null
+        ? { acknowledgeWoke: { open: () => onAcknowledgeWoke(threadRef, wokeAt) } }
+        : {};
+    if (opensPullRequestList) {
+      return {
+        ...acknowledgeWoke,
+        openPullRequest: { label: "Open pull requests", open: handlePrListClick },
+      };
+    }
+    if (pullRequestUrl === undefined) return acknowledgeWoke;
+    return {
+      ...acknowledgeWoke,
+      openPullRequest: {
+        label: "Open pull request",
+        open: () => handlePrClick(SYNTHETIC_PLAIN_CLICK),
+      },
+    };
+  }, [
+    handlePrClick,
+    handlePrListClick,
+    isWoke,
+    onAcknowledgeWoke,
+    opensPullRequestList,
+    pullRequestUrl,
+    threadRef,
+    touchLayout,
+    wokeAt,
+  ]);
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      // Touch rows have no PR button, so a mouse right-click there offers
+      // the PR too; desktop rows keep their menu unchanged.
+      onContextMenu(threadRef, { x: event.clientX, y: event.clientY }, contextMenuExtras);
+    },
+    [contextMenuExtras, onContextMenu, threadRef],
+  );
+
+  // Touch gestures. Left snoozes wherever the hover clock would offer it
+  // (same canSnooze gate, never on already-snoozed rows); right runs the
+  // row's own lifecycle action, gated on the same capability as its button.
+  const swipeLeftAction: ThreadRowSwipeAction | null =
+    touchLayout && variantAction !== "unsnooze" && showSnoozeButton ? "snooze" : null;
+  const swipeRightAction: ThreadRowSwipeAction | null = !touchLayout
+    ? null
+    : variantAction === "unsnooze"
+      ? props.snoozeSupported
+        ? "unsnooze"
+        : null
+      : props.settlementSupported
+        ? variantAction
+        : null;
+  const handleSwipeCommit = useCallback(
+    (direction: SwipeDirection) => {
+      if (direction === "left") {
+        onRequestSnoozePicker(threadRef, thread.title);
+        return;
+      }
+      if (variantAction === "unsnooze") onUnsnooze(threadRef);
+      else if (variantAction === "unsettle") onUnsettle(threadRef);
+      else onSettle(threadRef);
+    },
+    [
+      onRequestSnoozePicker,
+      onSettle,
+      onUnsettle,
+      onUnsnooze,
+      thread.title,
+      threadRef,
+      variantAction,
+    ],
+  );
+  // The two recognizers cancel each other: a swipe that locks first
+  // abandons the hold, and a hold that fires first ignores later drag.
+  const cancelSwipeRef = useRef<() => void>(() => {});
+  const longPress = useLongPress({
+    enabled: touchLayout && !isRenaming,
+    // Same menu as right-click, plus the PR the touch row no longer links.
+    onLongPress: (position) => {
+      cancelSwipeRef.current();
+      onContextMenu(threadRef, position, contextMenuExtras);
+    },
+  });
+  const swipe = useSwipeAction({
+    enabled: touchLayout && !isRenaming,
+    allowLeft: swipeLeftAction !== null,
+    allowRight: swipeRightAction !== null,
+    onCommit: handleSwipeCommit,
+    onSwipeStart: longPress.cancel,
+  });
+  cancelSwipeRef.current = swipe.cancel;
+  const gestureHandlers = useMemo(
+    () => composePointerHandlers(swipe.handlers, longPress.handlers),
+    [longPress.handlers, swipe.handlers],
+  );
+  const swipeRevealAction =
+    swipe.offset < 0 ? swipeLeftAction : swipe.offset > 0 ? swipeRightAction : null;
+  const swipeReveal =
+    swipeRevealAction !== null ? (
+      <SwipeReveal action={swipeRevealAction} offset={swipe.offset} armed={swipe.armed} />
+    ) : null;
+  const consumeSwipeClick = swipe.consumeSuppressedClick;
+  const consumeLongPressClick = longPress.consumeSuppressedClick;
+  const handleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      // Swipes and holds never navigate. Consume both: a press that
+      // long-pressed and then swiped leaves two suppressions, and a stale one
+      // must not eat the next real tap.
+      const swiped = consumeSwipeClick();
+      const longPressed = consumeLongPressClick();
+      if (swiped || longPressed) {
+        event.preventDefault();
+        return;
+      }
+      onThreadClick(event, threadRef);
+    },
+    [consumeLongPressClick, consumeSwipeClick, onThreadClick, threadRef],
+  );
+  const touchRowProps = touchLayout
+    ? {
+        ...gestureHandlers,
+        style: {
+          transform: swipe.offset === 0 ? undefined : `translateX(${swipe.offset}px)`,
+          transition: swipe.dragging ? "none" : "transform 200ms ease-out",
+        },
+      }
+    : {};
   const terminalStatusIcon = terminalStatus ? (
     <span
       role="img"
@@ -1722,7 +1996,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const showPin =
     props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
   const pinIndicator = showPin ? (
-    props.pinningSupported && !sortable?.isDragging ? (
+    // Touch rows carry no inline buttons: unpin lives in the hold menu.
+    props.pinningSupported && !sortable?.isDragging && !touchLayout ? (
       <Tooltip>
         <TooltipTrigger
           render={
@@ -1765,9 +2040,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         className={cn(
           // Matches the h-9 row so unrendered rows never shift the list when they paint.
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
+          // The swipe reveal sits behind the translated row, clipped to it.
+          "touch:relative touch:overflow-hidden touch:rounded-md touch:[contain-intrinsic-size:auto_56px]",
           sortable?.isDragging && "relative z-20",
         )}
       >
+        {swipeReveal}
         <Tooltip disabled={sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1779,11 +2057,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-current={accessibility.current}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-9 items-center gap-2.5 px-2.5 touch:h-14 touch:gap-3",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
+                {...touchRowProps}
               />
             }
           >
@@ -1811,7 +2093,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {/* The PR badge stays outside the hover-fading slot: it must
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
-            {prBadge}
+            {touchLayout ? touchPrBadge : prBadge}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1824,14 +2106,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <span
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
-                    !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                    // Touch rows have no hover actions to yield to.
+                    !isWoke && !touchLayout && "group-any-hover/sidebar-row:opacity-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                     // Snoozed rows show when they come BACK, not when they were
                     // last touched — the return ticket is the row's whole story.
-                    <span className="text-xs text-info-foreground tabular-nums">
+                    <span className="text-xs text-info-foreground tabular-nums touch:text-sm">
                       {props.snoozeWakeLabelText}
+                    </span>
+                  ) : isWoke && touchLayout ? (
+                    // Touch: a passive label; dismiss lives in the hold menu.
+                    <span className="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-warning-foreground">
+                      <AlarmClockIcon aria-hidden className="size-3" />
+                      <span role="status">Woke</span>
                     </span>
                   ) : isWoke ? (
                     // A wake can land straight in the settled tail (e.g. PR
@@ -1843,7 +2132,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             type="button"
                             aria-label="Dismiss Woke notification"
                             onClick={handleAcknowledgeWokeClick}
-                            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring touch:text-sm"
                           >
                             <AlarmClockIcon aria-hidden className="size-3" />
                             <span role="status">Woke</span>
@@ -1853,14 +2142,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                     </Tooltip>
                   ) : (
-                    <span className="text-xs">
+                    <span className="text-xs touch:text-sm">
                       {variantAction === "unsettle"
                         ? settledTimeLabel(thread)
                         : threadTimeLabel(thread)}
                     </span>
                   )}
                 </span>
-                {variantAction === "unsnooze" ? (
+                {/* Touch rows swipe instead: no inline lifecycle buttons. */}
+                {touchLayout ? null : variantAction === "unsnooze" ? (
                   !props.snoozeSupported ? null : (
                     <button
                       type="button"
@@ -1922,6 +2212,253 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const diff = latestRunDiff(thread);
 
+  const cardRow = (
+    <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
+      <TooltipTrigger
+        render={
+          <div
+            ref={rowRef}
+            role="button"
+            tabIndex={0}
+            aria-label={accessibility.label}
+            aria-current={accessibility.current}
+            data-testid="sidebar-row-card"
+            aria-busy={isRegeneratingTitle || undefined}
+            className={rowSurfaceClassName}
+            onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
+            onKeyDown={handleKeyDown}
+            onContextMenu={handleContextMenu}
+            {...touchRowProps}
+          />
+        }
+      >
+        {accessibleTitle}
+        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) touch:h-[5.75rem] touch:px-3">
+          <div className="flex h-5 min-w-0 items-center gap-1.5">
+            {draftIndicator}
+            {props.project ? (
+              <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+            ) : null}
+            {props.projectDisplayName ? (
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-secondary-label text-xs touch:text-sm",
+                  shouldRecede ? "font-normal" : "font-medium",
+                )}
+              >
+                {props.projectDisplayName}
+              </span>
+            ) : (
+              <span className="flex-1" />
+            )}
+            {pinIndicator}
+            {/* The visible state owns this slot's width: status at rest,
+                  actions on hover/keyboard focus or while the popover is open. Keeping
+                  the hidden state out of flow lets the project label reclaim
+                  space without either state overlapping it. */}
+            {sortable?.isDragging ? (
+              dragDestination
+            ) : (
+              <span
+                className={cn(
+                  "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs touch:text-sm",
+                  props.sweepAction !== null && "hidden",
+                )}
+              >
+                {/* Read-only status labels yield to the hover actions. Woke is
+                    itself an action, so it stays pointer-enabled and visible
+                    while the other controls appear beside it. */}
+                <span
+                  className={cn(
+                    isWokeStatus && !touchLayout
+                      ? "pointer-events-auto"
+                      : touchLayout
+                        ? // Touch rows have no hover actions to yield to.
+                          "pointer-events-none"
+                        : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
+                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+                  )}
+                >
+                  {topStatus ? (
+                    isWokeStatus && !touchLayout ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              aria-label="Dismiss Woke notification"
+                              onClick={handleAcknowledgeWokeClick}
+                              className={cn(
+                                "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                                topStatus.className,
+                              )}
+                            >
+                              <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                              <span role="status">{topStatus.label}</span>
+                            </button>
+                          }
+                        />
+                        <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                      </Tooltip>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 font-medium",
+                          topStatus.className,
+                        )}
+                      >
+                        {topStatus.icon === "working" ? (
+                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "input" ? (
+                          <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "approval" ? (
+                          <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "failed" ? (
+                          <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "done" ? (
+                          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+                        ) : topStatus.icon === "woke" ? (
+                          <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                        ) : null}
+                        {/* The label alone is the live region: a role="status"
+                            wrapper around the ticking duration would make
+                            screen readers announce every second. */}
+                        <span role="status">{topStatus.label}</span>
+                        {status === "working" ? (
+                          <span aria-hidden>
+                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                          </span>
+                        ) : null}
+                      </span>
+                    )
+                  ) : (
+                    threadTimeLabel(thread)
+                  )}
+                </span>
+                {!touchLayout &&
+                (props.settlementSupported || showSnoozeButton || hasUnsentDraft) ? (
+                  <span
+                    className={cn(
+                      // focus-visible, not focus-within: a mouse click leaves
+                      // the Settle button focused, and a plain focus-within
+                      // would keep the controls pinned over the status label
+                      // once the pointer moves away (e.g. after a failed
+                      // settle) instead of cross-fading back.
+                      "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
+                      snoozeMenuOpen && "pointer-events-auto static opacity-100",
+                    )}
+                  >
+                    {hasUnsentDraft ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              aria-label="Discard draft"
+                              onClick={handleDiscardDraftClick}
+                              className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                            />
+                          }
+                        >
+                          <XIcon className="size-3.5" />
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">Discard draft</TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                    {showSnoozeButton ? (
+                      <SnoozeMenuButton
+                        open={snoozeMenuOpen}
+                        onOpenChange={setSnoozeMenuOpen}
+                        onSnooze={handleSnoozePreset}
+                        timestampFormat={props.timestampFormat}
+                      />
+                    ) : null}
+                    {props.settlementSupported ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              aria-label="Settle thread"
+                              onClick={handleSettleClick}
+                              onPointerDown={handleActionPointerDown}
+                              className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                            />
+                          }
+                        >
+                          <CheckIcon className="size-3.5" />
+                          Settle
+                        </TooltipTrigger>
+                        <TooltipPopup>Settle thread</TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                  </span>
+                ) : null}
+              </span>
+            )}
+            {/* A sweep hides the slot rather than unmounting it, so the
+                  pressed action button stays connected and a cancelled sweep's
+                  release click still fires and is consumed. */}
+            {props.sweepAction !== null ? dragDestination : null}
+          </div>
+          <div className="mt-1 flex min-w-0">
+            {title}
+            {isRegeneratingTitle ? (
+              <span role="status" className="sr-only">
+                Regenerating title
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs touch:mt-1 touch:text-sm">
+            {/* Always the branch. The plan step used to take this slot while
+                  working, but it truncated to a half-sentence and dropped the
+                  branch, so the row lost its most stable identifier. */}
+            {thread.branch ? (
+              <>
+                <ThreadWorktreeIndicator thread={thread} />
+                <span className="flex min-w-0 flex-1 text-muted-foreground/40">
+                  <MiddleTruncate value={thread.branch} showTitle={false} />
+                </span>
+              </>
+            ) : (
+              <span className="flex-1" />
+            )}
+            {terminalStatusIcon}
+            {touchLayout ? touchPrBadge : prBadge}
+            {diff ? (
+              <span className="shrink-0 font-mono">
+                <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}
+                <span className="text-diff-deletion-foreground">−{diff.deletions}</span>
+              </span>
+            ) : null}
+            <span
+              aria-hidden
+              className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+            >
+              {isRemote ? (
+                <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                  <EnvironmentMachineIcon
+                    aria-hidden
+                    kind={props.environmentMachine}
+                    className="size-3.5"
+                  />
+                </span>
+              ) : null}
+              <SidebarProviderStack
+                thread={thread}
+                providerEntryByInstanceId={props.providerEntryByInstanceId}
+              />
+            </span>
+          </div>
+        </div>
+        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+      </TooltipTrigger>
+      {detailsTooltip}
+    </Tooltip>
+  );
+
   return (
     <li
       data-thread-item={threadKey}
@@ -1929,247 +2466,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {...(fileDropHandlers ?? {})}
       className={cn(
         // Matches the h-[4.875rem] content box; the py-0.5 padding is added on top.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px] touch:[contain-intrinsic-size:auto_96px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
-      <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
-        <TooltipTrigger
-          render={
-            <div
-              ref={rowRef}
-              role="button"
-              tabIndex={0}
-              aria-label={accessibility.label}
-              aria-current={accessibility.current}
-              data-testid="sidebar-row-card"
-              aria-busy={isRegeneratingTitle || undefined}
-              className={rowSurfaceClassName}
-              onClick={handleClick}
-              onDoubleClick={handleDoubleClick}
-              onKeyDown={handleKeyDown}
-              onContextMenu={handleContextMenu}
-            />
-          }
-        >
-          {accessibleTitle}
-          <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
-              {draftIndicator}
-              {props.project ? (
-                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-              ) : null}
-              {props.projectDisplayName ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectDisplayName}
-                </span>
-              ) : (
-                <span className="flex-1" />
-              )}
-              {pinIndicator}
-              {/* The visible state owns this slot's width: status at rest,
-                  actions on hover/keyboard focus or while the popover is open. Keeping
-                  the hidden state out of flow lets the project label reclaim
-                  space without either state overlapping it. */}
-              {sortable?.isDragging ? (
-                dragDestination
-              ) : (
-                <span
-                  className={cn(
-                    "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
-                    props.sweepAction !== null && "hidden",
-                  )}
-                >
-                  {/* Read-only status labels yield to the hover actions. Woke is
-                    itself an action, so it stays pointer-enabled and visible
-                    while the other controls appear beside it. */}
-                  <span
-                    className={cn(
-                      isWokeStatus
-                        ? "pointer-events-auto"
-                        : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
-                      "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                      snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
-                    )}
-                  >
-                    {topStatus ? (
-                      isWokeStatus ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Dismiss Woke notification"
-                                onClick={handleAcknowledgeWokeClick}
-                                className={cn(
-                                  "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-                                  topStatus.className,
-                                )}
-                              >
-                                <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                                <span role="status">{topStatus.label}</span>
-                              </button>
-                            }
-                          />
-                          <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
-                        </Tooltip>
-                      ) : (
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            topStatus.className,
-                          )}
-                        >
-                          {topStatus.icon === "working" ? (
-                            <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "input" ? (
-                            <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "approval" ? (
-                            <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "failed" ? (
-                            <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "done" ? (
-                            <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                          ) : null}
-                          {/* The label alone is the live region: a role="status"
-                            wrapper around the ticking duration would make
-                            screen readers announce every second. */}
-                          <span role="status">{topStatus.label}</span>
-                          {status === "working" ? (
-                            <span aria-hidden>
-                              <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                            </span>
-                          ) : null}
-                        </span>
-                      )
-                    ) : (
-                      threadTimeLabel(thread)
-                    )}
-                  </span>
-                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
-                    <span
-                      className={cn(
-                        // focus-visible, not focus-within: a mouse click leaves
-                        // the Settle button focused, and a plain focus-within
-                        // would keep the controls pinned over the status label
-                        // once the pointer moves away (e.g. after a failed
-                        // settle) instead of cross-fading back.
-                        "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
-                        snoozeMenuOpen && "pointer-events-auto static opacity-100",
-                      )}
-                    >
-                      {hasUnsentDraft ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Discard draft"
-                                onClick={handleDiscardDraftClick}
-                                className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                              />
-                            }
-                          >
-                            <XIcon className="size-3.5" />
-                          </TooltipTrigger>
-                          <TooltipPopup side="top">Discard draft</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                      {showSnoozeButton ? (
-                        <SnoozeMenuButton
-                          open={snoozeMenuOpen}
-                          onOpenChange={setSnoozeMenuOpen}
-                          onSnooze={handleSnoozePreset}
-                          timestampFormat={props.timestampFormat}
-                        />
-                      ) : null}
-                      {props.settlementSupported ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Settle thread"
-                                onClick={handleSettleClick}
-                                onPointerDown={handleActionPointerDown}
-                                className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                              />
-                            }
-                          >
-                            <CheckIcon className="size-3.5" />
-                            Settle
-                          </TooltipTrigger>
-                          <TooltipPopup>Settle thread</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                    </span>
-                  ) : null}
-                </span>
-              )}
-              {/* A sweep hides the slot rather than unmounting it, so the
-                  pressed action button stays connected and a cancelled sweep's
-                  release click still fires and is consumed. */}
-              {props.sweepAction !== null ? dragDestination : null}
-            </div>
-            <div className="mt-1 flex min-w-0">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
-                <>
-                  <ThreadWorktreeIndicator thread={thread} />
-                  <span className="flex min-w-0 flex-1 text-muted-foreground/40">
-                    <MiddleTruncate value={thread.branch} showTitle={false} />
-                  </span>
-                </>
-              ) : (
-                <span className="flex-1" />
-              )}
-              {terminalStatusIcon}
-              {prBadge}
-              {diff ? (
-                <span className="shrink-0 font-mono">
-                  <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}
-                  <span className="text-diff-deletion-foreground">−{diff.deletions}</span>
-                </span>
-              ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-              >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={props.environmentMachine}
-                      className="size-3.5"
-                    />
-                  </span>
-                ) : null}
-                <SidebarProviderStack
-                  thread={thread}
-                  providerEntryByInstanceId={props.providerEntryByInstanceId}
-                />
-              </span>
-            </div>
-          </div>
-          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
-        </TooltipTrigger>
-        {detailsTooltip}
-      </Tooltip>
+      {touchLayout ? (
+        // Inner wrapper so the swipe reveal spans the card, not the li's padding.
+        <div className="relative overflow-hidden rounded-md">
+          {swipeReveal}
+          {cardRow}
+        </div>
+      ) : (
+        cardRow
+      )}
     </li>
   );
 });
@@ -2288,7 +2597,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(
-                "flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm outline-none",
+                "flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm outline-none touch:min-h-14 touch:gap-3 touch:py-2 touch:text-base",
                 props.isHighlighted || props.isRouteActive
                   ? "bg-sidebar-row-active text-sidebar-foreground"
                   : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
@@ -2309,7 +2618,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
                 ) : null}
                 {displayTitle}
               </span>
-              <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
+              <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums touch:text-sm">
                 {threadTimeLabel(thread)}
               </span>
             </span>
@@ -2351,8 +2660,11 @@ export default function Sidebar() {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
-  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
+  // Touch layout always confirms: a stray tap in a moving car must never
+  // delete or archive history, whatever the desktop preference says.
+  const touchLayout = useTouchLayout();
+  const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete) || touchLayout;
+  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive) || touchLayout;
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
@@ -4174,6 +4486,22 @@ export default function Sidebar() {
     [performSnooze],
   );
 
+  // Touch layout's swipe-left snooze picker. Presets resolve when the
+  // picker opens so "In 1 hour" is relative to the swipe.
+  const [touchSnoozeTarget, setTouchSnoozeTarget] =
+    useState<TouchSnoozePickerTarget<ScopedThreadRef> | null>(null);
+  const openTouchSnoozePicker = useCallback(
+    (threadRef: ScopedThreadRef, title: string) => {
+      setTouchSnoozeTarget({
+        threadRef,
+        title,
+        presets: resolveTouchSnoozePresets(new Date(), timestampFormat),
+      });
+    },
+    [timestampFormat],
+  );
+  const closeTouchSnoozePicker = useCallback(() => setTouchSnoozeTarget(null), []);
+
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const handleMultiSelectContextMenu = useCallback(
     async (position: { x: number; y: number }) => {
@@ -4442,7 +4770,11 @@ export default function Sidebar() {
   );
 
   const handleThreadContextMenu = useCallback(
-    (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+    (
+      threadRef: ScopedThreadRef,
+      position: { x: number; y: number },
+      extras: ThreadContextMenuExtras = {},
+    ) => {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
@@ -4488,36 +4820,57 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
-        const clicked = await settlePromise(() =>
-          api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              projectFilter: threadProjectGroup
-                ? {
-                    label: threadProjectGroup.displayName,
-                    isActive: projectScopeKey === threadProjectGroup.projectKey,
-                  }
-                : null,
-              isPinned,
-              isSettled,
-              autoSettleEnabled: thread.autoSettleDisabledAt == null,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning: !threadRuntimeCanArchive(thread.runtime),
-              supports: {
-                settlement: supportsSettlement,
-                autoSettleOptOut: supportsAutoSettleOptOut,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
-            position,
-          ),
-        );
+        const actionItems = buildThreadActionMenuItems({
+          branch: thread.branch ?? null,
+          projectFilter: threadProjectGroup
+            ? {
+                label: threadProjectGroup.displayName,
+                isActive: projectScopeKey === threadProjectGroup.projectKey,
+              }
+            : null,
+          isPinned,
+          isSettled,
+          autoSettleEnabled: thread.autoSettleDisabledAt == null,
+          isSnoozed,
+          canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+          isRegeneratingTitle,
+          isRunning: !threadRuntimeCanArchive(thread.runtime),
+          supports: {
+            settlement: supportsSettlement,
+            autoSettleOptOut: supportsAutoSettleOptOut,
+            snooze: supportsSnooze,
+            pinning: supportsPinning,
+            titleRegeneration: supportsTitleRegeneration,
+          },
+          snoozePresets,
+        });
+        const { openPullRequest, acknowledgeWoke } = extras;
+        const extraItems: Array<ContextMenuItem<"open-pull-request" | "dismiss-wake">> = [];
+        if (openPullRequest) {
+          extraItems.push({ id: "open-pull-request", label: openPullRequest.label });
+        }
+        if (acknowledgeWoke) extraItems.push({ id: "dismiss-wake", label: "Dismiss wake" });
+        const items: ReadonlyArray<
+          ContextMenuItem<ThreadActionMenuId | "open-pull-request" | "dismiss-wake">
+        > =
+          extraItems.length > 0
+            ? [
+                ...extraItems,
+                ...actionItems.map((item, index) =>
+                  index === 0 ? { ...item, separatorBefore: true } : item,
+                ),
+              ]
+            : actionItems;
+        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure") return;
+        if (clicked.value === "open-pull-request") {
+          openPullRequest?.open();
+          return;
+        }
+        if (clicked.value === "dismiss-wake") {
+          acknowledgeWoke?.open();
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -4952,6 +5305,7 @@ export default function Sidebar() {
                             key={item.value}
                             hideIndicator
                             value={item}
+                            className="touch:min-h-12"
                             onContextMenu={(event) => {
                               if (project) handleProjectSettings(event, project);
                             }}
@@ -4961,7 +5315,9 @@ export default function Sidebar() {
                             ) : (
                               <FolderIcon className="size-4 shrink-0" />
                             )}
-                            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                            <span className="min-w-0 flex-1 truncate text-sm touch:text-base">
+                              {item.label}
+                            </span>
                             {project && showProjectEnvironments ? (
                               <ProjectEnvironmentBadge
                                 group={project}
@@ -4976,7 +5332,7 @@ export default function Sidebar() {
                                 tabIndex={-1}
                                 aria-hidden="true"
                                 title={`Project settings for ${project.displayName}`}
-                                className="ml-auto"
+                                className="ml-auto touch:size-12"
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   void handleProjectSettings(event, project);
@@ -5223,6 +5579,8 @@ export default function Sidebar() {
                             isRenaming={renamingThreadKey === threadKey}
                             renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                             onContextMenu={handleThreadContextMenu}
+                            touchLayout={touchLayout}
+                            onRequestSnoozePicker={openTouchSnoozePicker}
                             onSettle={attemptSettle}
                             onActionSweepStart={startActionSweep}
                             onUnsettle={attemptUnsettle}
@@ -5404,7 +5762,7 @@ export default function Sidebar() {
                         <button
                           type="button"
                           onClick={showMoreSettled}
-                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground touch:h-14 touch:text-base"
                         >
                           <PlusIcon aria-hidden className="size-4 shrink-0" />
                           Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
@@ -5431,7 +5789,7 @@ export default function Sidebar() {
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground touch:min-h-12 touch:px-4 touch:text-sm"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
                     Add project
@@ -5446,6 +5804,11 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
+      <TouchSnoozePicker
+        target={touchSnoozeTarget}
+        onPick={attemptSnooze}
+        onClose={closeTouchSnoozePicker}
+      />
       <SidebarChromeFooter />
     </>
   );

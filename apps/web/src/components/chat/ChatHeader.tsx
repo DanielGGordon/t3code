@@ -33,6 +33,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import { useCondensedChrome } from "../../hooks/useTouchLayout";
 import {
   HeaderUsageStats,
   HeaderUsageStatsMenu,
@@ -109,6 +110,9 @@ export const ChatHeader = memo(function ChatHeader({
   const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
   const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
   const updateClientSettings = useUpdateClientSettings();
+  // Phones and the touch / car layout keep the big usage readouts visible and
+  // drop the small badges that duplicate them.
+  const condensed = useCondensedChrome();
   const usageStats = selectHeaderUsageStats({
     visibility: usageStatsVisibility,
     contextWindow,
@@ -270,7 +274,8 @@ export const ChatHeader = memo(function ChatHeader({
     <div
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
-        rightPanelOpen ? "pr-10" : "pr-24",
+        // Room for the fixed panel toggles, which grow to 48px in the touch layout.
+        rightPanelOpen ? "pr-10 touch:pr-16" : "pr-24 touch:pr-44",
       )}
       onContextMenu={handleHeaderContextMenu}
     >
@@ -283,7 +288,14 @@ export const ChatHeader = memo(function ChatHeader({
             doesn't answer it. */}
         {activeProject ? (
           <>
-            <WorkspaceBreadcrumbItem className="shrink">
+            <WorkspaceBreadcrumbItem
+              className={cn(
+                "shrink",
+                // On a phone the usage strip competes for width, so the project
+                // name may truncate instead of starving the thread title.
+                condensed && "max-md:max-w-28",
+              )}
+            >
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -291,11 +303,20 @@ export const ChatHeader = memo(function ChatHeader({
                       type="button"
                       aria-label={`New thread in ${activeProjectName}`}
                       onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                      className={cn(
+                        "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                        // The new-chat crumb is a real tap target on phones and in
+                        // the touch layout (which grows it further to 48px).
+                        condensed && "min-h-11 gap-2 rounded-lg px-2 hover:bg-accent",
+                        "touch:min-h-12 touch:text-base",
+                      )}
                     />
                   }
                 >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
+                  <ProjectFavicon
+                    project={activeProject}
+                    className={cn("size-3.5 touch:size-5", condensed && "size-4.5")}
+                  />
                   <WorkspaceBreadcrumbText className="max-w-40">
                     {activeProjectName}
                   </WorkspaceBreadcrumbText>
@@ -313,7 +334,7 @@ export const ChatHeader = memo(function ChatHeader({
             <input
               autoFocus
               aria-label="Thread title"
-              className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring"
+              className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring touch:min-h-12 touch:text-base"
               defaultValue={renamingTitle}
               onBlur={(event) => {
                 if (renameCommittedRef.current) return;
@@ -343,7 +364,7 @@ export const ChatHeader = memo(function ChatHeader({
                     onClick={openMenuFromTitle}
                     onDoubleClick={handleTitleDoubleClick}
                     onBlur={cancelPendingTitleMenu}
-                    className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring touch:min-h-12 touch:text-base"
                   />
                 }
               >
@@ -353,7 +374,7 @@ export const ChatHeader = memo(function ChatHeader({
                 <ChevronDownIcon
                   aria-hidden
                   data-thread-title-chevron
-                  className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100"
+                  className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100 touch:size-5 touch:opacity-100"
                 />
               </TooltipTrigger>
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
@@ -361,7 +382,9 @@ export const ChatHeader = memo(function ChatHeader({
           ) : (
             <Tooltip>
               <TooltipTrigger
-                render={<h2 aria-label={activeThreadTitle} className="min-w-0 flex-1" />}
+                render={
+                  <h2 aria-label={activeThreadTitle} className="min-w-0 flex-1 touch:text-base" />
+                }
               >
                 <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
               </TooltipTrigger>
@@ -370,11 +393,17 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      <HeaderUsageStats stats={usageStats} />
-      <div data-chat-header-actions className="flex shrink-0 items-center justify-end gap-2">
-        {contextWindow && <TokenUsageBadge usage={contextWindow} />}
-        {claudeAccountUsage && <ClaudeAccountUsageBadge usage={claudeAccountUsage} />}
+      <HeaderUsageStats stats={usageStats} condensed={condensed} />
+      <div
+        data-chat-header-actions
+        className="flex shrink-0 items-center justify-end gap-2 touch:gap-3"
+      >
+        {/* The small badges duplicate the big readouts; condensed headers drop
+            them to make room for the readouts themselves. */}
+        {!condensed && contextWindow && <TokenUsageBadge usage={contextWindow} />}
+        {!condensed && claudeAccountUsage && <ClaudeAccountUsageBadge usage={claudeAccountUsage} />}
         <HeaderUsageStatsMenu
+          condensed={condensed}
           visibility={usageStatsVisibility}
           scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
           stockSymbol={stockSymbol}
@@ -384,14 +413,14 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipTrigger
             render={
               <Toggle
-                className="shrink-0"
+                className="shrink-0 touch:size-12 touch:min-w-12"
                 pressed={restartRequested}
                 onPressedChange={onToggleRestartRequest}
                 aria-label="Flag this chat as needing a service restart"
                 variant="outline-destructive"
                 size="xs"
               >
-                <RotateCcwIcon className="size-3" />
+                <RotateCcwIcon className="size-3 touch:size-5" />
               </Toggle>
             }
           />

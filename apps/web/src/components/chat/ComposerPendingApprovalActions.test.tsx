@@ -60,4 +60,30 @@ describe("ComposerPendingApprovalActions", () => {
     expect(markup).not.toContain(">Approve<");
     expect(markup).not.toContain(">Decline<");
   });
+
+  it("puts approve on the driver side and demotes the rest in the touch layout", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerPendingApprovalActions
+        requestId={RuntimeRequestId.make("approval-touch")}
+        canRespond
+        isResponding={false}
+        touchLayout
+        onRespondToApproval={async () => undefined}
+      />,
+    );
+    const labels = [">Approve<", ">Decline<", ">Always allow this session<", ">Cancel<"];
+
+    expect(markup).toContain('data-approval-actions="touch"');
+    expect(markup).not.toContain("More approval options");
+    expect(labels.map((label) => markup.indexOf(label))).toEqual(
+      labels.map((label) => markup.indexOf(label)).toSorted((left, right) => left - right),
+    );
+    expect(labels.every((label) => markup.includes(label))).toBe(true);
+    const buttonFor = (label: string) =>
+      markup.slice(markup.lastIndexOf("<button", markup.indexOf(label)), markup.indexOf(label));
+    // The primary row is 56px; cancel stays small.
+    expect(buttonFor(">Approve<")).toContain("h-14");
+    expect(buttonFor(">Decline<")).toContain("h-14");
+    expect(buttonFor(">Cancel<")).not.toContain("h-14");
+  });
 });

@@ -34,6 +34,21 @@ export function resolveSnoozePresets(
 }
 
 /**
+ * The touch-layout swipe picker: always exactly four presets in a fixed
+ * order, so the targets never shift position between uses (muscle memory on
+ * a car screen beats the time-of-day-aware evening slot).
+ */
+const TOUCH_SNOOZE_PRESET_IDS = ["hour", "three-hours", "tomorrow", "next-week"] as const;
+
+export function resolveTouchSnoozePresets(
+  now: Date,
+  timestampFormat: TimestampFormat,
+): ReadonlyArray<SnoozePreset> {
+  const presets = resolveSnoozePresets(now, timestampFormat);
+  return TOUCH_SNOOZE_PRESET_IDS.flatMap((id) => presets.filter((preset) => preset.id === id));
+}
+
+/**
  * Human wake time for menus and toasts: "tomorrow 9:00", "Mon 9:00",
  * "17:30" (today).
  */

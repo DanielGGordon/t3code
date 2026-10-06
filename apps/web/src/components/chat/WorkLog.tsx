@@ -46,7 +46,7 @@ type RowContent = {
 
 function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
   return (
-    <div className="flex min-h-6 min-w-0 items-center gap-1.5 text-sm leading-relaxed select-none [&_*]:select-none">
+    <div className="flex min-h-6 min-w-0 items-center gap-1.5 text-sm leading-relaxed select-none touch:min-h-12 touch:text-base [&_*]:select-none">
       {icon ? (
         <span className="relative flex size-6 shrink-0 items-center justify-center">{icon}</span>
       ) : null}

@@ -41,6 +41,7 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { useTouchLayout } from "./useTouchLayout";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -98,8 +99,11 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
-  const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
-  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
+  // Touch layout always confirms, matching the sidebar: a stray tap on a car
+  // screen must never delete or archive history.
+  const touchLayout = useTouchLayout();
+  const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete) || touchLayout;
+  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive) || touchLayout;
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {

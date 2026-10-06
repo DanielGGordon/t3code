@@ -27,6 +27,7 @@ import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
+import { TouchCollapsibleBlock } from "./TouchCollapsibleBlock";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -61,7 +62,11 @@ function JsonTokens({ text }: { readonly text: string }) {
 }
 
 const monoClassName =
-  "font-mono text-(length:--font-size-code,var(--text-2xs)) leading-relaxed whitespace-pre-wrap break-words select-text";
+  "font-mono text-(length:--font-size-code,var(--text-2xs)) leading-relaxed whitespace-pre-wrap break-words select-text touch:text-(length:--font-size-code-touch)";
+
+// Touch layout drops the nested scroll box (a finger scroll there fights the
+// timeline); output that is tall once wrapped collapses behind Expand instead.
+const scrollableOutputClassName = "max-h-80 overflow-auto text-muted-foreground touch:max-h-none";
 
 function StructuredValue({
   value,
@@ -82,17 +87,19 @@ function StructuredValue({
   }, [highlightJson, text]);
   if (!text) return null;
   return (
-    <pre className={cn("max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
-      {isJson ? (
-        <RenderErrorBoundary fallback={text}>
-          <Suspense fallback={text}>
-            <JsonTokens text={text} />
-          </Suspense>
-        </RenderErrorBoundary>
-      ) : (
-        text
-      )}
-    </pre>
+    <TouchCollapsibleBlock text={text}>
+      <pre className={cn(scrollableOutputClassName, monoClassName)}>
+        {isJson ? (
+          <RenderErrorBoundary fallback={text}>
+            <Suspense fallback={text}>
+              <JsonTokens text={text} />
+            </Suspense>
+          </RenderErrorBoundary>
+        ) : (
+          text
+        )}
+      </pre>
+    </TouchCollapsibleBlock>
   );
 }
 
@@ -158,7 +165,9 @@ function ToolOutput(props: ToolOutputState) {
     />
   ));
   const text = props.output ? (
-    <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+    <TouchCollapsibleBlock text={props.output}>
+      <div className={scrollableOutputClassName}>{props.output}</div>
+    </TouchCollapsibleBlock>
   ) : props.pending ? (
     <div className="text-muted-foreground italic">Loading output…</div>
   ) : props.error ? (

@@ -36,6 +36,10 @@ const buttonVariants = cva(
         "sm-multiline":
           "min-h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] py-[calc(--spacing(1)-1px)] whitespace-normal sm:min-h-7",
         xl: "h-11 px-[calc(--spacing(4)-1px)] text-lg sm:h-10 sm:text-base [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
+        // Touch layout: 56px targets for frequent commit actions. No `sm:` height,
+        // so the size holds at every breakpoint.
+        "2xl":
+          "h-14 gap-2.5 px-[calc(--spacing(5)-1px)] text-lg sm:text-lg [&_svg:not([class*='size-'])]:size-6 sm:[&_svg:not([class*='size-'])]:size-6",
         xs: "h-7 gap-1 px-[calc(--spacing(2)-1px)] text-sm sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
       },
       variant: {
