@@ -77,6 +77,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { ComposerKeyboardToggle } from "./ComposerKeyboardToggle";
 import { ComposerVoiceInput } from "./ComposerVoiceInput";
 import { isVoiceRecordingSupported } from "../../voice/recorder";
 import { useVoiceDictation } from "../../voice/useVoiceDictation";
@@ -980,6 +981,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const composerKeyboardOnDemand = useClientSettings(
+    (settings) => settings.composerKeyboardOnDemand,
+  );
+  const [isComposerKeyboardOpen, setIsComposerKeyboardOpen] = useState(false);
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile =
@@ -2037,7 +2042,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const insertComposerTextAtEnd = (
     text: string,
-    options?: { ensureLeadingBoundary?: boolean },
+    options?: { ensureLeadingBoundary?: boolean; focusEditor?: boolean },
   ): boolean => {
     if (
       text.length === 0 ||
@@ -2055,13 +2060,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       prompt.length,
       prompt.length,
       needsLeadingSpace ? ` ${text}` : text,
+      { focusEditorAfterReplace: options?.focusEditor ?? true },
     );
   };
 
   const voiceInputSupported = useMemo(() => isVoiceRecordingSupported(), []);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text, mode) => {
-      if (!insertComposerTextAtEnd(text, { ensureLeadingBoundary: true })) {
+      // No focus: on a touch screen it would raise the on-screen keyboard the
+      // user just avoided by dictating.
+      if (!insertComposerTextAtEnd(text, { ensureLeadingBoundary: true, focusEditor: false })) {
         toastManager.add({
           type: "error",
           title: "Unable to add the transcript",
@@ -2676,6 +2684,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
+                keyboardOnDemand={composerKeyboardOnDemand}
+                onKeyboardOpenChange={setIsComposerKeyboardOpen}
               />
               {showMobilePendingAnswerActions ? (
                 <div
@@ -2846,6 +2856,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                {composerKeyboardOnDemand && !isVoiceDictationActive ? (
+                  <ComposerKeyboardToggle
+                    open={isComposerKeyboardOpen}
+                    disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
+                    onOpen={() => composerEditorRef.current?.openKeyboard()}
+                    onClose={() => composerEditorRef.current?.closeKeyboard()}
+                  />
+                ) : null}
                 {voiceInputSupported ? (
                   <ComposerVoiceInput
                     dictation={voiceDictation}

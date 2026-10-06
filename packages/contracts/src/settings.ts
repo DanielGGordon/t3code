@@ -101,6 +101,9 @@ export const ClientSettingsSchema = Schema.Struct({
   composerAutoRuntimeModeVisible: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  // Touch screens used mostly for dictation (e.g. a car display): tapping the
+  // composer does not raise the on-screen keyboard; a keyboard button does.
+  composerKeyboardOnDemand: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   fileExplorerShowDotfiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
@@ -639,6 +642,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   composerAutoRuntimeModeVisible: Schema.optionalKey(Schema.Boolean),
+  composerKeyboardOnDemand: Schema.optionalKey(Schema.Boolean),
   fileExplorerShowDotfiles: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
   favorites: Schema.optionalKey(
