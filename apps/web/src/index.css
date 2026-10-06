@@ -3,6 +3,8 @@
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Touch / car layout (Settings → Features), set on <html> by TouchLayoutSync. */
+@custom-variant touch (&:is([data-touch-layout], [data-touch-layout] *));
 
 /* On mobile, morph the expanded hero composer into the compact docked
    composer while it moves; the rest of the app remains visually stationary. */

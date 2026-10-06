@@ -3,6 +3,7 @@ import {
   FileKeyIcon,
   GitBranchIcon,
   KeyboardIcon,
+  TabletSmartphoneIcon,
   PlayIcon,
   SparklesIcon,
   SquareArrowOutUpRightIcon,
@@ -79,6 +80,7 @@ export function FeaturesSettingsPanel() {
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
     composerKeyboardOnDemand: s.composerKeyboardOnDemand,
+    touchLayout: s.touchLayout,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
@@ -122,7 +124,23 @@ export function FeaturesSettingsPanel() {
           );
         })}
       </SettingsSection>
-      <SettingsSection title="Composer">
+      <SettingsSection title="Touch screens">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <TabletSmartphoneIcon className="size-3.5" />
+              Touch / car layout
+            </span>
+          }
+          description="Bigger buttons, a large mic on the left (driver side), rarely-changed composer controls folded into one menu, and swipe / press-and-hold gestures instead of small hover buttons. For a car display or tablet. Stored on this device only."
+          control={
+            <Switch
+              checked={settings.touchLayout}
+              onCheckedChange={(checked) => updateSettings({ touchLayout: checked })}
+              aria-label="Use the touch / car layout on this device"
+            />
+          }
+        />
         <SettingsRow
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -130,10 +148,12 @@ export function FeaturesSettingsPanel() {
               Keyboard on demand
             </span>
           }
-          description="Tapping the message box no longer opens the on-screen keyboard; a keyboard button next to the mic does. For touch screens you mostly dictate on, such as a car display. Stored on this device only."
+          description="Tapping the message box no longer opens the on-screen keyboard; a keyboard button next to the mic does. For touch screens you mostly dictate on. Stored on this device only."
+          {...(settings.touchLayout ? { status: "On — implied by the touch / car layout" } : {})}
           control={
             <Switch
-              checked={settings.composerKeyboardOnDemand}
+              checked={settings.composerKeyboardOnDemand || settings.touchLayout}
+              disabled={settings.touchLayout}
               onCheckedChange={(checked) => updateSettings({ composerKeyboardOnDemand: checked })}
               aria-label="Open the on-screen keyboard only from the keyboard button"
             />

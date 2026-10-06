@@ -104,6 +104,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // Touch screens used mostly for dictation (e.g. a car display): tapping the
   // composer does not raise the on-screen keyboard; a keyboard button does.
   composerKeyboardOnDemand: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Touch / car layout for wide touch screens (a car display, a tablet):
+  // bigger targets, a driver-side mic, gestures instead of hover buttons.
+  // Implies composerKeyboardOnDemand. Per device; toggled from Features.
+  touchLayout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   fileExplorerShowDotfiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
@@ -643,6 +647,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   composerAutoRuntimeModeVisible: Schema.optionalKey(Schema.Boolean),
   composerKeyboardOnDemand: Schema.optionalKey(Schema.Boolean),
+  touchLayout: Schema.optionalKey(Schema.Boolean),
   fileExplorerShowDotfiles: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
   favorites: Schema.optionalKey(
