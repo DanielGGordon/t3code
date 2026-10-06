@@ -1414,6 +1414,8 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
           <div
             className={cn(
               "relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)",
+              // Touch layout: 18px editor and placeholder, readable at a glance.
+              "touch:text-lg",
               containerClassName,
             )}
           >

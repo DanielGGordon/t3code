@@ -3,7 +3,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
+import { ChevronDownIcon, FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -13,6 +13,8 @@ import { projectIconColorClassName } from "~/projectIconColors";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { useClientSettings } from "~/hooks/useSettings";
+import { useCondensedChrome } from "~/hooks/useTouchLayout";
+import { cn } from "~/lib/utils";
 import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -44,6 +46,17 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 // Menu value for "No project"; real entries are keyed by logical project key.
 const NO_PROJECT_VALUE = "no-project";
 
+/**
+ * Phone / touch-layout project selector: a 48px+ pill with a chevron, so it
+ * reads as a button and is easy to hit with a finger instead of being a
+ * dotted word inside the sentence.
+ */
+const PILL_SELECTOR_CLASS =
+  "pointer-events-auto inline-flex min-h-12 max-w-80 cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:bg-muted data-popup-open:bg-muted touch:min-h-14 touch:px-6";
+
+// Finger-sized rows for the project menu in the touch layout.
+const TOUCH_MENU_ITEM_CLASS = "touch:min-h-12";
+
 interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
@@ -70,6 +83,7 @@ export function DraftHeroHeadline({
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const pillSelector = useCondensedChrome();
 
   const environmentLabelById = useMemo(
     () =>
@@ -234,22 +248,35 @@ export function DraftHeroHeadline({
             // project title) so the hero sentence reads naturally: an
             // aria-label here would replace the title with an action phrase
             // mid-sentence and baffle screen-reader users.
-            <MenuTrigger
-              render={<InlineButton tone="picker" />}
-              data-draft-project-trigger=""
-              className="pointer-events-auto max-w-64 align-baseline"
-            />
+            pillSelector ? (
+              <MenuTrigger
+                render={<button type="button" className={PILL_SELECTOR_CLASS} />}
+                data-draft-project-trigger=""
+              />
+            ) : (
+              <MenuTrigger
+                render={<InlineButton tone="picker" />}
+                data-draft-project-trigger=""
+                className="pointer-events-auto max-w-64 align-baseline"
+              />
+            )
           }
         >
           <span className="min-w-0 truncate">
             {isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
           </span>
+          {pillSelector ? (
+            <ChevronDownIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+          ) : null}
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
           <TooltipPopup side="top">{activeProjectDisplayName}</TooltipPopup>
         ) : null}
       </Tooltip>
-      <MenuPopup align="center" className="max-h-80 overflow-y-auto">
+      <MenuPopup
+        align="center"
+        className="max-h-80 overflow-y-auto touch:max-h-[60vh] touch:min-w-80"
+      >
         <MenuRadioGroup
           value={isScratchDraft ? NO_PROJECT_VALUE : activeProjectKey}
           onValueChange={(value) => {
@@ -265,7 +292,7 @@ export function DraftHeroHeadline({
           }}
         >
           {scratchWorkspaceRoot === null ? null : (
-            <MenuRadioItem value={NO_PROJECT_VALUE} closeOnClick>
+            <MenuRadioItem value={NO_PROJECT_VALUE} closeOnClick className={TOUCH_MENU_ITEM_CLASS}>
               <span className="flex min-w-0 items-center gap-2">
                 {/* Boxed like ProjectFavicon so the label lines up with project rows. */}
                 <span
@@ -280,7 +307,12 @@ export function DraftHeroHeadline({
           )}
           {menuEntries.map(({ group }) => {
             return (
-              <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
+              <MenuRadioItem
+                key={group.projectKey}
+                value={group.projectKey}
+                closeOnClick
+                className={TOUCH_MENU_ITEM_CLASS}
+              >
                 <span className="flex min-w-0 items-center gap-2">
                   <ProjectFavicon project={group} className="size-4 shrink-0" />
                   <Tooltip>
@@ -302,7 +334,7 @@ export function DraftHeroHeadline({
           })}
         </MenuRadioGroup>
         {projectPickerEntries.length > 0 ? <MenuSeparator /> : null}
-        <MenuItem onClick={openAddProject}>
+        <MenuItem onClick={openAddProject} className={TOUCH_MENU_ITEM_CLASS}>
           <FolderPlusIcon />
           Add project
         </MenuItem>
@@ -312,9 +344,20 @@ export function DraftHeroHeadline({
     <button
       type="button"
       onClick={openAddProject}
-      className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className={
+        pillSelector
+          ? PILL_SELECTOR_CLASS
+          : "pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      }
     >
-      {activeProjectTitle ?? "Add a project"}
+      {pillSelector ? (
+        <>
+          <FolderPlusIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 truncate">{activeProjectTitle ?? "Add a project"}</span>
+        </>
+      ) : (
+        (activeProjectTitle ?? "Add a project")
+      )}
     </button>
   );
 
@@ -340,7 +383,11 @@ export function DraftHeroHeadline({
           render={
             <InlineButton
               tone="muted"
-              className="pointer-events-auto"
+              className={cn(
+                "pointer-events-auto",
+                // A finger-sized hit area for the other way to start a chat.
+                pillSelector && "min-h-12",
+              )}
               onClick={() =>
                 void startScratch().then((started) => {
                   if (started) {
@@ -376,7 +423,13 @@ export function DraftHeroHeadline({
       {/* Reserved whenever threads can skip a project, so the heading does not
           move. Without a project, the picker moves here to choose one. */}
       {scratchWorkspaceRoot === null ? null : (
-        <p className="mt-2 flex h-6 items-center text-sm">
+        <p
+          className={cn(
+            "mt-2 flex items-center text-sm",
+            // The pill / finger-sized link is taller than the inline line.
+            pillSelector ? "min-h-14 touch:text-base" : "h-6",
+          )}
+        >
           {isScratchDraft ? projectSelector : orStartWithoutProject}
         </p>
       )}

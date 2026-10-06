@@ -3,6 +3,7 @@ import {
   FileKeyIcon,
   GitBranchIcon,
   KeyboardIcon,
+  TabletSmartphoneIcon,
   PlayIcon,
   SparklesIcon,
   SquareArrowOutUpRightIcon,
@@ -17,7 +18,7 @@ import {
 
 import { HOST_STATS_PICKER_STYLES, HOST_STATS_VARIANTS } from "../host-stats/variants";
 
-import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useCondensedChrome } from "../../hooks/useTouchLayout";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { resolveHeaderControlVisibility } from "../../lib/headerControlVisibility";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -61,17 +62,17 @@ const HEADER_CONTROL_ROWS: ReadonlyArray<{
   },
 ];
 
-function visibilityStatusLabel(visibility: HeaderControlVisibility, isMobile: boolean): string {
+function visibilityStatusLabel(visibility: HeaderControlVisibility, condensed: boolean): string {
   if (visibility === "auto") {
-    return isMobile
-      ? "Auto — hidden on this device (mobile)"
+    return condensed
+      ? "Auto — hidden on this device (phone / touch layout)"
       : "Auto — shown on this device (desktop)";
   }
   return visibility === "show" ? "Always shown on this device" : "Hidden on this device";
 }
 
 export function FeaturesSettingsPanel() {
-  const isMobile = useIsMobile();
+  const condensed = useCondensedChrome();
   const settings = useClientSettings((s) => ({
     headerGitActionsVisibility: s.headerGitActionsVisibility,
     headerOpenInEditorVisibility: s.headerOpenInEditorVisibility,
@@ -79,6 +80,7 @@ export function FeaturesSettingsPanel() {
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
     composerKeyboardOnDemand: s.composerKeyboardOnDemand,
+    touchLayout: s.touchLayout,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
@@ -89,7 +91,7 @@ export function FeaturesSettingsPanel() {
       <SettingsSection title="Header actions">
         {HEADER_CONTROL_ROWS.map((row) => {
           const visibility = settings[row.key];
-          const effective = resolveHeaderControlVisibility(visibility, isMobile);
+          const effective = resolveHeaderControlVisibility(visibility, condensed);
           return (
             <SettingsRow
               key={row.key}
@@ -100,7 +102,7 @@ export function FeaturesSettingsPanel() {
                 </span>
               }
               description={row.description}
-              status={visibilityStatusLabel(visibility, isMobile)}
+              status={visibilityStatusLabel(visibility, condensed)}
               resetAction={
                 visibility !== DEFAULT_HEADER_CONTROL_VISIBILITY ? (
                   <SettingResetButton
@@ -122,7 +124,23 @@ export function FeaturesSettingsPanel() {
           );
         })}
       </SettingsSection>
-      <SettingsSection title="Composer">
+      <SettingsSection title="Touch screens">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <TabletSmartphoneIcon className="size-3.5" />
+              Touch / car layout
+            </span>
+          }
+          description="Bigger buttons, a large mic on the left (driver side), rarely-changed composer controls folded into one menu, and swipe / press-and-hold gestures instead of small hover buttons. For a car display or tablet. Stored on this device only."
+          control={
+            <Switch
+              checked={settings.touchLayout}
+              onCheckedChange={(checked) => updateSettings({ touchLayout: checked })}
+              aria-label="Use the touch / car layout on this device"
+            />
+          }
+        />
         <SettingsRow
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -130,10 +148,12 @@ export function FeaturesSettingsPanel() {
               Keyboard on demand
             </span>
           }
-          description="Tapping the message box no longer opens the on-screen keyboard; a keyboard button next to the mic does. For touch screens you mostly dictate on, such as a car display. Stored on this device only."
+          description="Tapping the message box no longer opens the on-screen keyboard; a keyboard button next to the mic does. For touch screens you mostly dictate on. Stored on this device only."
+          {...(settings.touchLayout ? { status: "On — implied by the touch / car layout" } : {})}
           control={
             <Switch
-              checked={settings.composerKeyboardOnDemand}
+              checked={settings.composerKeyboardOnDemand || settings.touchLayout}
+              disabled={settings.touchLayout}
               onCheckedChange={(checked) => updateSettings({ composerKeyboardOnDemand: checked })}
               aria-label="Open the on-screen keyboard only from the keyboard button"
             />
@@ -221,8 +241,8 @@ export function FeaturesSettingsPanel() {
       </SettingsSection>
       <p className="px-1 text-xs text-muted-foreground/70">
         Visibility is stored per device. “Auto” shows a control on desktop-width screens and hides
-        it on mobile. Toggling the switch pins it on or off for this device; use the reset arrow to
-        return to Auto.
+        it on phones and in the touch / car layout. Toggling the switch pins it on or off for this
+        device; use the reset arrow to return to Auto.
       </p>
     </SettingsPageContainer>
   );

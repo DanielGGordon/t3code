@@ -9,7 +9,7 @@ import { AlertTriangleIcon, XIcon } from "lucide-react";
 
 import type { DraftId } from "../../composerDraftStore";
 import { resolveHeaderControlVisibility } from "../../lib/headerControlVisibility";
-import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useCondensedChrome } from "../../hooks/useTouchLayout";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import {
@@ -81,8 +81,9 @@ export interface ThreadDetailsPanelProps extends Pick<
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
-  // Settings -> Features toggles for the workspace/version-control controls.
-  const isMobile = useIsMobile();
+  // Settings -> Features toggles for the workspace/version-control controls;
+  // "auto" hides them on phones and in the touch / car layout.
+  const condensed = useCondensedChrome();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
     openInEditor: settings.headerOpenInEditorVisibility,
@@ -90,15 +91,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   }));
   const showGitActions = resolveHeaderControlVisibility(
     headerControlVisibility.gitActions,
-    isMobile,
+    condensed,
   );
   const showOpenInEditor = resolveHeaderControlVisibility(
     headerControlVisibility.openInEditor,
-    isMobile,
+    condensed,
   );
   const showProjectScripts = resolveHeaderControlVisibility(
     headerControlVisibility.projectScripts,
-    isMobile,
+    condensed,
   );
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,

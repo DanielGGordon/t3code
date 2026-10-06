@@ -41,7 +41,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
       className={cn("flex min-w-0 flex-1 flex-col items-start gap-1", className)}
       role="group"
     >
-      <span className="flex w-full min-w-0 items-center gap-2 text-2xs text-muted-foreground">
+      <span className="flex w-full min-w-0 items-center gap-2 text-2xs text-muted-foreground touch:text-sm">
         <span className="shrink-0 font-medium text-warning">{fallbackLabel}</span>
         {approval.appName ? <span className="min-w-0 truncate">{approval.appName}</span> : null}
         {pendingCount > 1 ? (
@@ -51,7 +51,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
       <Detail
         aria-label={detailAriaLabel}
         className={cn(
-          "block max-h-20 w-full min-w-0 overflow-auto text-xs text-foreground [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 [&::-webkit-scrollbar]:h-1.5",
+          "block max-h-20 w-full min-w-0 overflow-auto text-xs text-foreground touch:max-h-56 touch:text-sm [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 [&::-webkit-scrollbar]:h-1.5",
           approval.requestKind === "mcp-elicitation"
             ? "whitespace-pre-wrap font-sans wrap-break-word"
             : "whitespace-pre font-mono",

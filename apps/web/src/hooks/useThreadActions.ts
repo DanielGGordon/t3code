@@ -290,7 +290,10 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
-  const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
+  // The touch / car layout always confirms: a fat-fingered delete is final.
+  const confirmThreadDelete = useClientSettings(
+    (settings) => settings.confirmThreadDelete || settings.touchLayout,
+  );
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(

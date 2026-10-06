@@ -179,6 +179,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { TouchCollapsibleBlock } from "./TouchCollapsibleBlock";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { inferEntryKindFromPath } from "../../pierre-icons";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -257,6 +258,7 @@ import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useTouchLayout } from "~/hooks/useTouchLayout";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
@@ -1381,7 +1383,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             showsHorizontalScrollIndicator={false}
             onItemSizeChanged={reportContentOverflow}
             className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none] touch:overscroll-contain",
               topFadeEnabled && "topbar-scroll-fade",
             )}
             ListHeaderComponent={listHeader}
@@ -1951,6 +1953,8 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 // inside a message are exposed below this level. Visually hidden and excluded
 // from selection so sighted users and copied text are unaffected.
 const MESSAGE_HEADING_LEVEL = 3;
+/** Per-message actions (copy, revert, fork) grow to a 56px finger target in the touch layout. */
+const TOUCH_MESSAGE_ACTION_CLASS_NAME = "touch:size-14 touch:[&_svg]:size-5";
 
 function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
@@ -2277,17 +2281,20 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </span>
         </div>
       ) : null}
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100">
+        <div className="flex shrink-0 items-center gap-2 touch:gap-3">
           <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+            <TooltipTrigger
+              render={<p className="text-muted-foreground text-xs tabular-nums touch:text-sm" />}
+            >
               {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
             </TooltipPopup>
           </Tooltip>
-          <div className="flex items-center gap-0.5">
+          {/* "Edit from here" rewinds the thread: keep it well apart from Copy on touch. */}
+          <div className="flex items-center gap-0.5 touch:gap-3">
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
@@ -2308,6 +2315,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                     }
                   : {})}
                 variant="ghost"
+                className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
               />
             )}
           </div>
@@ -2405,6 +2413,7 @@ function RevertUserMessageButton({
             disabled={activity.isRevertingCheckpoint || activity.isWorking}
             onClick={() => ctx.onRevertToTurnCount(turnCount, messageId)}
             aria-label="Edit from here"
+            className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
           />
         }
       >
@@ -2465,7 +2474,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
         onClick={() => ctx.onToggleTurnFold(row.runId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 touch:min-h-12 touch:px-3 touch:text-base"
       >
         <span>{row.label}</span>
         <MorphIcon className="size-3.5" icon={row.expanded ? ChevronDown : ChevronRight} />
@@ -2489,14 +2498,14 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
       data-scroll-anchor-ignore
       data-superseded-attempt-id={row.attemptId}
       onClick={() => ctx.onToggleAttemptFold(row.attemptId)}
-      className="flex w-full cursor-pointer select-none items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      className="flex w-full cursor-pointer select-none items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 touch:min-h-14"
     >
       <MorphIcon
         className="size-3.5 shrink-0 text-muted-foreground"
         icon={row.expanded ? ChevronDown : ChevronRight}
       />
-      <span className="text-xs font-medium text-foreground/80">{row.label}</span>
-      <span className="text-2xs text-muted-foreground">Partial output retained</span>
+      <span className="text-xs font-medium text-foreground/80 touch:text-base">{row.label}</span>
+      <span className="text-2xs text-muted-foreground touch:text-sm">Partial output retained</span>
     </button>
   );
 }
@@ -2585,6 +2594,7 @@ function AssistantForkButton({
                 .finally(() => setBusy(false));
             }}
             aria-label="Fork from this response"
+            className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
           />
         }
       >
@@ -2634,10 +2644,10 @@ function AssistantMessageMeta({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
+        "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200 touch:gap-3",
         alwaysVisible
           ? "opacity-100"
-          : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
+          : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100 touch:opacity-100",
         className,
       )}
     >
@@ -2656,7 +2666,9 @@ function AssistantMessageMeta({
       />
       {!message.streaming && (
         <Tooltip>
-          <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+          <TooltipTrigger
+            render={<p className="text-muted-foreground text-xs tabular-nums touch:text-sm" />}
+          >
             {formatDayAwareTimestamp(message.updatedAt, ctx.timestampFormat)}
           </TooltipTrigger>
           <TooltipPopup>
@@ -2687,7 +2699,13 @@ function AssistantCopyButton({
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <MessageCopyButton
+      text={assistantCopyState.text ?? ""}
+      variant="ghost"
+      className={TOUCH_MESSAGE_ACTION_CLASS_NAME}
+    />
+  );
 }
 
 function ProposedPlanTimelineRow({
@@ -4375,6 +4393,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   markdownCwd: string | undefined;
   footer?: ReactNode;
 }) {
+  const touchLayout = useTouchLayout();
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
@@ -4417,7 +4436,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           {canCollapse ? (
             <Button
               type="button"
-              size="xs"
+              size={touchLayout ? "2xl" : "xs"}
               variant="ghost-muted"
               aria-expanded={expanded}
               data-scroll-anchor-ignore
@@ -4463,6 +4482,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
 function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentContext }) {
   const ctx = use(TimelineRowCtx);
+  const touchLayout = useTouchLayout();
   const fenceLanguage = comment.fenceLanguage ?? "diff";
   const renderablePatch = getRenderablePatch(
     buildReviewCommentRenderablePatch(comment),
@@ -4472,15 +4492,15 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-background/70 p-3">
       <div className="space-y-1">
-        <div className="text-xs font-medium text-foreground">
+        <div className="text-xs font-medium text-foreground touch:text-sm">
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
-        <div className="text-2xs text-muted-foreground">
+        <div className="text-2xs text-muted-foreground touch:text-sm">
           {comment.sectionTitle} · {comment.rangeLabel}
         </div>
       </div>
       {comment.text.length > 0 && (
-        <div className="whitespace-pre-wrap wrap-break-word text-sm">
+        <div className="whitespace-pre-wrap wrap-break-word text-sm touch:text-base touch:leading-relaxed">
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}
@@ -4493,27 +4513,35 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           className="text-foreground"
         />
       )}
-      {renderablePatch?.kind === "files" && (
-        <DiffWorkerPoolProvider>
-          {renderablePatch.files.map((fileDiff) => (
-            <FileDiff
-              key={resolveFileDiffPath(fileDiff)}
-              fileDiff={fileDiff}
-              options={{
-                collapsed: false,
-                diffStyle: "unified",
-                theme: resolveDiffThemeName(ctx.resolvedTheme),
-                preferredHighlighter: PREFERRED_HIGHLIGHTER,
-              }}
-            />
-          ))}
-        </DiffWorkerPoolProvider>
-      )}
-      {renderablePatch?.kind === "raw" && (
-        <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
-          {renderablePatch.text}
-        </pre>
-      )}
+      {renderablePatch ? (
+        <TouchCollapsibleBlock
+          text={comment.diff}
+          className="overflow-hidden rounded-md border border-border/60"
+        >
+          {renderablePatch.kind === "files" ? (
+            <DiffWorkerPoolProvider>
+              {renderablePatch.files.map((fileDiff) => (
+                <FileDiff
+                  key={resolveFileDiffPath(fileDiff)}
+                  fileDiff={fileDiff}
+                  options={{
+                    collapsed: false,
+                    diffStyle: "unified",
+                    theme: resolveDiffThemeName(ctx.resolvedTheme),
+                    preferredHighlighter: PREFERRED_HIGHLIGHTER,
+                    // Wrap instead of finger-scrolling sideways in the touch layout.
+                    ...(touchLayout ? { overflow: "wrap" as const } : {}),
+                  }}
+                />
+              ))}
+            </DiffWorkerPoolProvider>
+          ) : (
+            <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs touch:whitespace-pre-wrap touch:text-(length:--font-size-code-touch) touch:wrap-anywhere">
+              {renderablePatch.text}
+            </pre>
+          )}
+        </TouchCollapsibleBlock>
+      ) : null}
     </div>
   );
 }
@@ -4911,8 +4939,10 @@ function buildToolCallExpandedBody(
   return blocks.length > 0 ? blocks.join("\n\n") : null;
 }
 
+// Touch layout drops the nested scroll box (a finger scroll there fights the
+// timeline); bodies that are tall once wrapped collapse behind Expand instead.
 const toolCallExpandedBodyClassName =
-  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
+  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text touch:max-h-none touch:text-(length:--font-size-code-touch)";
 
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (workEntry.structuredPayload?.type === "notification") {
@@ -5399,7 +5429,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : (
             <>
               {expandedBody ? (
-                <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+                <TouchCollapsibleBlock text={expandedBody}>
+                  <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+                </TouchCollapsibleBlock>
               ) : null}
               {plainOutputFetches && workEntry.projectedItem ? (
                 <FetchedToolOutput

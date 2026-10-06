@@ -293,7 +293,6 @@ import {
   AlarmClockIcon,
   CheckCircle2Icon,
   PaperclipIcon,
-  ChevronDownIcon,
   DownloadIcon,
   GitBranchIcon,
   TargetIcon,
@@ -560,6 +559,7 @@ import { readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button, InlineButton } from "./ui/button";
+import { ScrollToEndButton } from "./chat/ScrollToEndButton";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -11201,20 +11201,12 @@ export default function ChatView(props: ChatViewProps) {
                   className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
                   style={{ bottom: scrollToEndClearance + 4 }}
                 >
-                  <Button
-                    aria-label="Scroll to end"
-                    onPointerDown={(event) => event.preventDefault()}
+                  <ScrollToEndButton
                     onClick={() => {
                       composerRef.current?.restoreAfterTimelineReachedEnd();
                       scrollToEnd(true);
                     }}
-                    className="pointer-events-auto"
-                    size="xs"
-                    variant="glass"
-                  >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
-                  </Button>
+                  />
                 </div>
               )}
             </div>

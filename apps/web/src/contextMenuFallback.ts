@@ -284,6 +284,11 @@ export function showContextMenuFallback<T extends string>(
       }
     };
 
+    // Touch / car layout (Settings → Features): the inline styles below are
+    // out of reach of the `touch:` variant, so size rows for fingers here.
+    const touchLayout =
+      (document.documentElement as HTMLElement | undefined)?.dataset.touchLayout === "true";
+
     const openMenu = (
       entries: readonly ContextMenuItem<T>[],
       preferredLeft: number,
@@ -307,6 +312,12 @@ export function showContextMenuFallback<T extends string>(
         "max-h-[min(24rem,70vh)] min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
       inner.style.cssText =
         "max-height:min(24rem,70vh);min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;";
+      if (touchLayout) {
+        // Finger-sized rows need the room: the thread menu would otherwise
+        // scroll after eight rows.
+        inner.style.maxHeight = "85vh";
+        menu.style.minWidth = "14rem";
+      }
 
       for (const item of entries) {
         if (item.separatorBefore === true && inner.children.length > 0) {
@@ -344,6 +355,13 @@ export function showContextMenuFallback<T extends string>(
             : `${rowBase} text-foreground hover:bg-accent hover:text-accent-foreground`;
         button.style.cssText =
           "display:flex;width:100%;min-height:1.75rem;align-items:center;gap:0.5rem;border:0;border-radius:var(--radius-sm);background:transparent;padding:0.25rem 0.5rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.875rem;line-height:1.25rem;text-align:left;cursor:default;";
+        if (touchLayout) {
+          button.style.minHeight = "3rem";
+          button.style.fontSize = "1rem";
+          button.style.lineHeight = "1.5rem";
+          button.style.padding = "0.5rem 0.75rem";
+          button.style.gap = "0.75rem";
+        }
         if (isLeafDestructive) {
           button.style.color = "var(--destructive-foreground)";
         }

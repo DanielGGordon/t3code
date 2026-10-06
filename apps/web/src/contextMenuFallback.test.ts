@@ -264,6 +264,23 @@ describe("showContextMenuFallback", () => {
     await expect(selectionPromise).resolves.toBe("rename");
   });
 
+  it("sizes rows for fingers only in the touch layout", async () => {
+    const desktopPromise = showContextMenuFallback([{ id: "rename", label: "Rename" }]);
+    expect(findButton("Rename")?.style.minHeight).toBeUndefined();
+    dismissContextMenu();
+    await expect(desktopPromise).resolves.toBeNull();
+
+    const touchDocument = new FakeDocument() as FakeDocument & {
+      documentElement: { dataset: Record<string, string> };
+    };
+    touchDocument.documentElement = { dataset: { touchLayout: "true" } };
+    vi.stubGlobal("document", touchDocument);
+    const touchPromise = showContextMenuFallback([{ id: "rename", label: "Rename" }]);
+    expect(findButton("Rename")?.style).toMatchObject({ minHeight: "3rem", fontSize: "1rem" });
+    dismissContextMenu();
+    await expect(touchPromise).resolves.toBeNull();
+  });
+
   it("opens nested submenus and resolves the clicked leaf id", async () => {
     const selectionPromise = showContextMenuFallback([
       {

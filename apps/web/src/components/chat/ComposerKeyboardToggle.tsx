@@ -2,18 +2,38 @@ import { memo } from "react";
 import { KeyboardIcon, KeyboardOffIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
+import { ComposerTouchButton } from "./ComposerTouchButton";
 
 /**
  * Raises or dismisses the on-screen keyboard when the composer is in
  * keyboard-on-demand mode (tapping the text box alone does not). Sized for
- * touch, next to the mic.
+ * touch, next to the mic; a 56px outlined pill in the touch layout
+ * (`touchLayout`).
  */
 export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props: {
   open: boolean;
   disabled: boolean;
   onOpen: () => void;
   onClose: () => void;
+  touchLayout?: boolean;
 }) {
+  const label = props.open ? "Hide keyboard" : "Show keyboard";
+  if (props.touchLayout) {
+    return (
+      <ComposerTouchButton
+        tone="outline"
+        size="icon"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={props.open ? props.onClose : props.onOpen}
+        disabled={props.disabled}
+        aria-label={label}
+        aria-pressed={props.open}
+      >
+        {props.open ? <KeyboardOffIcon aria-hidden="true" /> : <KeyboardIcon aria-hidden="true" />}
+      </ComposerTouchButton>
+    );
+  }
+
   return (
     <Button
       type="button"
@@ -25,7 +45,7 @@ export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props
       onPointerDown={(event) => event.preventDefault()}
       onClick={props.open ? props.onClose : props.onOpen}
       disabled={props.disabled}
-      aria-label={props.open ? "Hide keyboard" : "Show keyboard"}
+      aria-label={label}
       aria-pressed={props.open}
     >
       {props.open ? (
