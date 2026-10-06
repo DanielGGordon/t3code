@@ -191,7 +191,37 @@ function makeCapturingClaudeAdapter(input: {
           interruptTurn: () => Effect.void,
           respondToRuntimeRequest: () => Effect.void,
           readThreadSnapshot: () => unimplemented("readThreadSnapshot unused"),
-          rollbackThread: () => unimplemented("rollbackThread unused"),
+          // Mirrors ClaudeAdapterV2: a rollback to thread start allocates a
+          // fresh, never-created native session id.
+          rollbackThread: (rollbackInput) =>
+            rollbackInput.target.type !== "thread_start"
+              ? unimplemented("only thread_start rollback is modeled")
+              : Effect.gen(function* () {
+                  const now = yield* DateTime.now;
+                  const nativeThreadId = `rolled-back:${rollbackInput.providerThread.appThreadId}`;
+                  return {
+                    providerThread: {
+                      ...rollbackInput.providerThread,
+                      id: ProviderThreadId.make(`provider-thread:${nativeThreadId}`),
+                      providerSessionId: sessionInput.providerSessionId,
+                      nativeThreadRef: {
+                        driver: CLAUDE_DRIVER,
+                        nativeId: nativeThreadId,
+                        strength: "strong",
+                      },
+                      nativeConversationHeadRef: null,
+                      status: "idle",
+                      firstRunOrdinal: null,
+                      lastRunOrdinal: null,
+                      nativeMetadata: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                    providerTurns: [],
+                    messages: [],
+                    runtimeRequests: [],
+                  };
+                }),
           forkThread: () => unimplemented("forkThread unused"),
         };
         return runtime;
@@ -206,8 +236,13 @@ describe("ProviderTurnStartService imported native history", () => {
       driver: CLAUDE_DRIVER,
       nativeThreadRef: { driver: CLAUDE_DRIVER, nativeId: IMPORTED_SESSION_ID, strength: "strong" },
       firstRunOrdinal: null,
+      nativeMetadata: { importedNativeHistory: true },
     } as unknown as OrchestrationV2ProviderThread;
     assert.isTrue(providerThreadHasImportedNativeHistory(base));
+    // Adapters mint the same shape for brand-new native threads (e.g. Claude's
+    // rollback to thread start): without the importer marker it is not history.
+    assert.isFalse(providerThreadHasImportedNativeHistory({ ...base, nativeMetadata: null }));
+    assert.isFalse(providerThreadHasImportedNativeHistory({ ...base, nativeMetadata: {} }));
     // T3 has already run a turn on it: the attempt history decides instead.
     assert.isFalse(providerThreadHasImportedNativeHistory({ ...base, firstRunOrdinal: 1 }));
     assert.isFalse(providerThreadHasImportedNativeHistory({ ...base, nativeThreadRef: null }));
@@ -275,6 +310,7 @@ describe("ProviderTurnStartService imported native history", () => {
             lastRunOrdinal: null,
             handoffIds: [],
             forkedFrom: null,
+            nativeMetadata: { importedNativeHistory: true },
             createdAt: created.createdAt,
             updatedAt: created.createdAt,
           };
@@ -341,6 +377,128 @@ describe("ProviderTurnStartService imported native history", () => {
             ProviderReplayHarness.layerWithRegistry(
               {
                 name: "imported-native-resume",
+                runtimePolicyOverride: {
+                  cwd,
+                  approvalPolicy: "never",
+                  sandboxPolicy: { type: "readOnly" },
+                },
+              },
+              layerRegistry,
+            ),
+          ),
+          Effect.provide(IdAllocator.layer),
+        );
+      }),
+    ),
+  );
+  it.live("starts the fresh native session minted by a rollback to thread start", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace("rollback-start-fresh-session");
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+          makeCapturingClaudeAdapter({ modelSelection: CLAUDE_MODEL_SELECTION, capturedTurns }),
+        ]);
+        const threadId = ThreadId.make("rollback-start-fresh-session");
+        const projectId = ProjectId.make("project:rollback-start-fresh-session");
+
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+
+          const sendAndSettle = (ordinal: number) =>
+            Effect.gen(function* () {
+              yield* orchestrator.dispatch({
+                type: "message.dispatch",
+                commandId: CommandId.make(`rollback-start-fresh-session:${ordinal}`),
+                threadId,
+                messageId: MessageId.make(`rollback-start-fresh-session:${ordinal}`),
+                createdBy: "user",
+                creationSource: "web",
+                text: `Message ${ordinal}`,
+                attachments: [],
+                modelSelection: CLAUDE_MODEL_SELECTION,
+                dispatchMode: { type: "start_immediately" },
+              });
+              yield* orchestrator.streamStoredEvents.pipe(
+                Stream.filter(
+                  ({ event }) =>
+                    event.type === "run.updated" &&
+                    event.payload.ordinal === ordinal &&
+                    (event.payload.status === "completed" || event.payload.status === "failed"),
+                ),
+                Stream.runHead,
+              );
+              yield* worker.drain();
+            });
+
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("rollback-start-fresh-session:create"),
+            threadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Ordinary thread",
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+          yield* sendAndSettle(1);
+
+          const afterFirst = yield* orchestrator.getThreadProjection(threadId);
+          const startCheckpoint = afterFirst.checkpoints.find(
+            (checkpoint) => (checkpoint.appRunOrdinal ?? 0) === 0 && checkpoint.status === "ready",
+          );
+          assert.isDefined(startCheckpoint, "the thread-start checkpoint is captured");
+          yield* orchestrator.dispatch({
+            type: "checkpoint.rollback",
+            commandId: CommandId.make("rollback-start-fresh-session:rollback"),
+            threadId,
+            checkpointId: startCheckpoint!.id,
+            scopeId: startCheckpoint!.scopeId,
+            restoreFiles: false,
+          });
+          // The rollback effect runs on the background worker.
+          yield* orchestrator.streamStoredEvents.pipe(
+            Stream.filter(
+              ({ event }) =>
+                (event.type === "provider-thread.updated" &&
+                  event.payload.nativeThreadRef?.nativeId === `rolled-back:${threadId}`) ||
+                (event.type === "thread.metadata-updated" &&
+                  event.payload.rollbackFailure !== null &&
+                  event.payload.rollbackFailure !== undefined),
+            ),
+            Stream.runHead,
+            Effect.timeout("10 seconds"),
+          );
+          yield* worker.drain();
+
+          const afterRollback = yield* orchestrator.getThreadProjection(threadId);
+          const minted = afterRollback.providerThreads.find(
+            (candidate) => candidate.id === afterRollback.thread.activeProviderThreadId,
+          );
+          assert.equal(
+            minted?.nativeThreadRef?.nativeId,
+            `rolled-back:${threadId}`,
+            afterRollback.thread.rollbackFailure?.message,
+          );
+
+          yield* sendAndSettle(2);
+
+          const turns = yield* Ref.get(capturedTurns);
+          assert.equal(turns.length, 2);
+          assert.equal(turns[1]?.nativeThreadId, `rolled-back:${threadId}`);
+          // The rollback minted a never-created native session: it must be
+          // opened fresh (`sessionId:`), not resumed ("No conversation found").
+          assert.isFalse(turns[1]?.nativeThreadHasTurns);
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              {
+                name: "rollback-start-fresh-session",
                 runtimePolicyOverride: {
                   cwd,
                   approvalPolicy: "never",

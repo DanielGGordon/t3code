@@ -91,6 +91,9 @@ scenario in `reconcileV2PreviewMigration.test.ts` is un-skipped.
   `AgentSessionImporter`): a provider thread with a known Claude session id and no T3 turns
   opened with `sessionId:` instead of `resume:`. Fix + tests in `ProviderTurnStartService.ts`.
   The legacy-summary handoff is skipped for such threads.
+  Imported provider threads carry an explicit `nativeMetadata.importedNativeHistory: true`
+  marker (a rollback-to-thread-start mints the same shape otherwise); upstream's
+  `project/AgentSessionImporter.ts` sets it too — a small divergence in an upstream file.
 - **v1 → v2 resume restore** — new startup phase
   `orchestration-v2.legacy-v1.restore-claude-resume` binds migrated v1 Claude threads
   (incl. `claude-import-*`) to their native session so they resume instead of continuing

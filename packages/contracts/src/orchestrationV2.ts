@@ -855,6 +855,14 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   updatedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Version 2 scopes provider-derived item ids by provider instance. */
   itemIdentityVersion: Schema.optional(Schema.Literal(2)),
+  /**
+   * Fork: set only by importers that bind this provider thread to a native
+   * session that already has history (agent session import, `t3 import sync`,
+   * the legacy v1 resume restore). Until T3 runs its first turn on the thread,
+   * this is what makes that turn resume the native session instead of
+   * starting it fresh. Adapter-minted threads never carry it.
+   */
+  importedNativeHistory: Schema.optional(Schema.Literal(true)),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;

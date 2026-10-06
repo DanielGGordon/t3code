@@ -22,6 +22,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Command } from "effect/cli";
 
@@ -149,6 +150,63 @@ it.effect("adds, renames, and removes projects through the V2 project CLI domain
 
     yield* runCli(["project", "remove", added?.id ?? "", "--base-dir", baseDir]);
     assert.deepEqual((yield* readProjects(baseDir)).projects, []);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+// A server that is alive but slow must never push a CLI write offline: that
+// would write the live database from a second process, and deleting the
+// runtime state would keep every later run (e.g. the 15-minute import timer)
+// offline for the server's whole lifetime.
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const writeRuntimeState = (baseDir: string, pid: number) =>
+  Effect.gen(function* () {
+    const config = yield* makeConfig(baseDir);
+    NodeFS.mkdirSync(NodePath.dirname(config.serverRuntimeStatePath), { recursive: true });
+    NodeFS.writeFileSync(
+      config.serverRuntimeStatePath,
+      `${encodeJson({
+        version: 1,
+        pid,
+        port: 1,
+        // Nothing listens on port 1: the probe fails like a hung server would.
+        origin: "http://127.0.0.1:1",
+        startedAt: "2026-10-01T00:00:00.000Z",
+      })}\n`,
+    );
+    return config.serverRuntimeStatePath;
+  });
+
+it.effect("fails live-or-offline CLI writes while the recorded server pid is alive", () =>
+  Effect.gen(function* () {
+    const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cli-live-pid-"));
+    const workspaceRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cli-live-ws-"));
+    const statePath = yield* writeRuntimeState(baseDir, process.pid);
+
+    for (const args of [
+      ["project", "add", workspaceRoot, "--base-dir", baseDir],
+      ["session", "reset", "thread-live-pid", "--yes", "--base-dir", baseDir],
+      ["import", "sync", "--projects-dir", workspaceRoot, "--base-dir", baseDir],
+    ]) {
+      const error = yield* runCli(args).pipe(Effect.flip);
+      assert.include(String(error), `server (pid ${process.pid}) is running`, args.join(" "));
+      // The runtime state survives, so the next run tries the server again.
+      assert.isTrue(NodeFS.existsSync(statePath), args.join(" "));
+    }
+    // Nothing was written offline.
+    assert.deepEqual((yield* readProjects(baseDir)).projects, []);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("runs CLI writes offline and clears the runtime state once its pid is dead", () =>
+  Effect.gen(function* () {
+    const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cli-dead-pid-"));
+    const workspaceRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cli-dead-ws-"));
+    // Above Linux's pid_max ceiling (2^22): never a live process.
+    const statePath = yield* writeRuntimeState(baseDir, 2 ** 30);
+
+    yield* runCli(["project", "add", workspaceRoot, "--base-dir", baseDir]);
+    assert.isFalse(NodeFS.existsSync(statePath));
+    assert.equal((yield* readProjects(baseDir)).projects[0]?.workspaceRoot, workspaceRoot);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

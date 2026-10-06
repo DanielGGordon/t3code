@@ -69,18 +69,23 @@ const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
  * by an importer (upstream's AgentSessionImporter, the fork's `t3 import sync`,
  * or the legacy v1 resume seeder) and T3 has not yet run a turn on it.
  *
- * T3 itself never persists such a row: the orchestrator creates provider
- * threads with `firstRunOrdinal` set and no native ref, and turn start records
- * `firstRunOrdinal` before the provider sees the turn. So a strong native ref
- * with `firstRunOrdinal === null` means the native transcript already exists
- * and must be resumed — opening it with a fresh session id fails ("already in
- * use") or silently drops the imported history.
+ * Importers mark such rows explicitly (`nativeMetadata.importedNativeHistory`).
+ * The shape alone (strong native ref + `firstRunOrdinal === null`) is NOT
+ * enough: adapters mint exactly that shape for brand-new native threads, e.g.
+ * Claude's rollback to thread start allocates a fresh, never-created session
+ * id — resuming that fails with "No conversation found". For a marked row the
+ * native transcript already exists and must be resumed — opening it with a
+ * fresh session id fails ("already in use") or silently drops the history.
  */
 export function providerThreadHasImportedNativeHistory(
-  providerThread: Pick<OrchestrationV2ProviderThread, "nativeThreadRef" | "firstRunOrdinal">,
+  providerThread: Pick<
+    OrchestrationV2ProviderThread,
+    "nativeThreadRef" | "firstRunOrdinal" | "nativeMetadata"
+  >,
 ): boolean {
   const ref = providerThread.nativeThreadRef;
   return (
+    providerThread.nativeMetadata?.importedNativeHistory === true &&
     providerThread.firstRunOrdinal === null &&
     ref !== null &&
     ref.strength === "strong" &&

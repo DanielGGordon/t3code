@@ -328,6 +328,9 @@ const make = Effect.gen(function* () {
             handoffIds: [],
             forkedFrom: null,
             pendingBackgroundTasks: [],
+            // Fork: marks the native session as already having history so the
+            // first T3 turn resumes it (ProviderTurnStartService).
+            nativeMetadata: { importedNativeHistory: true },
             createdAt,
             updatedAt,
           };

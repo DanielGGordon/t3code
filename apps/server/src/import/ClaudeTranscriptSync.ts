@@ -391,8 +391,8 @@ function cachedOutcomeStillHolds(state: SyncState, cached: CachedFileOutcome): b
         thread.deletedAt === null &&
         !state.threadsWithRuns.has(outcome.threadId) &&
         !state.pendingLegacyTranscripts.has(outcome.threadId) &&
-        (thread.activeProviderThreadId !== null ||
-          state.threadsWithProviderThreads.has(outcome.threadId))
+        // Not `activeProviderThreadId`: it can dangle (see ensureResumable).
+        state.threadsWithProviderThreads.has(outcome.threadId)
       );
     }
     case "skipped-owned":
@@ -583,6 +583,25 @@ export const make = Effect.gen(function* () {
     return { projectId: project.id, reused: false } as const;
   });
 
+  /**
+   * `loadState` snapshots which threads have runs once per sweep, but T3 can
+   * start a turn on an import thread while the sweep runs. Re-read right
+   * before a write that is only valid for a thread T3 never continued, so the
+   * sweep cannot re-import T3's own turn (Claude appends it to the transcript).
+   */
+  const threadGainedRuns = Effect.fn("ClaudeTranscriptSync.threadGainedRuns")(function* (
+    state: SyncState,
+    threadId: ThreadId,
+  ) {
+    if (state.threadsWithRuns.has(threadId)) return true;
+    const rows = yield* sql<{ readonly found: number }>`
+      SELECT 1 AS found FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} LIMIT 1
+    `.pipe(mapFailure("Failed to read the thread's runs"));
+    if (rows.length === 0) return false;
+    state.threadsWithRuns.add(threadId);
+    return true;
+  });
+
   /** Bind an existing import thread that never got its provider thread. */
   const ensureResumable = Effect.fn("ClaudeTranscriptSync.ensureResumable")(function* (
     state: SyncState,
@@ -590,9 +609,10 @@ export const make = Effect.gen(function* () {
     sessionId: string,
   ) {
     const existing = state.threads.get(threadId);
+    // An `activeProviderThreadId` without a provider thread row is a dangling
+    // pointer (an import interrupted mid-write by older code): repair it too.
     if (
       existing === undefined ||
-      existing.activeProviderThreadId !== null ||
       state.threadsWithProviderThreads.has(threadId) ||
       state.threadsWithRuns.has(threadId) ||
       !isClaudeSessionId(sessionId)
@@ -600,7 +620,7 @@ export const make = Effect.gen(function* () {
       return false;
     }
     const thread = decodeStoredAppThread(existing.payloadJson);
-    if (thread === undefined) return false;
+    if (thread === undefined || (yield* threadGainedRuns(state, threadId))) return false;
     const suffix = yield* randomUuidV4;
     yield* writeEvents(
       bindExistingThreadToClaudeSession({
@@ -716,7 +736,13 @@ export const make = Effect.gen(function* () {
       messages.flatMap((message) => messageEvents({ threadId, message, fallbackAt: createdAt }));
 
     if (plan.kind === "append") {
+      const continuedInT3 = {
+        kind: "skipped-forked",
+        threadId,
+        reason: "thread has provider turns (it was continued in T3 during this sweep)",
+      } satisfies ClaudeSessionOutcome;
       for (const batch of chunks(toImport, MESSAGE_BATCH_SIZE)) {
+        if (yield* threadGainedRuns(state, threadId)) return continuedInT3;
         yield* writeEvents(messageEventsFor(batch));
         for (const message of batch) state.messageOwnerIndex.set(message.uuid, threadId);
         yield* Effect.yieldNow;
@@ -727,6 +753,8 @@ export const make = Effect.gen(function* () {
         current !== undefined &&
         DateTime.isGreaterThan(updatedAt, current.updatedAt)
       ) {
+        // This rewrites the whole thread row from the sweep's snapshot.
+        if (yield* threadGainedRuns(state, threadId)) return continuedInT3;
         // Surface the newer activity in the sidebar.
         const suffix = yield* randomUuidV4;
         yield* writeEvents([
@@ -797,6 +825,9 @@ export const make = Effect.gen(function* () {
     };
 
     const [firstBatch = [], ...restBatches] = chunks(toImport, MESSAGE_BATCH_SIZE);
+    // `thread.created` already points at the provider thread, so both go in
+    // the same (atomic) write: a failure later in the import must not leave
+    // `activeProviderThreadId` dangling.
     yield* writeEvents([
       {
         id: EventId.make(`${IMPORT_EVENT_PREFIX}:thread:${threadId}:created`),
@@ -806,6 +837,21 @@ export const make = Effect.gen(function* () {
         occurredAt: createdAt,
         payload: appThread,
       },
+      ...(providerThread === undefined
+        ? []
+        : [
+            {
+              id: EventId.make(
+                `${IMPORT_EVENT_PREFIX}:provider-thread:${threadId}:${providerThread.id}`,
+              ),
+              type: "provider-thread.updated" as const,
+              threadId,
+              driver: CLAUDE_DRIVER_KIND,
+              providerInstanceId: instanceId,
+              occurredAt: updatedAt,
+              payload: providerThread,
+            },
+          ]),
       ...messageEventsFor(firstBatch),
     ]);
     state.threads.set(threadId, {
@@ -814,27 +860,12 @@ export const make = Effect.gen(function* () {
       activeProviderThreadId: providerThread?.id ?? null,
     });
     state.tombstones.add(threadId);
+    if (providerThread !== undefined) state.threadsWithProviderThreads.add(threadId);
     for (const message of firstBatch) state.messageOwnerIndex.set(message.uuid, threadId);
     for (const batch of restBatches) {
       yield* Effect.yieldNow;
       yield* writeEvents(messageEventsFor(batch));
       for (const message of batch) state.messageOwnerIndex.set(message.uuid, threadId);
-    }
-    if (providerThread !== undefined) {
-      yield* writeEvents([
-        {
-          id: EventId.make(
-            `${IMPORT_EVENT_PREFIX}:provider-thread:${threadId}:${providerThread.id}`,
-          ),
-          type: "provider-thread.updated",
-          threadId,
-          driver: CLAUDE_DRIVER_KIND,
-          providerInstanceId: instanceId,
-          occurredAt: updatedAt,
-          payload: providerThread,
-        },
-      ]);
-      state.threadsWithProviderThreads.add(threadId);
     }
 
     return {

@@ -4,8 +4,8 @@
  * `t3 session reset`).
  *
  * The resume contract (see `ProviderTurnStartService.providerThreadHasImportedNativeHistory`):
- * a provider thread with a strong `nativeThreadRef` to Claude session X and
- * `firstRunOrdinal: null`, set as the thread's `activeProviderThreadId`, makes
+ * a provider thread marked `nativeMetadata.importedNativeHistory`, with a strong
+ * `nativeThreadRef` to Claude session X and `firstRunOrdinal: null`, set as the thread's `activeProviderThreadId`, makes
  * the next T3 turn open Claude with `resume: X` (in place — Claude appends
  * T3's turns to X's transcript).
  */
@@ -96,6 +96,8 @@ export function importedClaudeProviderThread(input: {
     handoffIds: [],
     forkedFrom: null,
     pendingBackgroundTasks: [],
+    // Explicit importer marker: only marked rows resume native history.
+    nativeMetadata: { importedNativeHistory: true },
     createdAt: input.at,
     updatedAt: input.at,
   };

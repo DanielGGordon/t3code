@@ -78,6 +78,8 @@ const setup = Effect.gen(function* () {
   };
 });
 
+const encodeRatesSnapshot = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const layerService = (input: {
   readonly prefix: string;
   readonly home: string;
@@ -1245,6 +1247,50 @@ describe("UsageService", () => {
       // A later request is fresh work again, not a stale cached answer.
       yield* service.readSummary(WINDOW);
       assert.strictEqual(ratesFetches, 2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("prices turns from cached rates without waiting on a hung rate fetch", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        // A stale (older than the TTL) snapshot on disk.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(config.stateDir, "usage-model-rates.json"),
+            encodeRatesSnapshot({
+              fetchedAtMs: 0,
+              document: {
+                "gpt-test": { input_cost_per_token: 1e-6, output_cost_per_token: 1e-5 },
+              },
+            }),
+          ),
+        );
+        let ratesFetches = 0;
+        const service = yield* UsageService.make.pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            // LiteLLM never answers: the fetch only ends at its 10s timeout.
+            HttpClient.make(() =>
+              Effect.suspend(() => {
+                ratesFetches += 1;
+                return Effect.never;
+              }),
+            ),
+          ),
+        );
+
+        for (let call = 0; call < 3; call++) {
+          const tables = yield* service.pricingTables.pipe(Effect.timeout("1 second"));
+          assert.strictEqual(tables.rates.size, 1);
+        }
+        // The stale table is refreshed in the background, once per retry window.
+        yield* Effect.sleep("20 millis");
+        assert.strictEqual(ratesFetches, 1);
+      }).pipe(
+        Effect.provide(layerService({ prefix: "usage-service-turn-pricing-test", home, settings })),
+      );
     }).pipe(Effect.scoped),
   );
 

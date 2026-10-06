@@ -345,6 +345,42 @@ export const make = Effect.gen(function* () {
           detail: `${lines.join("\n")}\nThread ${threadId} has a run in progress or queued; stop it before resetting.`,
         });
       }
+      // Any later `provider-thread.updated` for the old provider thread points
+      // the app thread back at it, silently undoing the reset. Those come from
+      // a loaded provider session (live adapter events) and from startup
+      // recovery of provider threads still marked active or waiting on
+      // background tasks — so refuse while either could still happen.
+      const liveSessions = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM orchestration_v2_projection_provider_sessions AS session
+        WHERE session.status NOT IN ('stopped', 'error')
+          AND (
+            session.thread_id = ${threadId}
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_provider_session_bindings AS binding
+              WHERE binding.provider_session_id = session.provider_session_id
+                AND binding.thread_id = ${threadId}
+            )
+          )
+      `.pipe(mapFailure("Failed to read the thread's provider sessions"));
+      const unsettledProviderThreads = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM orchestration_v2_projection_provider_threads
+        WHERE thread_id = ${threadId}
+          AND (
+            status = 'active'
+            OR COALESCE(json_array_length(payload_json, '$.pendingBackgroundTasks'), 0) > 0
+          )
+      `.pipe(mapFailure("Failed to read the thread's provider threads"));
+      if ((liveSessions[0]?.count ?? 0) > 0 || (unsettledProviderThreads[0]?.count ?? 0) > 0) {
+        return yield* new ClaudeResumeBindingError({
+          detail:
+            `${lines.join("\n")}\nThread ${threadId} still has a loaded provider session or ` +
+            "unfinished background work, which would re-attach the old session after a reset. " +
+            "Stop the thread and retry once its provider session has closed (idle sessions close " +
+            "on their own after a period of inactivity, or restart the server).",
+        });
+      }
       if (!apply) {
         return {
           lines: [

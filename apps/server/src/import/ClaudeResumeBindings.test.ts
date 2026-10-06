@@ -4,12 +4,19 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { EventId, ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import {
+  EventId,
+  type OrchestrationV2ProviderSession,
+  ProviderDriverKind,
+  ProviderSessionId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -179,6 +186,93 @@ describe("ClaudeResumeBindings", () => {
       assert.include(unknown.message, "was not found");
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect("refuses reset while a provider session or background work could re-attach", () =>
+    Effect.gen(function* () {
+      const bindings = yield* ClaudeResumeBindings.ClaudeResumeBindings;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const threadId = ThreadId.make("thread-live-session");
+      const providerThread = yield* bindThread(threadId, MISSING_SESSION);
+      const at = providerThread.createdAt;
+      const session: OrchestrationV2ProviderSession = {
+        id: ProviderSessionId.make("provider-session:live"),
+        driver: CLAUDE_DRIVER,
+        providerInstanceId: CLAUDE_INSTANCE,
+        status: "ready",
+        cwd: "/tmp",
+        model: "claude-sonnet-4-6",
+        capabilities: ClaudeProviderCapabilitiesV2,
+        createdAt: at,
+        updatedAt: at,
+        lastError: null,
+      };
+      const writeSession = (status: OrchestrationV2ProviderSession["status"], n: number) =>
+        eventSink.write({
+          events: [
+            {
+              id: EventId.make(`test:live-session:${n}`),
+              type: n === 0 ? "provider-session.attached" : "provider-session.updated",
+              threadId,
+              driver: CLAUDE_DRIVER,
+              providerInstanceId: CLAUDE_INSTANCE,
+              occurredAt: at,
+              payload: { ...session, status },
+            },
+          ],
+        });
+      const activeProviderThreadId = () =>
+        projections
+          .getThreadRecords(threadId, [])
+          .pipe(Effect.map((records) => records.thread.activeProviderThreadId));
+
+      // A loaded session's next provider-thread update would undo the reset.
+      yield* writeSession("ready", 0);
+      const whileLoaded = yield* Effect.flip(bindings.reset({ threadId, apply: true }));
+      assert.include(whileLoaded.message, "loaded provider session");
+      assert.strictEqual(yield* activeProviderThreadId(), providerThread.id);
+
+      // Session closed, but background work still pending: startup recovery
+      // would rewrite this provider thread and re-point the app thread at it.
+      yield* writeSession("stopped", 1);
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("test:live-session:pending-task"),
+            type: "provider-thread.updated",
+            threadId,
+            driver: CLAUDE_DRIVER,
+            providerInstanceId: CLAUDE_INSTANCE,
+            occurredAt: at,
+            payload: {
+              ...providerThread,
+              pendingBackgroundTasks: [{ taskId: "task-1", kind: "command" }],
+            },
+          },
+        ],
+      });
+      const whilePending = yield* Effect.flip(bindings.reset({ threadId, apply: true }));
+      assert.include(whilePending.message, "unfinished background work");
+      assert.strictEqual(yield* activeProviderThreadId(), providerThread.id);
+
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("test:live-session:settled"),
+            type: "provider-thread.updated",
+            threadId,
+            driver: CLAUDE_DRIVER,
+            providerInstanceId: CLAUDE_INSTANCE,
+            occurredAt: at,
+            payload: { ...providerThread, pendingBackgroundTasks: [] },
+          },
+        ],
+      });
+      const applied = yield* bindings.reset({ threadId, apply: true });
+      assert.isTrue(applied.reset);
+      assert.isNull(yield* activeProviderThreadId());
+    }).pipe(Effect.provide(layer)),
+  );
 
   it.effect("restores native resume for migrated v1 Claude threads, idempotently", () =>
     Effect.gen(function* () {

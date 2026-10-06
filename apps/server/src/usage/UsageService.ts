@@ -82,6 +82,9 @@ const RATES_TTL_MS = 24 * 60 * 60 * 1000;
 /** An explicit refresh ignores the TTL, but not a table fetched this recently. */
 const RATES_REFRESH_FLOOR_MS = 60 * 1000;
 
+/** Turn pricing retries a failed background rate fetch no more often than this. */
+const RATES_BACKGROUND_RETRY_MS = 5 * 60 * 1000;
+
 /**
  * Files are filtered by mtime before opening. The slack covers a session whose
  * last write lands just before local midnight on the window's first day.
@@ -243,26 +246,28 @@ export const make = Effect.gen(function* () {
    * than the page failing. `force` refetches inside the TTL so a model that
    * LiteLLM added since the last fetch gets priced now.
    */
+  /** Adopts the on-disk snapshot when nothing is loaded yet. Local I/O only. */
+  const loadRatesFromDisk = Effect.gen(function* () {
+    if (ratesFetchedAtMs !== null) return;
+    const fromDisk = yield* fileSystem.readFileString(ratesCachePath).pipe(
+      Effect.flatMap((raw) => decodeRatesCache(raw)),
+      Effect.catchCause(() => Effect.succeed(null)),
+    );
+    if (fromDisk === null || ratesFetchedAtMs !== null) return;
+    const parsed = parseRateTable(fromDisk.document);
+    if (parsed.size === 0) return;
+    rates = parsed;
+    ratesFetchedAtMs = fromDisk.fetchedAtMs;
+    ratesStatus = "cached";
+  });
+
   const loadRates = Effect.fn("UsageService.loadRates")(function* (force: boolean) {
     const now = yield* Clock.currentTimeMillis;
     const maxAgeMs = force ? RATES_REFRESH_FLOOR_MS : RATES_TTL_MS;
     if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < maxAgeMs) return;
 
-    if (ratesFetchedAtMs === null) {
-      const fromDisk = yield* fileSystem.readFileString(ratesCachePath).pipe(
-        Effect.flatMap((raw) => decodeRatesCache(raw)),
-        Effect.catchCause(() => Effect.succeed(null)),
-      );
-      if (fromDisk !== null) {
-        const parsed = parseRateTable(fromDisk.document);
-        if (parsed.size > 0) {
-          rates = parsed;
-          ratesFetchedAtMs = fromDisk.fetchedAtMs;
-          ratesStatus = "cached";
-          if (now - fromDisk.fetchedAtMs < maxAgeMs) return;
-        }
-      }
-    }
+    yield* loadRatesFromDisk;
+    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < maxAgeMs) return;
 
     const fetched = yield* httpClient.get(LITELLM_RATES_URL).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -993,8 +998,27 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
+  // Fork (thread spend): turn finalization prices from whatever table is
+  // loaded and never waits on LiteLLM (a failing fetch costs up to 10s, and
+  // the ingestor would pay it on every turn, serialized). A stale table is
+  // refreshed in the background, at most once per retry window.
+  let backgroundRatesRefreshAtMs: number | null = null;
+  const refreshRatesInBackground = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    if (ratesFetchedAtMs !== null && now - ratesFetchedAtMs < RATES_TTL_MS) return;
+    if (
+      backgroundRatesRefreshAtMs !== null &&
+      now - backgroundRatesRefreshAtMs < RATES_BACKGROUND_RETRY_MS
+    ) {
+      return;
+    }
+    backgroundRatesRefreshAtMs = now;
+    yield* ensureRates(false).pipe(Effect.ignoreCause, Effect.forkDetach);
+  });
+
   const pricingTables = Effect.gen(function* () {
-    yield* ensureRates(false);
+    yield* loadRatesFromDisk;
+    yield* refreshRatesInBackground;
     const settings = yield* settingsService.getSettings.pipe(Effect.option);
     return {
       rates,

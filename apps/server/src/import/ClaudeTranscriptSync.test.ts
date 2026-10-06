@@ -6,6 +6,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { EventId, ProviderDriverKind, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -54,6 +55,62 @@ const sync = (projectsDir: string) =>
     const service = yield* ClaudeTranscriptSync.ClaudeTranscriptSync;
     return yield* service.sync({ projectsDir });
   });
+
+/**
+ * A fixture whose FileSystem runs `onRead` right before the sweep reads
+ * `targetFileName`: after `loadState` snapshotted the database, like a T3
+ * turn starting while a sweep is underway.
+ */
+function fixtureWithReadHook(targetFileName: string) {
+  const base = fixture();
+  const hook: { onRead: Effect.Effect<void, never, never> | undefined } = { onRead: undefined };
+  const layerHookedFileSystem = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      return {
+        ...fs,
+        readFileString: (filePath: string, encoding?: string) =>
+          NodePath.basename(filePath) === targetFileName && hook.onRead !== undefined
+            ? Effect.andThen(hook.onRead, fs.readFileString(filePath, encoding))
+            : fs.readFileString(filePath, encoding),
+      } satisfies FileSystem.FileSystem;
+    }),
+  );
+  const layer = ClaudeTranscriptSync.layer.pipe(
+    Layer.provide(layerHookedFileSystem),
+    Layer.provideMerge(layerV2Database),
+    Layer.provideMerge(layerImportEnvironment({ worktreesDir: base.worktreesDir })),
+  );
+  return { ...base, layer, hook };
+}
+
+/** A fixture whose EventSink fails every write once `failWrites` is armed. */
+function fixtureWithFailingWrites() {
+  const base = fixture();
+  const control = { failWritesAfter: Number.POSITIVE_INFINITY, writes: 0 };
+  const layerFlakyEventSink = Layer.effect(
+    EventSink.EventSinkV2,
+    Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      return {
+        ...sink,
+        write: (input) => {
+          control.writes += 1;
+          return control.writes > control.failWritesAfter
+            ? Effect.fail(new EventSink.EventSinkWriteError({ eventCount: input.events.length }))
+            : sink.write(input);
+        },
+      } satisfies EventSink.EventSinkV2Shape;
+    }),
+  );
+  const layer = ClaudeTranscriptSync.layer.pipe(
+    Layer.provide(layerFlakyEventSink),
+    Layer.provideMerge(layerV2Database),
+    Layer.provideMerge(layerImportEnvironment({ worktreesDir: base.worktreesDir })),
+  );
+  return { ...base, layer, control };
+}
 
 describe("ClaudeTranscriptSync", () => {
   it.effect("creates a resumable thread, then stays idempotent and appends new messages", () => {
@@ -346,6 +403,104 @@ describe("ClaudeTranscriptSync", () => {
         deriveProviderThread({ driver: CLAUDE_DRIVER, nativeThreadId: SESSION_A }),
       );
       assert.isTrue(providerThreadHasImportedNativeHistory(records.providerThreads[0]!));
+    }).pipe(Effect.provide(layer));
+  });
+  it.effect("does not append T3's own turn when T3 starts one during the sweep", () => {
+    const { projectsDir, workspace, layer, hook } = fixtureWithReadHook(`${SESSION_A}.jsonl`);
+    return Effect.gen(function* () {
+      writeTranscript({
+        projectsDir,
+        sessionId: SESSION_A,
+        cwd: workspace,
+        messages: baseMessages,
+      });
+      const first = yield* sync(projectsDir);
+      assert.strictEqual(first.counters.created, 1, first.lines.join("\n"));
+      const threadId = ThreadId.make(`claude-import-${SESSION_A}`);
+
+      // T3 resumes the session in place: Claude appends T3's turn to the
+      // transcript, and the run row lands after the sweep's snapshot.
+      writeTranscript({
+        projectsDir,
+        sessionId: SESSION_A,
+        cwd: workspace,
+        messages: [...baseMessages, { uuid: "a-t3", role: "user", text: "sent from T3" }],
+      });
+      const sql = yield* SqlClient.SqlClient;
+      hook.onRead = sql`
+        INSERT OR IGNORE INTO orchestration_v2_projection_runs (
+          run_id, thread_id, ordinal, provider, provider_thread_id, status, requested_at,
+          completed_at, payload_json
+        ) VALUES (
+          'run:mid-sweep', ${threadId}, 1, 'claudeAgent', NULL, 'running',
+          '2026-09-03T00:00:00.000Z', NULL, '{}'
+        )
+      `.pipe(Effect.asVoid, Effect.orDie);
+
+      const second = yield* sync(projectsDir);
+      assert.strictEqual(second.counters.updated, 0, second.lines.join("\n"));
+      assert.strictEqual(second.counters.skippedForked, 1, second.lines.join("\n"));
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const records = yield* projections.getThreadRecords(threadId, ["messages"]);
+      // Only the originally imported messages; T3's turn was not re-imported.
+      assert.strictEqual(records.messages.length, baseMessages.length);
+    }).pipe(Effect.provide(layer));
+  });
+  it.effect("never leaves a dangling activeProviderThreadId when an import write fails", () => {
+    const { projectsDir, workspace, layer, control } = fixtureWithFailingWrites();
+    return Effect.gen(function* () {
+      // More than one message batch, so the create path needs several writes.
+      writeTranscript({
+        projectsDir,
+        sessionId: SESSION_A,
+        cwd: workspace,
+        messages: Array.from({ length: 120 }, (_, index) => ({
+          uuid: `bulk-${index}`,
+          role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+          text: `message ${index}`,
+        })),
+      });
+      control.writes = 0;
+      control.failWritesAfter = 1;
+      const failed = yield* sync(projectsDir);
+      assert.strictEqual(failed.counters.failed, 1, failed.lines.join("\n"));
+
+      const threadId = ThreadId.make(`claude-import-${SESSION_A}`);
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const records = yield* projections.getThreadRecords(threadId, ["providerThreads"]);
+      const activeId = records.thread.activeProviderThreadId;
+      assert.isNotNull(activeId);
+      const active = records.providerThreads.find((candidate) => candidate.id === activeId);
+      assert.isDefined(active, "thread.created must not point at a provider thread never written");
+      assert.isTrue(providerThreadHasImportedNativeHistory(active!));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("repairs an import thread whose activeProviderThreadId dangles", () => {
+    const { projectsDir, workspace, layer } = fixture();
+    return Effect.gen(function* () {
+      writeTranscript({
+        projectsDir,
+        sessionId: SESSION_A,
+        cwd: workspace,
+        messages: baseMessages,
+      });
+      yield* sync(projectsDir);
+      const threadId = ThreadId.make(`claude-import-${SESSION_A}`);
+      // What an interrupted import by older code left behind: the pointer
+      // without its provider thread row.
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`DELETE FROM orchestration_v2_projection_provider_threads WHERE thread_id = ${threadId}`;
+
+      const repaired = yield* sync(projectsDir);
+      assert.include(repaired.lines.join("\n"), "rebound", repaired.lines.join("\n"));
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const records = yield* projections.getThreadRecords(threadId, ["providerThreads"]);
+      const active = records.providerThreads.find(
+        (candidate) => candidate.id === records.thread.activeProviderThreadId,
+      );
+      assert.isDefined(active);
+      assert.isTrue(providerThreadHasImportedNativeHistory(active!));
     }).pipe(Effect.provide(layer));
   });
 });

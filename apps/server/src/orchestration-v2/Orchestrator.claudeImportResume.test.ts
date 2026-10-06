@@ -3,7 +3,8 @@
 //  1. The first send in an imported thread resumes the native Claude session
 //     in place and does NOT also prepend the legacy-import summary handoff
 //     (Claude already holds that history).
-//  2. `t3 session reset` detaches the thread; the next send opens a NEW
+//  2. `t3 session reset` refuses while the provider session is loaded; once it
+//     is released, reset detaches the thread and the next send opens a NEW
 //     provider thread (fresh native session) with the thread's history handed
 //     over as context.
 import { assert, describe, it } from "@effect/vitest";
@@ -44,6 +45,7 @@ import {
   type ProviderAdapterV2Shape,
 } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { CLAUDE_MODEL_SELECTION } from "./testkit/fixtures/shared.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
@@ -275,6 +277,18 @@ describe("Orchestrator with imported Claude threads", () => {
             assert.strictEqual(turns1[0]?.nativeThreadId, IMPORTED_SESSION_ID);
             assert.isTrue(turns1[0]?.nativeThreadHasTurns);
             const importedProviderThreadId = turns1[0]!.providerThreadId;
+
+            // While the provider session is loaded its next provider-thread
+            // update would re-attach the old session: reset refuses.
+            const refused = yield* Effect.flip(bindings.reset({ threadId, apply: true }));
+            assert.include(refused.message, "loaded provider session");
+            const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+            const { providerSessions } = yield* orchestrator.getThreadRecords(threadId, [
+              "providerSessions",
+            ]);
+            for (const session of providerSessions) {
+              yield* sessions.release({ providerSessionId: session.id, reason: "idle_timeout" });
+            }
 
             const reset = yield* bindings.reset({ threadId, apply: true });
             assert.isTrue(reset.reset, reset.lines.join("\n"));

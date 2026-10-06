@@ -34,6 +34,7 @@ import { projectMutationOperation } from "../project/ProjectMutation.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import {
   clearPersistedServerRuntimeState,
+  isProcessAlive,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -98,6 +99,32 @@ export class ProjectLiveServerRequestError extends Schema.TaggedError<ProjectLiv
 ) {
   override get message(): string {
     return "Failed to call the running server.";
+  }
+}
+
+/**
+ * The runtime state names a server process that is still alive, but it did
+ * not answer in time. Falling back to offline writes would write the state
+ * database from a second process behind the server's back (no live event
+ * publication, racing its writers), so the command fails instead and the
+ * runtime state is kept for the next attempt.
+ */
+export class ProjectLiveServerUnresponsiveError extends Schema.TaggedError<ProjectLiveServerUnresponsiveError>()(
+  "ProjectLiveServerUnresponsiveError",
+  {
+    operation: Schema.Literal("callLiveServer"),
+    pid: Schema.Int,
+    origin: Schema.String,
+    statePath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return (
+      `The T3 Code server (pid ${this.pid}) is running but did not answer at ${this.origin}. ` +
+      "Not writing to its database from this process; retry when the server responds. " +
+      `If no T3 Code server is actually running, delete ${this.statePath} and retry.`
+    );
   }
 }
 
@@ -367,6 +394,17 @@ export const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProje
       return Option.some(attempted.success);
     }
 
+    // A slow or briefly unreachable server is still the database's owner. Only
+    // a dead pid proves the state file is stale and offline writes are safe.
+    if (isProcessAlive(runtimeState.value.pid)) {
+      return yield* new ProjectLiveServerUnresponsiveError({
+        operation: "callLiveServer",
+        pid: runtimeState.value.pid,
+        origin: runtimeState.value.origin,
+        statePath: config.serverRuntimeStatePath,
+        cause: attempted.failure,
+      });
+    }
     yield* Effect.logDebug("Failed to connect to the persisted project CLI server.", {
       origin: runtimeState.value.origin,
       cause: attempted.failure,

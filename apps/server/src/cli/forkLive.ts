@@ -6,7 +6,9 @@
  * Writing v2 events from a second process while the server serves would skip
  * its live event publication and race its writers, so when a server answers
  * the CLI never falls back to writing locally — a failing live request is an
- * error, not a reason to go offline.
+ * error, not a reason to go offline. Likewise a server whose recorded pid is
+ * alive but which does not answer the probe fails the run
+ * (`ProjectLiveServerUnresponsiveError`); only a dead pid means offline.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
