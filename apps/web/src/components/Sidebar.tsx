@@ -5247,8 +5247,9 @@ export default function Sidebar() {
                             : "Filter threads by project"
                         }
                         // The most-used header control, so it gets a larger
-                        // icon and hit target than its neighbours.
-                        className="size-11 touch:[&>svg]:size-8"
+                        // icon and a wider hit target than its neighbours: the
+                        // icon stays square, the button pads out around it.
+                        className="h-11 w-16 touch:h-12 touch:w-20 touch:[&>svg]:size-8"
                       />
                     }
                   >
