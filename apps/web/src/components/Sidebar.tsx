@@ -5246,6 +5246,9 @@ export default function Sidebar() {
                             ? `Filter threads by project: ${scopedProjectGroup.displayName}`
                             : "Filter threads by project"
                         }
+                        // The most-used header control, so it gets a larger
+                        // icon and hit target than its neighbours.
+                        className="size-11 touch:[&>svg]:size-8"
                       />
                     }
                   >
@@ -5253,15 +5256,15 @@ export default function Sidebar() {
                       // Wrapped so the button's direct-child svg color rule cannot override
                       // a project's own icon color.
                       <span className="flex shrink-0">
-                        <ProjectFavicon project={scopedProjectGroup} className="size-4" />
+                        <ProjectFavicon project={scopedProjectGroup} className="size-8" />
                       </span>
                     ) : (
-                      <FolderIcon className="size-4" />
+                      <FolderIcon className="size-8" />
                     )}
                   </ComboboxTrigger>
                   <ComboboxPopup
                     align="start"
-                    // Anchored to the search field, not the 28px trigger: the
+                    // Anchored to the search field, not the icon trigger: the
                     // popup opens under the field, is at least as wide as it,
                     // and grows to fit project names up to a cap, past which
                     // the rows truncate.
