@@ -33,6 +33,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../config.ts";
 import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
+import { DESKTOP_RENDERER_ORIGINS, isCrossOriginBrowserRequest } from "./browserOrigin.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import * as SessionStore from "./SessionStore.ts";
@@ -607,6 +608,12 @@ export const make = Effect.gen(function* () {
   const descriptor = yield* policy.getDescriptor();
   const config = yield* ServerConfig.ServerConfig;
   const devAuth = resolveReusableDevAuth(config);
+  // Mirrors the credentialed CORS allowlist in http.ts.
+  const crossOriginCookieAllowedOrigins = [
+    ...(config.devUrl ? [config.devUrl.origin] : []),
+    ...DESKTOP_RENDERER_ORIGINS,
+    ...config.devAllowedOrigins,
+  ];
 
   const authenticateToken = (
     token: string,
@@ -1089,6 +1096,17 @@ export const make = Effect.gen(function* () {
             mapSessionVerificationErrors,
           );
         }
+      }
+
+      // Without a ticket, only cookies can authenticate a browser upgrade, and
+      // browsers attach them to WebSockets opened by any same-site page.
+      if (
+        request.headers.authorization === undefined &&
+        isCrossOriginBrowserRequest(request, crossOriginCookieAllowedOrigins)
+      ) {
+        return yield* new ServerAuthInvalidCredentialError({
+          diagnostic: "Cookie-authenticated WebSocket upgrades must be same-origin.",
+        });
       }
 
       return yield* authenticateRequest(request);

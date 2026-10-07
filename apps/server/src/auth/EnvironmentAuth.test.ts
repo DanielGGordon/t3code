@@ -572,4 +572,47 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         ),
       ),
   );
+
+  it.effect("accepts cookie WebSocket upgrades only from the page's own origin", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const pairingCredential = yield* serverAuth.issuePairingCredential();
+      const exchanged = yield* serverAuth.createBrowserSession(
+        pairingCredential.credential,
+        requestMetadata,
+      );
+      // Shaped like Caddy's forward: Host loses the port, X-Forwarded-Host keeps it.
+      const upgrade = (origin: string | undefined, url = "/ws") =>
+        ({
+          url,
+          cookies: { [sessions.cookieName]: exchanged.sessionToken },
+          headers: {
+            host: "203.0.113.7",
+            "x-forwarded-host": "203.0.113.7:7443",
+            "x-forwarded-proto": "https",
+            ...(origin ? { origin } : {}),
+          },
+        }) as unknown as Parameters<
+          EnvironmentAuth.EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"]
+        >[0];
+
+      const sameOrigin = yield* serverAuth.authenticateWebSocketUpgrade(
+        upgrade("https://203.0.113.7:7443"),
+      );
+      const noOrigin = yield* serverAuth.authenticateWebSocketUpgrade(upgrade(undefined));
+      const otherPort = yield* Effect.flip(
+        serverAuth.authenticateWebSocketUpgrade(upgrade("https://203.0.113.7:8443")),
+      );
+      const ticket = yield* serverAuth.issueWebSocketTicket(sameOrigin);
+      const ticketFromOtherOrigin = yield* serverAuth.authenticateWebSocketUpgrade(
+        upgrade("https://app.example.test", `/ws?wsTicket=${ticket.ticket}`),
+      );
+
+      expect(sameOrigin.sessionId.length).toBeGreaterThan(0);
+      expect(noOrigin.sessionId).toBe(sameOrigin.sessionId);
+      expect(otherPort._tag).toBe("ServerAuthInvalidCredentialError");
+      expect(ticketFromOtherOrigin.sessionId).toBe(sameOrigin.sessionId);
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
 });
