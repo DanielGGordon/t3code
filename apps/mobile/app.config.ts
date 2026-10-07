@@ -110,6 +110,22 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
+
+// Self-hosted sideload distribution (android-sideload, slot `t3code`). Only the `preview`
+// variant (com.t3tools.t3code.preview) ships this way, so only it gets the in-app updater.
+// The manifest URL can be overridden at build time for testing (T3CODE_SIDELOAD_MANIFEST_URL).
+const SIDELOAD_MANIFEST_URL =
+  repoEnv.T3CODE_SIDELOAD_MANIFEST_URL?.trim() ||
+  "https://15.204.108.12:7443/sideload/t3code/latest.json";
+const sideloadUpdates = APP_VARIANT === "preview" ? { manifestUrl: SIDELOAD_MANIFEST_URL } : null;
+
+// Android versionCode: explicit, and it must rise with every published sideload build
+// (`sideload publish` refuses anything not strictly higher). Bump this for each publish;
+// publish-android-apk.sh refuses to build if it is not above the published one.
+// History: 1 = first manual sideload (2026-07); 2 = first build with in-app updates.
+// T3CODE_ANDROID_VERSION_CODE overrides it (used for update tests).
+const ANDROID_VERSION_CODE = 2;
+const androidVersionCode = Number.parseInt(repoEnv.T3CODE_ANDROID_VERSION_CODE ?? "", 10);
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -294,6 +310,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
+    versionCode: Number.isInteger(androidVersionCode) ? androidVersionCode : ANDROID_VERSION_CODE,
     ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
       ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
       : {}),
@@ -466,6 +483,7 @@ const config: ExpoConfig = {
   ],
   extra: {
     appVariant: APP_VARIANT,
+    sideloadUpdates,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,

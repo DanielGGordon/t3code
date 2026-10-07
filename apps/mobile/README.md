@@ -154,3 +154,30 @@ vp run eas:android:dev
 vp run eas:android:preview:dev
 vp run eas:android:preview
 ```
+
+## Self-hosted Android sideload (fork)
+
+The `preview` variant (`com.t3tools.t3code.preview`) is distributed through
+[android-sideload](https://15.204.108.12:7443/sideload/) (slot `t3code`), not a store.
+
+- **First install:** open `https://15.204.108.12:7443/sideload/` on the phone and tap *T3 Code*.
+- **Updates:** Settings > About > **Check for updates** (also a quiet check on launch and each
+  foreground, at most every 6 hours). It downloads the APK, verifies its SHA-256 and opens the
+  system installer. Implemented by `modules/t3-sideload-updater` (a vendored copy of the
+  android-sideload updater, see its `VENDORED.md`) and `src/features/updates/sideload-updates.ts`;
+  iOS/web and non-`preview` variants don't include it.
+- **Publish:** bump `ANDROID_VERSION_CODE` in `app.config.ts` (must be strictly higher than
+  the published one; `~/projects/android-sideload/bin/sideload show t3code`), then
+  `bash apps/mobile/scripts/publish-android-apk.sh "what changed"`. It runs
+  `expo prebuild`, `assembleRelease` (arm64-v8a, signed with `~/.android/debug.keystore`) and
+  `sideload publish t3code <apk>`.
+- **Signing:** the script swaps `~/.android/debug.keystore` over the Expo template's bundled
+  `android/app/debug.keystore` after prebuild and fails unless `apksigner` reports that key's
+  cert. The first build on this key differs from the older template-signed APK, so Android
+  refuses to install it over the old one: uninstall the old "T3 Code Preview" on the phone and
+  re-pair once. After that every update installs in place via the button.
+- **Testing the updater:** `T3CODE_SIDELOAD_MANIFEST_URL` overrides the manifest URL and
+  `T3CODE_ANDROID_VERSION_CODE` the versionCode at build time. For an emulator use
+  `T3CODE_ANDROID_ABIS=x86_64`.
+- **TLS:** the manifest is served with Caddy's self-signed cert; `plugins/withAndroidSelfSignedServerTrust.cjs`
+  trusts it app-wide, including the updater's `HttpsURLConnection`.
