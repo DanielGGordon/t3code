@@ -12,6 +12,7 @@ import {
   registerHiddenUpdateTap,
   runAppUpdateCheck,
 } from "../updates/app-updates";
+import { checkForSideloadUpdates, isSideloadUpdateAvailable } from "../updates/sideload-updates";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -128,6 +129,13 @@ function AppSettingsSection() {
         target="SettingsOpenSourceLicenses"
       />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
+      {isSideloadUpdateAvailable() ? (
+        <SettingsRow
+          icon="arrow.down.circle"
+          label="Check for updates"
+          onPress={checkForSideloadUpdates}
+        />
+      ) : null}
       {updateCheckAvailable ? (
         <Pressable
           accessibilityLabel={`Version ${versionLabel}`}

@@ -17,6 +17,7 @@ import {
   AppearancePreferencesProvider,
   useAppearancePreferences,
 } from "./features/settings/appearance/AppearancePreferencesProvider";
+import { useSideloadUpdateCheckOnForeground } from "./features/updates/sideload-updates";
 import { RootStack } from "./Stack";
 import { appAtomRegistry } from "./state/atom-registry";
 import { OverlayPortalHost } from "./components/OverlayPortal";
@@ -70,6 +71,7 @@ export default function App() {
 function AppContent() {
   const { themeAppearance } = useAppearancePreferences();
   const navigationTheme = useMobileNavigationTheme();
+  useSideloadUpdateCheckOnForeground();
 
   return (
     <>

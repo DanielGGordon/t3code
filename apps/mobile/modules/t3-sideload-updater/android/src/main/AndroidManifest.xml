@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Merged into every app that depends on :updater, so the app's own manifest needs
+    nothing for updates. The provider is a FileProvider *subclass* so it never collides
+    with an androidx FileProvider the app declares for its own reasons.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- A user grant, asked for once per app on the first update (Updater deep-links it). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <provider
+            android:name="com.dgordon.sideload.updater.UpdateFileProvider"
+            android:authorities="${applicationId}.sideload-updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/sideload_updater_paths" />
+        </provider>
+    </application>
+</manifest>

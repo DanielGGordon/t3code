@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only file the updater shares: the verified APK, on its way to the installer. -->
+<paths>
+    <cache-path
+        name="sideload_updates"
+        path="sideload-updates/" />
+</paths>
