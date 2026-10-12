@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { TimerIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import {
   dueCacheExpiryBanners,
@@ -49,44 +49,37 @@ export function CacheExpiryBanners() {
   const serverConfigs = useServerConfigs();
   const navigate = useNavigate();
   const [store, setStore] = useLocalStorage(STORAGE_KEY, EMPTY_STORE, BannerStore);
-  const [nowMs, setNowMs] = useState(Date.now);
   const toasts = useRef(new Map<string, ToastId>());
 
+  // A due banner opens once; after that only its X (here or in another tab) closes
+  // it. Each check reads the clock afresh, on new shell data and every 30 s.
   useEffect(() => {
     if (!enabled) return;
-    const timer = setInterval(() => setNowMs(Date.now()), RECHECK_MS);
+    const openDue = () => {
+      const due = dueCacheExpiryBanners({
+        threads,
+        nowMs: Date.now(),
+        minTokens,
+        driverOf: (thread) =>
+          serverConfigs
+            .get(thread.environmentId)
+            ?.providers.find((provider) => provider.instanceId === thread.providerInstanceId)
+            ?.driver,
+      });
+      if (due.length === 0) return;
+      setStore((current) => {
+        const known = new Set([
+          ...current.open.map((banner) => banner.key),
+          ...current.dismissed.map((entry) => entry.key),
+        ]);
+        const fresh = due.filter((banner) => !known.has(banner.key));
+        return fresh.length === 0 ? current : { ...current, open: [...current.open, ...fresh] };
+      });
+    };
+    openDue();
+    const timer = setInterval(openDue, RECHECK_MS);
     return () => clearInterval(timer);
-  }, [enabled]);
-
-  const due = useMemo(
-    () =>
-      enabled
-        ? dueCacheExpiryBanners({
-            threads,
-            nowMs,
-            minTokens,
-            driverOf: (thread) =>
-              serverConfigs
-                .get(thread.environmentId)
-                ?.providers.find((provider) => provider.instanceId === thread.providerInstanceId)
-                ?.driver,
-          })
-        : [],
-    [enabled, threads, nowMs, minTokens, serverConfigs],
-  );
-
-  // A due banner opens once; after that only its X (here or in another tab) closes it.
-  useEffect(() => {
-    if (due.length === 0) return;
-    setStore((current) => {
-      const known = new Set([
-        ...current.open.map((banner) => banner.key),
-        ...current.dismissed.map((entry) => entry.key),
-      ]);
-      const fresh = due.filter((banner) => !known.has(banner.key));
-      return fresh.length === 0 ? current : { ...current, open: [...current.open, ...fresh] };
-    });
-  }, [due, setStore]);
+  }, [enabled, threads, minTokens, serverConfigs, setStore]);
 
   const dismiss = useCallback(
     (key: string) => {
