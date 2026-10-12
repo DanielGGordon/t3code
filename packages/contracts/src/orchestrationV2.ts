@@ -1918,6 +1918,12 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   ),
   /** Native goal on the active provider thread; omitted by servers without goals. */
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  /**
+   * Fork: context tokens of the active provider thread while no run is active
+   * (the prompt-cache expiry banner reads it). Null during a run, so token-usage
+   * updates mid-turn never re-push the shell; omitted by servers that predate it.
+   */
+  idleContextTokens: Schema.optional(Schema.NullOr(NonNegativeInt)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

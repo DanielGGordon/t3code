@@ -112,6 +112,17 @@ export const SidebarAutoSettleAfterDays = Schema.Number.check(
 );
 export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
 const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
+// Fork: the prompt-cache expiry banner (apps/web/src/components/CacheExpiryBanners.tsx)
+// fires only for conversations at least this large.
+export const MIN_CACHE_EXPIRY_BANNER_TOKENS = 10_000;
+export const MAX_CACHE_EXPIRY_BANNER_TOKENS = 2_000_000;
+export const CacheExpiryBannerMinTokens = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_CACHE_EXPIRY_BANNER_TOKENS,
+    maximum: MAX_CACHE_EXPIRY_BANNER_TOKENS,
+  }),
+);
+export const DEFAULT_CACHE_EXPIRY_BANNER_MIN_TOKENS = 100_000;
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
 export const GlassOpacity = Schema.Int.check(
@@ -323,6 +334,11 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
   inAppNotificationsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Fork: banner before a big idle conversation's prompt cache expires. Per device.
+  cacheExpiryBannerEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  cacheExpiryBannerMinTokens: CacheExpiryBannerMinTokens.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CACHE_EXPIRY_BANNER_MIN_TOKENS)),
+  ),
   diffColorScheme: DiffColorScheme.pipe(
     Schema.withDecodingDefault(Effect.succeed("red-green" as const)),
   ),
@@ -1823,6 +1839,8 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 export const ClientSettingsPatch = Schema.Struct({
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
+  cacheExpiryBannerEnabled: Schema.optionalKey(Schema.Boolean),
+  cacheExpiryBannerMinTokens: Schema.optionalKey(CacheExpiryBannerMinTokens),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),
   loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),

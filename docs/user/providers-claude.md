@@ -53,6 +53,16 @@ You can also send `/compact` in an existing conversation. Web and desktop offer
 a large older thread. See [commands and skills](./composer.md#commands-and-skills)
 for using composer commands.
 
+## Prompt cache reminders
+
+Claude keeps a conversation's prompt cache for an hour after its last turn. After
+that, the next message re-reads the whole context without the cache, which is slower
+and uses more of your limits. When an idle Claude conversation with at least 100k
+tokens of context is 10 minutes from losing its cache, T3 Code shows a banner with a
+link to it. The banner stays until you close it. Settled, snoozed and archived
+conversations are skipped. Turn the banners off or change the size in **Settings →
+Behavior**; both apply to the device you set them on.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which

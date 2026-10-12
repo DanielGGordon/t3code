@@ -354,6 +354,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "cache-expiry-banners",
+    title: "Cache expiry banners",
+    to: "/settings/general",
+    searchTerms: ["prompt cache expire context tokens idle conversation banner reminder claude"],
+  },
+  {
+    id: "cache-expiry-banner-min-tokens",
+    title: "Cache expiry banner size",
+    to: "/settings/general",
+    searchTerms: ["prompt cache context tokens threshold minimum banner"],
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/general",
