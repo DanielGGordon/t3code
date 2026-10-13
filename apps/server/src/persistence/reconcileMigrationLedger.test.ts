@@ -105,6 +105,9 @@ describe("reconcileMigrationLedger", () => {
         [57, "RemoveRedundantProjectionIndexes"],
         [58, "ScheduledTaskWebhooks"],
         [59, "WebhookRelayDeliveries"],
+        [60, "McpAppModelContext"],
+        [61, "ThreadSnapshotWindowIndexes"],
+        [62, "PullRequestReviewGuides"],
       ]);
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
 
@@ -161,7 +164,7 @@ describe("reconcileMigrationLedger", () => {
       assert.deepStrictEqual(executed[0], [33, "ProjectionThreadRestartRequest"]);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [33, 56, 57, 58, 59],
+        [33, 56, 57, 58, 59, 60, 61, 62],
       );
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
       const threadColumns = yield* columnsOf("projection_threads");
@@ -189,7 +192,7 @@ describe("reconcileMigrationLedger", () => {
   );
 
   it.effect.each([
-    ["beyond this build", 60, "SomeFutureMigration"],
+    ["beyond this build", 63, "SomeFutureMigration"],
     ["alongside a ledger that needs renumbering", 55, "SomeForeignMigration"],
   ] as const)("refuses an unknown migration %s without writing", ([, id, name]) =>
     Effect.gen(function* () {

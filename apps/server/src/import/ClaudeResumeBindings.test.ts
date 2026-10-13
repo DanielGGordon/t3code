@@ -18,7 +18,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
-import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
+import { deriveProviderThread } from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { providerThreadHasImportedNativeHistory } from "../orchestration-v2/ProviderTurnStartService.ts";
 import { formatAuditReport } from "../cli/session.ts";

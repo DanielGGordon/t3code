@@ -21,7 +21,8 @@ import * as Layer from "effect/Layer";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 import * as UsageService from "./UsageService.ts";
 import { priceUsage, type RateTable } from "./usagePricing.ts";
-import { codexSpeed, type UsageSpeed } from "./usageTranscripts.ts";
+import type { UsageSpeed } from "@t3tools/provider-core/server/usage";
+import { codexSpeed } from "../provider/Drivers/codexUsage.ts";
 
 export interface TurnCostEstimate {
   /** Undefined when nothing could be priced. */

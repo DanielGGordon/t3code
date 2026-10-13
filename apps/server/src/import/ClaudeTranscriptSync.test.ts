@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EventSink from "../orchestration-v2/EventSink.ts";
-import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
+import { deriveProviderThread } from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { providerThreadHasImportedNativeHistory } from "../orchestration-v2/ProviderTurnStartService.ts";
 import {

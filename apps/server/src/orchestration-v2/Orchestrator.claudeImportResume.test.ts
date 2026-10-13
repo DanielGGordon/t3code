@@ -36,19 +36,19 @@ import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
-import * as IdAllocator from "./IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "./Orchestrator.ts";
 import {
   ProviderAdapterProtocolError,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2SessionRuntime,
-  type ProviderAdapterV2Shape,
-} from "./ProviderAdapter.ts";
+  type ProviderAdapterV2,
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { CLAUDE_MODEL_SELECTION } from "./testkit/fixtures/shared.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
-import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
+import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const IMPORTED_SESSION_ID = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
@@ -63,7 +63,7 @@ interface CapturedTurn {
 function makeCapturingClaudeAdapter(input: {
   readonly modelSelection: ModelSelection;
   readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
-}): ProviderAdapterV2Shape {
+}): ProviderAdapterV2["Service"] {
   const unimplemented = (detail: string) =>
     Effect.fail(new ProviderAdapterProtocolError({ driver: CLAUDE_DRIVER, detail }));
   return {

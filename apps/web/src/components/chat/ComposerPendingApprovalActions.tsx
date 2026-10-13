@@ -14,6 +14,7 @@ interface ComposerPendingApprovalActionsProps {
   requestId: RuntimeRequestId;
   isResponding: boolean;
   canRespond: boolean;
+  disabled?: boolean;
   options?: ReadonlyArray<ProviderApprovalOption> | undefined;
   /**
    * Touch layout: a big approve on the driver's (left) side and decline far
@@ -38,6 +39,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   requestId,
   isResponding,
   canRespond,
+  disabled = false,
   options = DEFAULT_APPROVAL_OPTIONS,
   touchLayout = false,
   onRespondToApproval,
@@ -69,9 +71,13 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
             key={option.decision}
             size="xs"
             variant={option.decision === "accept" ? "default" : "outline"}
-            disabled={isResponding || !canRespond}
+            disabled={disabled || isResponding || !canRespond}
             aria-description={option.warning}
-            onClick={() => void onRespondToApproval(requestId, option.decision)}
+            onClick={() => {
+              if (!disabled && !isResponding) {
+                void onRespondToApproval(requestId, option.decision);
+              }
+            }}
           >
             {option.warning ? <TriangleAlertIcon className="size-3 shrink-0" /> : null}
             <span className="max-w-40 truncate">{option.label}</span>
@@ -89,7 +95,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       {moreOptions.length > 0 ? (
         <Menu>
           <MenuTrigger
-            disabled={isResponding}
+            disabled={disabled || isResponding}
             render={<Button size="icon-xs" variant="outline" aria-label="More approval options" />}
           >
             <EllipsisIcon />
@@ -99,9 +105,12 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
               const item = (
                 <MenuItem
                   key={option.decision}
-                  disabled={isResponding}
+                  disabled={disabled || isResponding}
                   aria-description={option.warning}
-                  onClick={() => void onRespondToApproval(requestId, option.decision)}
+                  onClick={() => {
+                    if (!disabled && !isResponding)
+                      void onRespondToApproval(requestId, option.decision);
+                  }}
                   variant="ghost"
                   className="mb-1 last:mb-0"
                 >

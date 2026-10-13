@@ -29,19 +29,19 @@ import * as Stream from "effect/Stream";
 import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
-import * as IdAllocator from "./IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "./Orchestrator.ts";
 import {
   ProviderAdapterProtocolError,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2SessionRuntime,
-  type ProviderAdapterV2Shape,
-} from "./ProviderAdapter.ts";
+  type ProviderAdapterV2,
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import { providerThreadHasImportedNativeHistory } from "./ProviderTurnStartService.ts";
 import { CLAUDE_MODEL_SELECTION } from "./testkit/fixtures/shared.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
-import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
+import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const IMPORTED_SESSION_ID = "9b0c7d52-5a35-4f1e-9a0c-3f7f1f0c2a11";
@@ -55,7 +55,7 @@ interface CapturedTurn {
 function makeCapturingClaudeAdapter(input: {
   readonly modelSelection: ModelSelection;
   readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
-}): ProviderAdapterV2Shape {
+}): ProviderAdapterV2["Service"] {
   const unimplemented = (detail: string) =>
     Effect.fail(new ProviderAdapterProtocolError({ driver: CLAUDE_DRIVER, detail }));
   return {
