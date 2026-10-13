@@ -54,7 +54,7 @@ export function TouchSnoozePicker<TRef>(props: {
                   onClose();
                   onPick(target.threadRef, preset);
                 }}
-                className="flex min-h-18 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent active:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-h-18 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent active:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
                 <span className="text-base font-medium text-foreground">{preset.label}</span>
                 <span className="text-sm text-muted-foreground tabular-nums">

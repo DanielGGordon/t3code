@@ -1687,7 +1687,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               showsHorizontalScrollIndicator={false}
               onItemSizeChanged={handleItemSizeChanged}
               className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none] touch:overscroll-contain",
+                "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none] touch:overscroll-contain",
                 topFadeEnabled && "topbar-scroll-fade",
               )}
               ListHeaderComponent={listHeader}

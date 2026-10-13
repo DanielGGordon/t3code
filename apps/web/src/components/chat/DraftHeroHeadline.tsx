@@ -59,7 +59,7 @@ interface PickerItem {
  * dotted word inside the sentence.
  */
 const PILL_SELECTOR_CLASS =
-  "pointer-events-auto inline-flex min-h-12 max-w-80 cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:bg-muted data-popup-open:bg-muted touch:min-h-14 touch:px-6 drive:min-h-12 drive:px-4";
+  "pointer-events-auto inline-flex min-h-12 max-w-80 cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/50 px-5 align-middle text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:bg-muted data-popup-open:bg-muted touch:min-h-14 touch:px-6 drive:min-h-12 drive:px-4";
 
 // Finger-sized rows for the project menu in the touch layout.
 const TOUCH_MENU_ITEM_CLASS = "touch:min-h-12";

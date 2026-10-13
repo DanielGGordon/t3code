@@ -18,7 +18,7 @@ function composerTouchButtonClassName(
   className?: string,
 ) {
   return cn(
-    "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-full border font-medium text-lg outline-none transition-[scale,background-color] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background active:scale-[0.97] disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-6",
+    "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-full border font-medium text-lg outline-none transition-[scale,background-color] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:scale-[0.97] disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-6",
     size === "large" ? "h-16 px-6" : size === "icon" ? "size-14" : "h-14 px-5",
     tone === "primary" &&
       "border-message-action bg-message-action text-message-action-foreground shadow-xs shadow-message-action/24 hover:bg-message-action-hover",
