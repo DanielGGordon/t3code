@@ -379,6 +379,34 @@ export const OrchestrationV2ThreadRestartRequestJson =
     requestedAt: Schema.DateTimeUtcFromString,
   }));
 
+/**
+ * Fork: the thread's prompt-cache keep-alive toggle, present while it is on.
+ * The server pings an idle Claude thread shortly before its one-hour prompt
+ * cache lapses (`@t3tools/shared/cacheKeepAlive`). UI state, not activity.
+ */
+export const OrchestrationV2ThreadCacheKeepAlive = Schema.Struct({
+  enabledAt: Schema.DateTimeUtc,
+  /** Pings sent since the user last wrote to the thread. */
+  nudgeCount: NonNegativeInt,
+  /** Set when nudgeCount reaches the cap; a user message or re-enabling resumes. */
+  pausedAt: Schema.NullOr(Schema.DateTimeUtc),
+  /** Run the latest ping started, so clients can keep its completion quiet. */
+  lastNudgeRunId: Schema.NullOr(RunId),
+  /**
+   * The user had read the thread when the latest ping went out, so its reply
+   * is not news and clients do not mark the thread unread for it.
+   */
+  lastNudgeAfterRead: Schema.Boolean,
+});
+export type OrchestrationV2ThreadCacheKeepAlive = typeof OrchestrationV2ThreadCacheKeepAlive.Type;
+
+export const OrchestrationV2ThreadCacheKeepAliveJson =
+  OrchestrationV2ThreadCacheKeepAlive.mapFields((fields) => ({
+    ...fields,
+    enabledAt: Schema.DateTimeUtcFromString,
+    pausedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  }));
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -427,6 +455,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   /** Fork: pending server-restart request; omitted by upstream servers. */
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequest)),
+  /** Fork: prompt-cache keep-alive toggle; null/absent when off. */
+  cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAlive)),
   // Fractional-index slot in the user-arranged pinned order. Optional so
   // payloads from pre-reorder servers still decode.
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1686,6 +1716,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.pinned",
       "thread.auto-settle-set",
       "thread.restart-request-updated",
+      "thread.cache-keep-alive-updated",
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
@@ -1859,6 +1890,52 @@ export const OrchestrationV2LatestVisibleMessageSummary = Schema.Struct({
 export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
+/**
+ * Fork: what prompt-cache keep-alive judges a thread by. The server computes it
+ * while keep-alive is on (null otherwise), so the sweep, the orchestrator's
+ * guard and the clients all read one answer (`@t3tools/shared/cacheKeepAlive`).
+ */
+export const OrchestrationV2ThreadCacheKeepAliveContext = Schema.Struct({
+  /**
+   * Driver of the provider thread holding the conversation; null when there is
+   * none or the next turn would run on a different provider instance.
+   */
+  driver: Schema.NullOr(ProviderDriverKind),
+  /** The most recently executed run; never one cancelled before it started. */
+  run: Schema.NullOr(
+    Schema.Struct({
+      id: RunId,
+      status: OrchestrationV2RunStatus,
+      completedAt: Schema.NullOr(Schema.DateTimeUtc),
+      /**
+       * When the latest model-produced item on the run's root node began
+       * (`CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES`; for Claude in practice its last
+       * root reasoning item, since assistant and most tool items sit on child
+       * nodes): about when its last provider request went out, which is what
+       * the cache counts from. Null when the root node has none.
+       */
+      lastProviderActivityAt: Schema.NullOr(Schema.DateTimeUtc),
+    }),
+  ),
+  /** A queued (possibly held) message is waiting; a ping never jumps it. */
+  hasQueuedRun: Schema.Boolean,
+});
+export type OrchestrationV2ThreadCacheKeepAliveContext =
+  typeof OrchestrationV2ThreadCacheKeepAliveContext.Type;
+
+export const OrchestrationV2ThreadCacheKeepAliveContextJson =
+  OrchestrationV2ThreadCacheKeepAliveContext.mapFields((fields) => ({
+    ...fields,
+    run: Schema.NullOr(
+      Schema.Struct({
+        id: RunId,
+        status: OrchestrationV2RunStatus,
+        completedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+        lastProviderActivityAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+      }),
+    ),
+  }));
+
 export const OrchestrationV2ThreadShell = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -1940,6 +2017,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   /** Fork: pending server-restart request; omitted by upstream servers. */
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequest)),
+  /** Fork: prompt-cache keep-alive toggle; null when off, omitted by upstream servers. */
+  cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAlive)),
+  /** Fork: what keep-alive judges the thread by; null while keep-alive is off. */
+  cacheKeepAliveContext: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveContext)),
   /** Slot in the user-arranged pinned order; omitted by pre-reorder servers. */
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Slot in the user-arranged active order; omitted by pre-reorder servers. */
@@ -2036,6 +2117,7 @@ export const OrchestrationV2AppThreadJson = OrchestrationV2AppThread.mapFields((
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequestJson)),
+  cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveJson)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtcFromString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2462,6 +2544,10 @@ export const OrchestrationV2ThreadShellJson = OrchestrationV2ThreadShell.mapFiel
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequestJson)),
+  cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveJson)),
+  cacheKeepAliveContext: Schema.optional(
+    Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveContextJson),
+  ),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   titleRegeneration: Schema.optional(
     Schema.NullOr(
@@ -2516,6 +2602,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.pinned",
       "thread.auto-settle-set",
       "thread.restart-request-updated",
+      "thread.cache-keep-alive-updated",
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
@@ -2739,6 +2826,16 @@ export const OrchestrationV2Command = Schema.Union([
     source: Schema.Literals(["auto", "manual"]),
     reason: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   }),
+  /**
+   * Fork: turn the prompt-cache keep-alive on or off. Turning it on while it
+   * is paused resumes it with a fresh ping budget.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.cache-keep-alive.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    enabled: Schema.Boolean,
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.pin"),
     commandId: CommandId,
@@ -2903,6 +3000,11 @@ export const OrchestrationV2Command = Schema.Union([
     usageLimitContinuationOfRunId: Schema.optional(RunId),
     manualContinuationOfRunId: Schema.optional(RunId),
     usageLimitRecoveryRequestId: Schema.optional(CommandId),
+    /**
+     * Fork: a server keep-alive ping for the prompt cache of this completed
+     * run. Rejected unless the thread is still idle and eligible.
+     */
+    cacheKeepAliveOfRunId: Schema.optional(RunId),
     /** Resolve untargeted delivery against the server's serialized thread state. */
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(

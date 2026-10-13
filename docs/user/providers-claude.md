@@ -63,6 +63,23 @@ link to it. The banner stays until you close it. Settled, snoozed and archived
 conversations are skipped. Turn the banners off or change the size in **Settings →
 Behavior**; both apply to the device you set them on.
 
+### Keep cache warm
+
+To keep a conversation's cache from lapsing at all, turn on **Keep cache warm** in the
+chat header. About five minutes before the cache would expire, the server sends the
+thread a short ping asking Claude to reply "ok", which starts a fresh hour. The early
+start leaves room for Claude Code to restart after a long idle. It works
+with every browser closed, and the setting is saved with the thread. Hover the button
+to see when the next ping is due. Agents can turn it on or off with the
+`t3_thread_organize` tool.
+
+Pings never interrupt a turn or a question waiting on you, and settled, snoozed and
+archived threads are skipped. If the cache has already expired, pinging waits for
+your next message, since rebuilding the cache costs the same either way. After 8
+pings in a row with no message from you (about 8 hours), keep-warm pauses; your next
+message, or clicking the button again, resumes it. Each ping is a small turn: it
+reads the whole context from the cache, so it uses some of your limits.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which

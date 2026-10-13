@@ -493,6 +493,21 @@ export const setRestartRequest = Effect.fn("EnvironmentCommands.setRestartReques
   });
 });
 
+/** Fork: turn a thread's prompt-cache keep-alive on (or resume it) or off. */
+export interface SetCacheKeepAliveInput extends ThreadCommandInput {
+  readonly enabled: boolean;
+}
+export const setCacheKeepAlive = Effect.fn("EnvironmentCommands.setCacheKeepAlive")(function* (
+  input: SetCacheKeepAliveInput,
+) {
+  return yield* dispatch({
+    type: "thread.cache-keep-alive.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    enabled: input.enabled,
+  });
+});
+
 export const reorderPinnedThread = Effect.fn("EnvironmentCommands.reorderPinnedThread")(function* (
   input: ReorderPinnedThreadInput,
 ) {

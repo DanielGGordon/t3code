@@ -217,6 +217,7 @@ export const layer: Layer.Layer<
       "thread.pinned",
       "thread.auto-settle-set",
       "thread.restart-request-updated",
+      "thread.cache-keep-alive-updated",
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
