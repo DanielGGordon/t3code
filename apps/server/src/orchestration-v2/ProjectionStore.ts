@@ -1,4 +1,5 @@
 import {
+  latestExecutedRun,
   latestRootProviderFailure,
   latestUnheldRun,
   threadErrorSummary,
@@ -21,6 +22,7 @@ import type {
   OrchestrationV2ThreadShellSnapshot,
   OrchestrationV2ShellThreadStatus,
   OrchestrationV2ThreadShell,
+  OrchestrationV2ThreadCacheKeepAliveContext,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
   ProviderInstanceId,
@@ -46,6 +48,7 @@ import {
   OrchestrationV2RunJson as OrchestrationV2RunJsonSchema,
   OrchestrationV2RuntimeRequestJson as OrchestrationV2RuntimeRequestJsonSchema,
   OrchestrationV2SubagentJson as OrchestrationV2SubagentJsonSchema,
+  OrchestrationV2ThreadCacheKeepAliveContextJson,
   OrchestrationV2TurnItemJson as OrchestrationV2TurnItemJsonSchema,
   orchestrationV2RunWorkStartedAt,
   RunId,
@@ -61,7 +64,10 @@ import {
   isOrchestrationV2TurnItemVisible,
 } from "@t3tools/shared/orchestrationV2Timeline";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { CACHE_KEEP_ALIVE_LEAD_MS, PROMPT_CACHE_TTL_MS } from "@t3tools/shared/cacheKeepAlive";
+import {
+  CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX,
+  isCacheKeepAliveMessageId,
+} from "@t3tools/shared/cacheKeepAlive";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -154,16 +160,6 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "limitRecovery"
   | "snoozedUntil"
 >;
-
-/**
- * Fork: a thread with prompt-cache keep-alive on, and the driver of the provider
- * thread that holds its conversation (null when the next turn would run on a
- * different provider instance).
- */
-export interface ProjectionCacheKeepAliveCandidate {
-  readonly threadId: ThreadId;
-  readonly driver: string | null;
-}
 
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
@@ -359,12 +355,14 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
   /**
-   * Fork: keep-alive threads that look due for a ping. A cheap pre-filter; the
-   * caller judges each one with its full shell (`cacheKeepAliveState`).
+   * Fork: idle threads with keep-alive on and not paused. A cheap pre-filter
+   * (few threads have it on); the caller judges each one by its shell's
+   * `cacheKeepAliveContext` with `cacheKeepAliveState`.
    */
-  readonly getCacheKeepAliveCandidates: (options: {
-    readonly now: DateTime.Utc;
-  }) => Effect.Effect<ReadonlyArray<ProjectionCacheKeepAliveCandidate>, ProjectionStoreV2Error>;
+  readonly getCacheKeepAliveCandidates: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionStoreV2Error
+  >;
   readonly getLimitRecoveryCandidates: (options: {
     readonly now: DateTime.Utc;
     readonly autoResume: boolean;
@@ -947,6 +945,7 @@ type ShellThreadRow = {
   readonly has_actionable_proposed_plan: number;
   readonly item_count: number;
   readonly runless_item_count: number;
+  readonly cache_keep_alive_context_json: string | null;
 };
 
 type ShellRunRow = {
@@ -1028,6 +1027,9 @@ const encodeContextTransferPayload = Schema.encodeEffect(
 
 const decodeThreadPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJsonSchema),
+);
+const decodeCacheKeepAliveContext = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationV2ThreadCacheKeepAliveContextJson),
 );
 const decodeRunPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2RunJsonSchema),
@@ -1499,6 +1501,8 @@ export function threadShellFromProjection(
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
     restartRequest: projection.thread.restartRequest ?? null,
     cacheKeepAlive: projection.thread.cacheKeepAlive ?? null,
+    cacheKeepAliveContext:
+      projection.thread.cacheKeepAlive == null ? null : cacheKeepAliveContextForShell(projection),
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -1539,6 +1543,61 @@ function activeProviderGoalForShell(
   activeProviderThreadId: OrchestrationV2ThreadProjection["thread"]["activeProviderThreadId"],
 ): OrchestrationV2ThreadShell["goal"] {
   return providerThreads.find((thread) => thread.id === activeProviderThreadId)?.goal ?? null;
+}
+
+// Turn items that are not provider output: they do not mark a provider request.
+const NON_PROVIDER_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "user_message",
+  "notification",
+  "error",
+]);
+
+/**
+ * Fork: keep-alive's view of a thread. Mirrors the SQL in
+ * `selectShellThreadRows` (cache_keep_alive_context_json); keep them in step.
+ */
+function cacheKeepAliveContextForShell(
+  projection: OrchestrationV2ThreadProjection,
+): OrchestrationV2ThreadCacheKeepAliveContext {
+  const { thread } = projection;
+  const active = projection.providerThreads.find(
+    (candidate) => candidate.id === thread.activeProviderThreadId,
+  );
+  const run = latestExecutedRun(projection.runs);
+  let lastProviderActivityAt: DateTime.Utc | null = null;
+  for (const item of projection.turnItems) {
+    if (
+      run === null ||
+      item.runId !== run.id ||
+      item.nodeId !== run.rootNodeId ||
+      item.startedAt === null ||
+      NON_PROVIDER_ITEM_TYPES.has(item.type)
+    ) {
+      continue;
+    }
+    if (
+      lastProviderActivityAt === null ||
+      DateTime.toEpochMillis(item.startedAt) > DateTime.toEpochMillis(lastProviderActivityAt)
+    ) {
+      lastProviderActivityAt = item.startedAt;
+    }
+  }
+  return {
+    driver:
+      active !== undefined && active.providerInstanceId === thread.providerInstanceId
+        ? active.driver
+        : null,
+    run:
+      run === null
+        ? null
+        : {
+            id: run.id,
+            status: run.status,
+            completedAt: run.completedAt,
+            lastProviderActivityAt,
+          },
+    hasQueuedRun: projection.runs.some((candidate) => candidate.status === "queued"),
+  };
 }
 
 /** Context size of the provider thread that currently owns the conversation. */
@@ -1587,6 +1646,7 @@ type ShellThreadState = {
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
   readonly activeContextTokens: number | null;
+  readonly cacheKeepAliveContext: OrchestrationV2ThreadCacheKeepAliveContext | null;
   readonly itemCount: number;
   readonly runlessItemCount: number;
   readonly updatedAt: OrchestrationV2ThreadProjection["updatedAt"];
@@ -1769,6 +1829,7 @@ function shellFromState(input: {
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
     restartRequest: input.state.thread.restartRequest ?? null,
     cacheKeepAlive: input.state.thread.cacheKeepAlive ?? null,
+    cacheKeepAliveContext: input.state.cacheKeepAliveContext,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     lastVisitedAt: input.state.thread.lastVisitedAt,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -3410,23 +3471,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       );
 
     const getCacheKeepAliveCandidates = Effect.fn("ProjectionStore.getCacheKeepAliveCandidates")(
-      function* (options: Parameters<ProjectionStoreV2Shape["getCacheKeepAliveCandidates"]>[0]) {
-        // Enabled, unpaused, idle threads whose last run ended inside the ping
-        // window (between the cache's expiry and the ping lead before it).
-        const windowStart = DateTime.formatIso(
-          DateTime.subtract(options.now, { milliseconds: PROMPT_CACHE_TTL_MS }),
-        );
-        const windowEnd = DateTime.formatIso(
-          DateTime.subtract(options.now, {
-            milliseconds: PROMPT_CACHE_TTL_MS - CACHE_KEEP_ALIVE_LEAD_MS,
-          }),
-        );
-        const rows = yield* sql<{ readonly thread_id: string; readonly driver: string | null }>`
-          SELECT t.thread_id, pt.driver
+      function* () {
+        const rows = yield* sql<{ readonly thread_id: string }>`
+          SELECT t.thread_id
           FROM orchestration_v2_projection_threads t
-          LEFT JOIN orchestration_v2_projection_provider_threads pt
-            ON pt.provider_thread_id = t.active_provider_thread_id
-            AND pt.provider_instance_id = t.provider_instance_id
           WHERE t.deleted_at IS NULL
             AND t.archived_at IS NULL
             AND json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
@@ -3436,14 +3484,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE active.thread_id = t.thread_id
                 AND active.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
             )
-            AND (
-              SELECT MAX(julianday(finished.completed_at))
-              FROM orchestration_v2_projection_runs finished
-              WHERE finished.thread_id = t.thread_id
-            ) BETWEEN julianday(${windowStart}) AND julianday(${windowEnd})
           ORDER BY t.thread_id
         `;
-        return rows.map((row) => ({ threadId: ThreadId.make(row.thread_id), driver: row.driver }));
+        return rows.map((row) => ThreadId.make(row.thread_id));
       },
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
@@ -3498,6 +3541,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
             AND json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
+            -- Fork: a failed keep-alive ping is not work to resume.
+            AND substr(json_extract(r.payload_json, '$.userMessageId'), 1, ${CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX.length})
+              <> ${CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX}
             AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt')))
             AND (
               (
@@ -5123,6 +5169,50 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
               ) AS has_actionable_proposed_plan,
+              -- Fork: keep-alive's view of the thread, only while it is on.
+              -- Mirrors cacheKeepAliveContextForShell; keep them in step. The
+              -- run is latestExecutedRun: never queued or cancelled before it
+              -- started, unfinished first, then the one that ended last.
+              CASE
+                WHEN json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL THEN json_object(
+                  'driver', (
+                    SELECT pt.driver
+                    FROM orchestration_v2_projection_provider_threads pt
+                    WHERE pt.provider_thread_id = t.active_provider_thread_id
+                      AND pt.provider_instance_id = t.provider_instance_id
+                  ),
+                  'run', json((
+                    SELECT json_object(
+                      'id', kr.run_id,
+                      'status', kr.status,
+                      'completedAt', kr.completed_at,
+                      'lastProviderActivityAt', (
+                        SELECT MAX(json_extract(ki.payload_json, '$.startedAt'))
+                        FROM orchestration_v2_projection_turn_items ki
+                        WHERE ki.thread_id = t.thread_id
+                          AND ki.run_id = kr.run_id
+                          AND ki.node_id IS json_extract(kr.payload_json, '$.rootNodeId')
+                          AND ki.type NOT IN ('user_message', 'notification', 'error')
+                      )
+                    )
+                    FROM orchestration_v2_projection_runs kr
+                    WHERE kr.thread_id = t.thread_id
+                      AND kr.status <> 'queued'
+                      AND NOT (
+                        kr.status = 'cancelled'
+                        AND json_extract(kr.payload_json, '$.startedAt') IS NULL
+                      )
+                    ORDER BY kr.completed_at IS NULL DESC, kr.completed_at DESC,
+                      kr.ordinal DESC, kr.run_id DESC
+                    LIMIT 1
+                  )),
+                  'hasQueuedRun', json(CASE WHEN EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs kq
+                    WHERE kq.thread_id = t.thread_id AND kq.status = 'queued'
+                  ) THEN 'true' ELSE 'false' END)
+                )
+                ELSE NULL
+              END AS cache_keep_alive_context_json,
               -- Count per run on the covering (thread_id, run_id) index, then
               -- look up each run once, instead of one run lookup per item.
               (
@@ -5585,6 +5675,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),
+          cacheKeepAliveContext:
+            row.cache_keep_alive_context_json === null
+              ? null
+              : yield* decodeCacheKeepAliveContext(row.cache_keep_alive_context_json),
           itemCount: row.item_count,
           runlessItemCount: row.runless_item_count,
           updatedAt: thread.updatedAt,
@@ -5937,25 +6031,17 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           Effect.map((state) =>
             [...state.projections.values()]
               .filter(
-                ({ thread }) =>
+                ({ thread, runs }) =>
                   thread.deletedAt === null &&
                   thread.archivedAt === null &&
                   thread.cacheKeepAlive != null &&
-                  thread.cacheKeepAlive.pausedAt === null,
+                  thread.cacheKeepAlive.pausedAt === null &&
+                  !runs.some((run) =>
+                    ["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
+                  ),
               )
-              .map(({ thread, providerThreads }) => {
-                const active = providerThreads.find(
-                  (candidate) => candidate.id === thread.activeProviderThreadId,
-                );
-                return {
-                  threadId: thread.id,
-                  driver:
-                    active !== undefined && active.providerInstanceId === thread.providerInstanceId
-                      ? active.driver
-                      : null,
-                };
-              })
-              .toSorted((left, right) => left.threadId.localeCompare(right.threadId)),
+              .map(({ thread }) => thread.id)
+              .toSorted((left, right) => left.localeCompare(right)),
           ),
         ),
       getLimitRecoveryCandidates: (options) =>
@@ -5963,10 +6049,12 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           Effect.map((state) =>
             [...state.projections.values()]
               .filter(
-                ({ thread }) =>
+                ({ thread, runs }) =>
                   thread.deletedAt === null &&
                   thread.archivedAt === null &&
-                  thread.settledOverride !== "settled",
+                  thread.settledOverride !== "settled" &&
+                  // Fork: a failed keep-alive ping is not work to resume.
+                  !isCacheKeepAliveMessageId(latestExecutedRun(runs)?.userMessageId),
               )
               .map(threadShellFromProjection)
               .filter(

@@ -27,7 +27,7 @@ function describe(state: CacheKeepAliveState, formatTime: (ms: number) => string
     case "paused":
       return `Keep cache warm is paused after ${state.nudgeCount} pings with no message from you. Send a message or click to resume.`;
     case "unsupported":
-      return "Keep cache warm is on, but this thread is not on Claude, so there is no hour-long cache to keep. Click to turn off.";
+      return "Keep cache warm is on, but no Claude session on this thread's current provider holds the conversation (for example after switching provider or account), so there is no cache to keep yet. Click to turn off.";
     case "parked":
       return "Keep cache warm is on, but this thread is archived, settled or snoozed, so it is not pinged. Click to turn off.";
     case "busy":
@@ -43,7 +43,6 @@ function describe(state: CacheKeepAliveState, formatTime: (ms: number) => string
 
 function CacheKeepAliveTooltipText(props: {
   readonly thread: CacheKeepAliveThread;
-  readonly driver: string | undefined;
   readonly nowMs: number;
 }) {
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
@@ -81,12 +80,19 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
     return null;
   }
   const thread = shell.source;
-  const driver = serverConfig.providers.find(
-    (provider) => provider.instanceId === thread.providerInstanceId,
-  )?.driver;
   const keepAlive = thread.cacheKeepAlive ?? null;
-  // Offered on Claude threads; shown elsewhere only while on, so it can be turned off.
-  if (keepAlive === null && !cacheKeepAliveSupportsDriver(driver)) return null;
+  // Offered while off on threads set to a Claude instance; while on it always
+  // shows, so it can be turned off. Where the thread stands comes from the
+  // server's cacheKeepAliveContext, the same answer the server pings by.
+  if (
+    keepAlive === null &&
+    !cacheKeepAliveSupportsDriver(
+      serverConfig.providers.find((provider) => provider.instanceId === thread.providerInstanceId)
+        ?.driver,
+    )
+  ) {
+    return null;
+  }
   const paused = keepAlive !== null && keepAlive.pausedAt !== null;
   const Icon = paused ? CirclePauseIcon : FlameIcon;
   return (
@@ -107,7 +113,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
         }
       />
       <TooltipPopup side="bottom" className="max-w-72 whitespace-normal">
-        <CacheKeepAliveTooltipText thread={thread} driver={driver} nowMs={openedAtMs} />
+        <CacheKeepAliveTooltipText thread={thread} nowMs={openedAtMs} />
       </TooltipPopup>
     </Tooltip>
   );

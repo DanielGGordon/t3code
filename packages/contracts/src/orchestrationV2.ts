@@ -1890,6 +1890,50 @@ export const OrchestrationV2LatestVisibleMessageSummary = Schema.Struct({
 export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
+/**
+ * Fork: what prompt-cache keep-alive judges a thread by. The server computes it
+ * while keep-alive is on (null otherwise), so the sweep, the orchestrator's
+ * guard and the clients all read one answer (`@t3tools/shared/cacheKeepAlive`).
+ */
+export const OrchestrationV2ThreadCacheKeepAliveContext = Schema.Struct({
+  /**
+   * Driver of the provider thread holding the conversation; null when there is
+   * none or the next turn would run on a different provider instance.
+   */
+  driver: Schema.NullOr(ProviderDriverKind),
+  /** The most recently executed run; never one cancelled before it started. */
+  run: Schema.NullOr(
+    Schema.Struct({
+      id: RunId,
+      status: OrchestrationV2RunStatus,
+      completedAt: Schema.NullOr(Schema.DateTimeUtc),
+      /**
+       * When the run's last provider item began (its root node's assistant,
+       * reasoning or tool items): about when its last provider request went
+       * out, which is what the cache counts from.
+       */
+      lastProviderActivityAt: Schema.NullOr(Schema.DateTimeUtc),
+    }),
+  ),
+  /** A queued (possibly held) message is waiting; a ping never jumps it. */
+  hasQueuedRun: Schema.Boolean,
+});
+export type OrchestrationV2ThreadCacheKeepAliveContext =
+  typeof OrchestrationV2ThreadCacheKeepAliveContext.Type;
+
+export const OrchestrationV2ThreadCacheKeepAliveContextJson =
+  OrchestrationV2ThreadCacheKeepAliveContext.mapFields((fields) => ({
+    ...fields,
+    run: Schema.NullOr(
+      Schema.Struct({
+        id: RunId,
+        status: OrchestrationV2RunStatus,
+        completedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+        lastProviderActivityAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+      }),
+    ),
+  }));
+
 export const OrchestrationV2ThreadShell = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -1973,6 +2017,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequest)),
   /** Fork: prompt-cache keep-alive toggle; null when off, omitted by upstream servers. */
   cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAlive)),
+  /** Fork: what keep-alive judges the thread by; null while keep-alive is off. */
+  cacheKeepAliveContext: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveContext)),
   /** Slot in the user-arranged pinned order; omitted by pre-reorder servers. */
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Slot in the user-arranged active order; omitted by pre-reorder servers. */
@@ -2497,6 +2543,9 @@ export const OrchestrationV2ThreadShellJson = OrchestrationV2ThreadShell.mapFiel
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   restartRequest: Schema.optional(Schema.NullOr(OrchestrationV2ThreadRestartRequestJson)),
   cacheKeepAlive: Schema.optional(Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveJson)),
+  cacheKeepAliveContext: Schema.optional(
+    Schema.NullOr(OrchestrationV2ThreadCacheKeepAliveContextJson),
+  ),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   titleRegeneration: Schema.optional(
     Schema.NullOr(

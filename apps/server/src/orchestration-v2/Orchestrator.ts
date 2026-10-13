@@ -376,6 +376,25 @@ export function isNativeMaintenanceCommand(message: {
   );
 }
 
+/** Answers to an asynchronous question are delivered as messages with this id prefix. */
+const ASYNC_ANSWER_MESSAGE_ID_PREFIX = "async-answer:";
+
+/**
+ * Fork: a message the user wrote, for keep-alive's ping budget. Clients' sends
+ * are stamped `user`; answers to a question the agent asked asynchronously are
+ * relayed by the server under `async-answer:` ids. Other server-sent turns
+ * (usage-limit recovery, scheduled work, the pings) and agents do not count.
+ */
+function isUserActivity(
+  command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+): boolean {
+  if (command.createdBy !== "user") return false;
+  return (
+    command.creationSource !== "server" ||
+    command.messageId.startsWith(ASYNC_ANSWER_MESSAGE_ID_PREFIX)
+  );
+}
+
 /** A native `/goal` command. It changes the provider's goal, so it never steers a running turn. */
 function isGoalCommand(message: {
   readonly text: string;
@@ -2923,7 +2942,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.mark-unread":
-          return { ...thread, lastVisitedAt: markUnreadVisitedAt };
+          return {
+            ...thread,
+            lastVisitedAt: markUnreadVisitedAt,
+            // Fork: an explicit "unread" beats a quiet keep-alive ping's reply.
+            ...(thread.cacheKeepAlive?.lastNudgeAfterRead
+              ? { cacheKeepAlive: { ...thread.cacheKeepAlive, lastNudgeAfterRead: false } }
+              : {}),
+          };
         case "thread.metadata.update": {
           const previousRecovery =
             thread.limitRecovery?.runId === command.limitRecovery?.runId &&
@@ -4521,28 +4547,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const isCacheKeepAlive = command.cacheKeepAliveOfRunId !== undefined;
       if (isCacheKeepAlive) {
         // Fork: a keep-alive ping only reaches a thread that is still idle on
-        // the finished run the sweep saw, judged by the same rule the sweep and
-        // the chat header use. Its command id is per run, so a rejection is
+        // the executed run the sweep saw. It is judged on the committed shell,
+        // whose cacheKeepAliveContext the sweep and the chat header read too
+        // (this command's projection omits provider items, so it cannot date
+        // the cache itself). The command id is per run, so a rejection is
         // final for that idle period.
-        const providerThread = projection.providerThreads.find(
-          (candidate) => candidate.id === projection.thread.activeProviderThreadId,
-        );
-        const state = cacheKeepAliveState({
-          thread: threadShellFromProjection(projection),
-          driver:
-            providerThread?.providerInstanceId === projection.thread.providerInstanceId
-              ? providerThread.driver
-              : undefined,
-          nowMs: DateTime.toEpochMillis(yield* DateTime.now),
-        });
+        const shell = yield* projectionStore
+          .getThreadShell(command.threadId)
+          .pipe(mapDispatchError(command));
+        const state =
+          shell === null
+            ? null
+            : cacheKeepAliveState({
+                thread: shell,
+                nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+              });
         if (
           command.createdBy !== "system" ||
           command.creationSource !== "server" ||
           command.dispatchMode.type !== "start_immediately" ||
-          state.kind !== "due" ||
-          state.runId !== command.cacheKeepAliveOfRunId ||
-          // The shell's latest run skips a held queue; a ping never jumps one.
-          projection.runs.some((run) => run.status === "queued")
+          state?.kind !== "due" ||
+          state.runId !== command.cacheKeepAliveOfRunId
         ) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
@@ -4708,18 +4733,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
       // Fork: the user writing again restarts the keep-alive ping budget, which
-      // also resumes keep-alive if the budget had run out. Server-sent turns
-      // (limit recovery, scheduled work) do not count as the user.
+      // also resumes keep-alive if the budget had run out. A message steered
+      // into a ping's run makes it real work, so it is no longer quiet.
       const keepAlive = projection.thread.cacheKeepAlive ?? null;
       if (
-        command.createdBy === "user" &&
-        command.creationSource !== "server" &&
+        isUserActivity(command) &&
         keepAlive !== null &&
-        (keepAlive.nudgeCount > 0 || keepAlive.pausedAt !== null)
+        (keepAlive.nudgeCount > 0 ||
+          keepAlive.pausedAt !== null ||
+          keepAlive.lastNudgeRunId !== null ||
+          keepAlive.lastNudgeAfterRead)
       ) {
         const thread: OrchestrationV2AppThread = {
           ...projection.thread,
-          cacheKeepAlive: { ...keepAlive, nudgeCount: 0, pausedAt: null },
+          cacheKeepAlive: {
+            ...keepAlive,
+            nudgeCount: 0,
+            pausedAt: null,
+            lastNudgeRunId: null,
+            lastNudgeAfterRead: false,
+          },
         };
         yield* emit(
           events,
@@ -7402,7 +7435,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             type: "message.dispatch",
             commandId: command.commandId,
             threadId: command.threadId,
-            messageId: MessageId.make(`async-answer:${command.requestId}`),
+            messageId: MessageId.make(`${ASYNC_ANSWER_MESSAGE_ID_PREFIX}${command.requestId}`),
             text: replies.join("\n\n"),
             attachments: [],
             createdBy: "user",
