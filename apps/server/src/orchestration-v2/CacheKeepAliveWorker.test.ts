@@ -25,6 +25,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -35,13 +36,14 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import * as CacheKeepAliveWorker from "./CacheKeepAliveWorker.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
@@ -55,7 +57,7 @@ const adapter = {
   getCapabilities: () => Effect.succeed(ClaudeProviderCapabilitiesV2),
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("No provider process needed for keep-alive tests"),
-} as ProviderAdapterV2Shape;
+} as ProviderAdapter.ProviderAdapterV2["Service"];
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerTest = Layer.mergeAll(
   layerDatabase,
@@ -851,7 +853,21 @@ it.effect("the real sweep pings a due thread through the projection and the orch
     const threadId = ThreadId.make("thread:keep-alive-end-to-end");
     yield* createIdleThread(threadId);
     const layerWorker = CacheKeepAliveWorker.layer.pipe(
-      Layer.provide(Layer.merge(ThreadManagementService.layer, Scheduler.layer)),
+      Layer.provide(
+        Layer.merge(
+          ThreadManagementService.layer.pipe(
+            // The dispatch chokepoint refuses provider work on an instance the
+            // settings leave off; the fixture instance is not a default one.
+            Layer.provide(
+              ServerSettings.layerTest({
+                providerInstances: { [instanceId]: { driver, enabled: true } },
+              }),
+            ),
+            Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+          ),
+          Scheduler.layer,
+        ),
+      ),
     );
     yield* Effect.gen(function* () {
       yield* TestClock.adjust("55 minutes");

@@ -23,7 +23,7 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
+import { deriveProviderThread } from "@t3tools/provider-core/server/IdAllocator";
 
 export const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 

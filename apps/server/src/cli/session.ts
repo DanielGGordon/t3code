@@ -16,7 +16,8 @@ import { Argument, Command, Flag } from "effect/cli";
 
 import { decodeSessionResetResponse, FORK_SESSION_RESET_ROUTE_PATH } from "../fork/http.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { projectLocationFlags } from "./config.ts";
 import { ForkCliError, postForkRoute, runLiveOrOffline, runOfflineRead } from "./forkLive.ts";
 
@@ -103,6 +104,7 @@ const sessionAuditCommand = Command.make("audit", {
     Effect.gen(function* () {
       const projectsRoot = expandHomePath(
         Option.isSome(flags.projectsDir) ? flags.projectsDir.value : "~/.claude/projects",
+        yield* HostProcess.HomeDirectory,
       );
       const rows = yield* runOfflineRead(flags, () =>
         ClaudeResumeBindings.auditClaudeResumeTargets({

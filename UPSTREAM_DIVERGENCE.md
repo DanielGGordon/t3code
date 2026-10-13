@@ -23,6 +23,56 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-10-13 — True merge of upstream through `98a6246d0` (2026-10-13)
+
+589 upstream commits since `ac8e9453c` (139 fork-only commits). 37 files conflicted (15
+server, 1 contracts, 21 web).
+
+### Migration numbering (offset extended)
+
+Upstream's new 059 `McpAppModelContext`, 060 `ThreadSnapshotWindowIndexes` and 061
+`PullRequestReviewGuides` run at fork ids **60, 61, 62** (file names keep upstream's numbers).
+`reconcileMigrationLedger` stays, with the full migration list as canonical. Upstream's
+`assertV2MigrationsCanRun` is adopted with `FIRST_V2_MIGRATION_ID = 56`. It runs after the
+reconcile. A forward run on a snapshot of the prod ledger (fork-numbered 1–59) ran exactly
+60–62; a second run was a no-op.
+
+`Migrations.test.ts` differs from upstream: it uses fork ids, and where upstream lets
+a database with a V2 id above the build's last id start, the fork test expects a refusal (see
+below).
+
+**Rollback caveat (first sync since the reconcile that adds migrations).** The reconcile
+refuses to start on any ledger row with an unknown name above the build's last id, because it
+can't tell a newer fork build from a foreign-numbered one. Upstream (`e24ea1d28`) lets such
+databases start, but the fork doesn't. So once this build has migrated prod to 60–62, the
+**previous prod build will refuse to start** ("migrated by a newer or foreign T3 Code build").
+To roll back: snapshot `statev2.sqlite` before the deploy and restore it, or (with the server
+stopped) delete ledger rows 60–62 from `effect_sql_migrations` before starting the older
+build. Those migrations only add columns, tables and indexes, so the older build ignores
+what they leave behind. Relaxing the reconcile to allow this is still an open decision.
+
+### Auth
+
+The fork's WebSocket-only same-origin check for cookie sessions (#65) is replaced by
+upstream's `isBrowserOriginAllowed` (`auth/EnvironmentAuth.ts`). That check also covers HTTP
+requests and compares the `Origin` host with `Host` / `X-Forwarded-Host` (or
+`Sec-Fetch-Site: same-origin`). The fork's `isSecureRequest` Secure-cookie helper
+(`auth/browserOrigin.ts`) is kept. The stock-quote RPC stays at `orchestration:read`, while
+its neighbours moved to upstream's new `diagnostics:read` scope.
+
+### Other resolutions
+
+- Usage: upstream deleted `usageTranscripts.ts`, so the fork's `codexSpeed` moved into
+  `codexUsage.ts`. The fork's pricing tables and rate refresh are kept.
+- Web: the `DraftHeroHeadline` project picker is now upstream's `Combobox`, with the fork's
+  touch pill applied on top. Upstream's operate-permission gating also covers the fork's touch
+  approval buttons and restart-request controls. `TouchCollapsibleBlock` became a thread-find
+  fold, so find can open it. Fork touch components were adjusted to pass upstream's new
+  `no-outset-state-indicators` lint rule (`ring-inset`). The fork's row-frame padding
+  replaces upstream's `messages-timeline-scroll` class.
+
+---
+
 ## 2026-10-06 — True merge of upstream through `ac8e9453c` (2026-10-05): orchestrator v2
 
 The big one: upstream's **new orchestrator** (`de3439142`, #2829 — "orchestration v2") plus
@@ -46,7 +96,7 @@ applying 36…59 exactly. Three `reconcileV2PreviewMigration` scenarios that see
 preview ledger numbering are skipped (that ledger can't exist on a fork DB); a test asserts
 the reconciler is a no-op on fork ledgers.
 
-**Prod ledger finding (2026-10-06).** Production's `effect_sql_migrations` was *not* at the
+**Prod ledger finding (2026-10-06).** Production's `effect_sql_migrations` was _not_ at the
 fork's 35: ids 1–35 are fork numbering, but 36–54 were recorded under **upstream** numbering
 (36 `ProjectionThreadsPinned` … 54 `ProjectionThreadsAutoSettleDisabledAt`) by an
 unidentified stock-numbered process, in two batches on 2026-09-10 and 2026-10-06 02:44 UTC.

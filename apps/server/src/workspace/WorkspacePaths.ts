@@ -14,7 +14,8 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { expandHomePathWith } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export class WorkspaceRootNotExistsError extends Schema.TaggedError<WorkspaceRootNotExistsError>()(
   "WorkspaceRootNotExistsError",
@@ -152,7 +153,9 @@ export const make = Effect.gen(function* () {
   const normalizeWorkspaceRoot: WorkspacePaths["Service"]["normalizeWorkspaceRoot"] = Effect.fn(
     "WorkspacePaths.normalizeWorkspaceRoot",
   )(function* (workspaceRoot, options) {
-    const normalizedWorkspaceRoot = path.resolve(expandHomePathWith(workspaceRoot.trim(), path));
+    const normalizedWorkspaceRoot = path.resolve(
+      expandHomePath(workspaceRoot.trim(), yield* HostProcess.HomeDirectory),
+    );
     let workspaceStat = yield* statWorkspaceRoot(
       workspaceRoot,
       normalizedWorkspaceRoot,
@@ -200,7 +203,9 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const workspaceRoot = path.resolve(expandHomePathWith(input.workspaceRoot.trim(), path));
+      const workspaceRoot = path.resolve(
+        expandHomePath(input.workspaceRoot.trim(), yield* HostProcess.HomeDirectory),
+      );
       const absolutePath = path.resolve(workspaceRoot, normalizedInputPath);
       const relativeToRoot = toPosixRelativePath(path.relative(workspaceRoot, absolutePath));
       if (

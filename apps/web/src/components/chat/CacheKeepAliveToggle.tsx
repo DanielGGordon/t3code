@@ -1,4 +1,8 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
@@ -12,8 +16,9 @@ import { memo, useCallback, useMemo, useState } from "react";
 
 import { useClientSettings } from "../../hooks/useSettings";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { formatShortTimestamp } from "../../timestampFormat";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -64,7 +69,8 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
     useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
   );
   const serverConfig = useServerConfigs().get(environmentId);
-  const setCacheKeepAlive = useAtomCommand(threadEnvironment.setCacheKeepAlive);
+  const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const setCacheKeepAlive = useOrchestrationCommand(threadEnvironment.setCacheKeepAlive);
   // The tooltip judges the thread against the clock read when it opens.
   const [openedAtMs, setOpenedAtMs] = useState(0);
   const handleOpenChange = useCallback((open: boolean) => {
@@ -104,6 +110,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             className="shrink-0 touch:size-12 touch:min-w-12"
             pressed={keepAlive !== null && !paused}
             onPressedChange={handlePressedChange}
+            disabled={!canOperateThread}
             aria-label={paused ? "Resume keeping the prompt cache warm" : "Keep cache warm"}
             variant="outline"
             size="xs"

@@ -57,8 +57,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
-import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -414,6 +415,7 @@ export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const config = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
+  const homeDirectory = yield* HostProcess.HomeDirectory;
   const path = yield* Path.Path;
   // A long-lived server re-sweeps every 15 minutes; skip re-parsing files whose
   // size+mtime did not change since an outcome that only a file change can alter.
@@ -886,7 +888,7 @@ export const make = Effect.gen(function* () {
   };
 
   const projectsRootFor = (options: ClaudeImportOptions) =>
-    expandHomePath(options.projectsDir?.trim() || DEFAULT_PROJECTS_DIR);
+    expandHomePath(options.projectsDir?.trim() || DEFAULT_PROJECTS_DIR, homeDirectory);
 
   const sync: ClaudeTranscriptSyncShape["sync"] = (options) =>
     sweepLock.withPermits(1)(
@@ -1015,7 +1017,7 @@ export const make = Effect.gen(function* () {
   ) {
     const trimmed = sessionArg.trim();
     if (trimmed.length === 0) return yield* fail("Session argument cannot be empty.");
-    const asPath = expandHomePath(trimmed);
+    const asPath = expandHomePath(trimmed, homeDirectory);
     if (yield* fs.exists(asPath).pipe(Effect.orElseSucceed(() => false))) return asPath;
     const projectsRoot = projectsRootFor(options);
     const projectDirs = yield* fs

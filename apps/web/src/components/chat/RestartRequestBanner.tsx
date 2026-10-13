@@ -1,4 +1,9 @@
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ProjectId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo, useCallback, useMemo, useState } from "react";
 import { RotateCcwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
@@ -6,7 +11,8 @@ import { RotateCcwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { useThreadShell, useThreadShellsForProjectRefs } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 const DISMISSAL_STORAGE_KEY = "t3:restart-banner-dismissals";
 
@@ -77,7 +83,8 @@ export const RestartRequestBanner = memo(function RestartRequestBanner({
     );
   }, [siblingThreadId]);
 
-  const setRestartRequest = useAtomCommand(threadEnvironment.setRestartRequest, {
+  const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const setRestartRequest = useOrchestrationCommand(threadEnvironment.setRestartRequest, {
     reportFailure: false,
   });
   const handleMarkResolved = useCallback(() => {
@@ -98,15 +105,17 @@ export const RestartRequestBanner = memo(function RestartRequestBanner({
             Other chats in this project are being warned to hold. Clear this once the restart is
             done.
           </AlertDescription>
-          <AlertAction>
-            <button
-              type="button"
-              className="inline-flex h-7 items-center rounded-md border border-warning/40 px-2 text-xs font-medium text-warning transition-colors hover:bg-warning/10"
-              onClick={handleMarkResolved}
-            >
-              Mark resolved
-            </button>
-          </AlertAction>
+          {canOperateThread && (
+            <AlertAction>
+              <button
+                type="button"
+                className="inline-flex h-7 items-center rounded-md border border-warning/40 px-2 text-xs font-medium text-warning transition-colors hover:bg-warning/10"
+                onClick={handleMarkResolved}
+              >
+                Mark resolved
+              </button>
+            </AlertAction>
+          )}
         </Alert>
       </div>
     );

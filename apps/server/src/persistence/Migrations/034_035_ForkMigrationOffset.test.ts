@@ -13,8 +13,9 @@ const freshDatabase = () => NodeSqliteClient.layer({ filename: ":memory:" });
  * This fork owns id 33 (`ProjectionThreadRestartRequest`); it has been recorded
  * in production's `effect_sql_migrations` since 2026-07-09. Every upstream
  * migration with id >= 33 therefore runs one id higher here: upstream's
- * settled/snoozed pair as 34/35 (2026-07 sync) and upstream 35..58 as 36..59
- * (2026-10 sync, incl. OrchestrationV2 at 56).
+ * settled/snoozed pair as 34/35 (2026-07 sync), upstream 35..58 as 36..59
+ * (2026-10-06 sync, incl. OrchestrationV2 at 56) and upstream 59..61 as 60..62
+ * (2026-10-13 sync).
  *
  * This matters because Effect's Migrator run loop is purely ordinal —
  * `if (currentId <= latestMigrationId) continue` — with no name or checksum
@@ -87,17 +88,17 @@ describe("034_035 fork migration offset", () => {
 
       const executed = yield* runMigrations();
       // Every upstream migration from upstream-35 (TitleRegeneration) on runs,
-      // none is skipped, and the ids are contiguous 36..59.
+      // none is skipped, and the ids are contiguous 36..62.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        Array.from({ length: 59 - 35 }, (_, index) => 36 + index),
+        Array.from({ length: 62 - 35 }, (_, index) => 36 + index),
       );
       assert.deepStrictEqual(executed[0], [36, "ProjectionThreadTitleRegeneration"]);
       assert.deepStrictEqual(
         executed.find(([, name]) => name === "OrchestrationV2"),
         [56, "OrchestrationV2"],
       );
-      assert.deepStrictEqual(executed.at(-1), [59, "WebhookRelayDeliveries"]);
+      assert.deepStrictEqual(executed.at(-1), [62, "PullRequestReviewGuides"]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       // The recorded ledger equals this build's manifest (no divergence warning).

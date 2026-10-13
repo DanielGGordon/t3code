@@ -1,7 +1,8 @@
 import { ChevronDownIcon } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { useTouchLayout } from "~/hooks/useTouchLayout";
 import { cn } from "~/lib/utils";
+import { useFindRevealRef } from "./markdownFindContext";
 import { countTextLines, estimateWrappedLines, shouldTouchCollapse } from "./touchCollapse";
 
 const COLLAPSED_FADE_MASK = "linear-gradient(to bottom, black calc(100% - 3rem), transparent)";
@@ -19,6 +20,9 @@ export function TouchCollapsibleBlock(props: {
 }) {
   const touchLayout = useTouchLayout();
   const [expanded, setExpanded] = useState(false);
+  // Thread find opens the block when it selects a match past the preview cutoff.
+  const revealForFind = useCallback(() => setExpanded(true), []);
+  const findRevealRef = useFindRevealRef(revealForFind);
   const visualRows = useMemo(
     () => (touchLayout ? estimateWrappedLines(props.text) : 0),
     [touchLayout, props.text],
@@ -31,7 +35,9 @@ export function TouchCollapsibleBlock(props: {
   return (
     <div className={props.className} data-touch-collapsed={expanded ? "false" : "true"}>
       <div
+        ref={findRevealRef}
         className={cn(!expanded && "max-h-80 overflow-hidden")}
+        data-thread-find-fold={expanded ? undefined : ""}
         style={
           expanded
             ? undefined

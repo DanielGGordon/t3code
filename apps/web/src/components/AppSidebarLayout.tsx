@@ -84,7 +84,7 @@ function readInitialThreadSidebarWidth(): number {
 function SidebarControl() {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(
@@ -125,15 +125,26 @@ function SidebarControl() {
 
     // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // A focused desktop browser page forwards the chord as a menu action.
+    const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
+      if (action === "sidebar.toggle") toggleSidebar();
+    });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      unsubscribe?.();
+    };
   }, [keybindings, toggleSidebar, usagePageOpen]);
 
   return (
     // The right-side layout controls carry mr-px (border compensation inside
     // the panel), so the trigger mirrors it: both clusters sit one extra pixel
     // off their edge and the titlebar reads symmetric.
+    // The sheet owns its trigger until its closing transition unmounts it.
     <div
-      className="pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center gap-1"
+      className={cn(
+        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center gap-1",
+        isMobile && mobileSheetMounted && "hidden",
+      )}
       data-sidebar-control=""
     >
       <Tooltip>
@@ -254,6 +265,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       ? getWindowFullscreenState()
       : false;
   });
+  const windowControlsInsetStyle = (
+    isMacosDesktop && !isWindowFullscreen
+      ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
+      : {}
+  ) as CSSProperties;
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
@@ -261,9 +277,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     // content starts after both.
     "--workspace-titlebar-content-left":
       "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-size) + 0.25rem + var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap))",
-    ...(isMacosDesktop && !isWindowFullscreen
-      ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
-      : {}),
+    ...windowControlsInsetStyle,
   } as CSSProperties;
 
   useEffect(() => {
@@ -328,6 +342,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
             onResize: setSidebarWidth,
           }}
+          // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
+          style={windowControlsInsetStyle}
         >
           {isOnSettings ? (
             <>
