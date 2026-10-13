@@ -114,17 +114,20 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 // Self-hosted sideload distribution (android-sideload, slot `t3code`). Only the `preview`
 // variant (com.t3tools.t3code.preview) ships this way, so only it gets the in-app updater.
 // The manifest URL can be overridden at build time for testing (T3CODE_SIDELOAD_MANIFEST_URL).
+// Since versionCode 4 it is the gordonlabs.dev hostname (Let's Encrypt, so system CAs).
+// Builds up to 3 poll https://15.204.108.12:7443/sideload/t3code/latest.json, which keeps
+// serving the same file until every installed phone has updated past 3.
 const SIDELOAD_MANIFEST_URL =
-  repoEnv.T3CODE_SIDELOAD_MANIFEST_URL?.trim() ||
-  "https://15.204.108.12:7443/sideload/t3code/latest.json";
+  repoEnv.T3CODE_SIDELOAD_MANIFEST_URL?.trim() || "https://apps.gordonlabs.dev/t3code/latest.json";
 const sideloadUpdates = APP_VARIANT === "preview" ? { manifestUrl: SIDELOAD_MANIFEST_URL } : null;
 
 // Android versionCode: explicit, and it must rise with every published sideload build
 // (`sideload publish` refuses anything not strictly higher). Bump this for each publish;
 // publish-android-apk.sh refuses to build if it is not above the published one.
-// History: 1 = first manual sideload (2026-07); 2 = first build with in-app updates.
+// History: 1 = first manual sideload (2026-07); 2 = first build with in-app updates;
+// 3 = auto-published by sideload-autopublish (2026-10-13); 4 = manifest on apps.gordonlabs.dev.
 // T3CODE_ANDROID_VERSION_CODE overrides it (used for update tests).
-const ANDROID_VERSION_CODE = 2;
+const ANDROID_VERSION_CODE = 4;
 const androidVersionCode = Number.parseInt(repoEnv.T3CODE_ANDROID_VERSION_CODE ?? "", 10);
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!

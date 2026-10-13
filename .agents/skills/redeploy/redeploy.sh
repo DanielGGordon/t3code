@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # /redeploy — sync the T3 Code deploy checkout to a detached copy of origin/main,
-# rebuild, and restart the prod service (t3code.service, fronted by Caddy on :7443).
+# rebuild, and restart the prod service (t3code.service, public at https://t3.gordonlabs.dev).
 #
 # Run this from a T3 chat. The chat lives INSIDE t3code.service, so the chat's own
 # session WILL drop when the service restarts. The restart is fired as a detached
@@ -10,7 +10,7 @@ set -euo pipefail
 DEPLOY_DIR="${T3_DEPLOY_DIR:-/home/dgordon/projects/meta/t3code-v2}"
 SERVICE="${T3_SERVICE:-t3code.service}"
 LOOPBACK_URL="${T3_HEALTH_URL:-http://127.0.0.1:3773/}"
-PUBLIC_URL="${T3_PUBLIC_URL:-https://15.204.108.12:7443/}"
+PUBLIC_URL="${T3_PUBLIC_URL:-https://t3.gordonlabs.dev/}"
 STATUS_LOG="${T3_REDEPLOY_LOG:-/tmp/t3-redeploy-status.log}"
 # The 15-minute Claude transcript import runs `t3 import sync` from THIS checkout.
 # It must not run between the checkout below and the server restart: it would be
@@ -124,7 +124,7 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
     echo \"target=$TARGET_SHORT ($TARGET_SUBJ)\"
     echo \"service-active=\$(systemctl --user is-active $SERVICE)\"
     echo \"loopback-3773=\$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null)\"
-    echo \"public-7443=\$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
+    echo \"public=\$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
     echo \"served-commit=\$(git -C '$DEPLOY_DIR' rev-parse --short HEAD)\"
     echo \"import-timer=\$(systemctl --user is-active '$IMPORT_TIMER' 2>/dev/null) (paused-by-redeploy=$TIMER_PAUSED)\"
   } > '$STATUS_LOG' 2>&1

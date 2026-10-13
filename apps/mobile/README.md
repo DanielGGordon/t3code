@@ -158,11 +158,13 @@ vp run eas:android:preview
 ## Self-hosted Android sideload (fork)
 
 The `preview` variant (`com.t3tools.t3code.preview`) is distributed through
-[android-sideload](https://15.204.108.12:7443/sideload/) (slot `t3code`), not a store.
+[android-sideload](https://apps.gordonlabs.dev/) (slot `t3code`), not a store.
 
-- **First install:** open `https://15.204.108.12:7443/sideload/` on the phone and tap *T3 Code*.
+- **First install:** open `https://apps.gordonlabs.dev/` on the phone and tap *T3 Code*.
 - **Updates:** Settings > About > **Check for updates** (also a quiet check on launch and each
-  foreground, at most every 6 hours). It downloads the APK, verifies its SHA-256 and opens the
+  foreground, at most every 6 hours) against `https://apps.gordonlabs.dev/t3code/latest.json`
+  (versionCode 4 on; older builds poll `https://15.204.108.12:7443/sideload/t3code/latest.json`,
+  the same file, which stays served for them). It downloads the APK, verifies its SHA-256 and opens the
   system installer. Implemented by `modules/t3-sideload-updater` (a vendored copy of the
   android-sideload updater, see its `VENDORED.md`) and `src/features/updates/sideload-updates.ts`;
   iOS/web and non-`preview` variants don't include it.
@@ -179,5 +181,6 @@ The `preview` variant (`com.t3tools.t3code.preview`) is distributed through
 - **Testing the updater:** `T3CODE_SIDELOAD_MANIFEST_URL` overrides the manifest URL and
   `T3CODE_ANDROID_VERSION_CODE` the versionCode at build time. For an emulator use
   `T3CODE_ANDROID_ABIS=x86_64`.
-- **TLS:** the manifest is served with Caddy's self-signed cert; `plugins/withAndroidSelfSignedServerTrust.cjs`
-  trusts it app-wide, including the updater's `HttpsURLConnection`.
+- **TLS:** the manifest is served on a Let's Encrypt hostname (system CAs). The old `:7443`
+  address uses Caddy's self-signed cert; `plugins/withAndroidSelfSignedServerTrust.cjs` trusts it
+  app-wide, including the updater's `HttpsURLConnection`, alongside the system CAs.

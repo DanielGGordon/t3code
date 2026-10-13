@@ -1,6 +1,6 @@
 ---
 name: redeploy
-description: Redeploy this self-hosted T3 Code prod server (15.204.108.12:7443) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main. Only runs on the T3 deploy host.
+description: Redeploy this self-hosted T3 Code prod server (https://t3.gordonlabs.dev) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main. Only runs on the T3 deploy host.
 ---
 
 # Redeploy T3 Code (prod)
@@ -71,7 +71,7 @@ Then:
   ```bash
   cat /tmp/t3-redeploy-status.log
   ```
-  A healthy result shows `service-active=active`, `loopback-3773=200`, `public-7443=200`,
+  A healthy result shows `service-active=active`, `loopback-3773=200`, `public=200` (https://t3.gordonlabs.dev/),
   `served-commit` matching the target, and `import-timer=active` (when
   `paused-by-redeploy=1`).
 - **If the script aborts**, confirm the timer came back:
