@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # /token — issue a fresh pairing token for the T3 Code prod server
-# (t3code.service, fronted by Caddy on 15.204.108.12:7443) without restarting
+# (t3code.service, public at https://t3.gordonlabs.dev) without restarting
 # anything. Writes a token directly into the running server's live database.
 set -euo pipefail
 
@@ -8,7 +8,7 @@ DEPLOY_DIR="${T3_DEPLOY_DIR:-/home/dgordon/projects/meta/t3code-v2}"
 SERVICE="${T3_SERVICE:-t3code.service}"
 BASE_DIR="${T3_BASE_DIR:-$HOME/.t3}"
 SERVER_PORT="${T3_SERVER_PORT:-3773}"
-PUBLIC_URL="${T3_PUBLIC_URL:-https://15.204.108.12:7443}"
+PUBLIC_URL="${T3_PUBLIC_URL:-https://t3.gordonlabs.dev}"
 TTL="${1:-15m}"
 
 # --- guard: only run on the actual T3 deploy/prod host ---

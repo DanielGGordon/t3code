@@ -1,6 +1,6 @@
 ---
 name: token
-description: Issue a fresh one-time pairing token to log into this self-hosted T3 Code prod server (15.204.108.12:7443), without restarting the service or disrupting other sessions. Use when the user says "/token", asks for a new login/pairing token, or their pairing link expired or was already consumed. Only runs on the T3 deploy host.
+description: Issue a fresh one-time pairing token to log into this self-hosted T3 Code prod server (https://t3.gordonlabs.dev), without restarting the service or disrupting other sessions. Use when the user says "/token", asks for a new login/pairing token, or their pairing link expired or was already consumed. Only runs on the T3 deploy host.
 ---
 
 # Issue a T3 Code login token (prod)
@@ -17,7 +17,9 @@ is to run it and hand back the printed URL.
 2. Runs the server's `auth pairing create` CLI directly against `~/.t3` (the same data
    directory `t3code.service` is already serving from) with `T3CODE_PORT=3773`, so the
    token lands in the running server's live database — no restart needed.
-3. Prints a ready-to-use `https://15.204.108.12:7443/pair#token=...` link.
+3. Prints a ready-to-use `https://t3.gordonlabs.dev/pair#token=...` link (sessions are per
+   origin; the old `https://15.204.108.12:7443` and IP `:443` roots are being retired to a
+   308 redirect, so pair on the hostname. `T3_PUBLIC_URL` overrides it).
 
 Unlike `/redeploy`, this never touches the running service — no session drop.
 

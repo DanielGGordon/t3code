@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the sideloadable `preview` Android APK and publish it through android-sideload
 # (slot `t3code`, com.t3tools.t3code.preview). Phones update via Settings > About >
-# "Check for updates"; first installs come from https://15.204.108.12:7443/sideload/.
+# "Check for updates"; first installs come from https://apps.gordonlabs.dev/.
 #
 # Usage: publish-android-apk.sh "what changed"
 # Env:
@@ -42,4 +42,4 @@ EXPECTED_CERT=e22364d7125807c3d20e1bbe5237347e3dcbab3d29780a1c538593f52a3c1aa4
   || { echo "APK is not signed with ~/.android/debug.keystore ($EXPECTED_CERT)" >&2; exit 1; }
 [ "${BUILD_ONLY:-0}" = "1" ] && { echo "Built and verified: $APK"; exit 0; }
 "$SIDELOAD" publish "$SLOT" "$APK" ${NOTES:+--notes "$NOTES"}
-echo "Download: https://15.204.108.12:7443/sideload/"
+echo "Download: https://apps.gordonlabs.dev/"
