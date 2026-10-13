@@ -50,6 +50,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         requestId={requestId}
         isResponding={isResponding}
         canRespond={canRespond}
+        disabled={disabled}
         options={options}
         onRespondToApproval={onRespondToApproval}
       />
@@ -138,6 +139,7 @@ function TouchComposerPendingApprovalActions({
   requestId,
   isResponding,
   canRespond,
+  disabled = false,
   options,
   onRespondToApproval,
 }: Omit<ComposerPendingApprovalActionsProps, "touchLayout"> & {
@@ -162,7 +164,7 @@ function TouchComposerPendingApprovalActions({
             size="2xl"
             variant="default"
             className="min-w-48"
-            disabled={isResponding || !canRespond}
+            disabled={disabled || isResponding || !canRespond}
             {...optionProps(acceptOption)}
           >
             <TouchApprovalOptionLabel option={acceptOption} />
@@ -173,7 +175,7 @@ function TouchComposerPendingApprovalActions({
             size="2xl"
             variant="destructive-outline"
             className="ms-auto min-w-36"
-            disabled={isResponding || !canRespond}
+            disabled={disabled || isResponding || !canRespond}
             {...optionProps(declineOption)}
           >
             <TouchApprovalOptionLabel option={declineOption} />
@@ -190,7 +192,7 @@ function TouchComposerPendingApprovalActions({
                 variant="outline"
                 className="touch:h-12"
                 // Matches the overflow menu outside the touch layout.
-                disabled={isResponding}
+                disabled={disabled || isResponding}
                 {...optionProps(option)}
               >
                 <TouchApprovalOptionLabel option={option} />
@@ -201,7 +203,7 @@ function TouchComposerPendingApprovalActions({
             <Button
               size="sm"
               variant="ghost"
-              disabled={isResponding}
+              disabled={disabled || isResponding}
               {...optionProps(cancelOption)}
             >
               <TouchApprovalOptionLabel option={cancelOption} />

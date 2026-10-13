@@ -2696,11 +2696,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
                 )}
               >
                 {isSlack ? (
-                  <SlackThreadBadge
-                    density="slim"
-                    isActive={props.isRouteActive}
-                    isMuted={false}
-                  />
+                  <SlackThreadBadge density="slim" isActive={props.isRouteActive} isMuted={false} />
                 ) : null}
                 {displayTitle}
               </span>
