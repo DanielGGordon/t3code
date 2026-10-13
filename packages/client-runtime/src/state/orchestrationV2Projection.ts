@@ -224,8 +224,9 @@ export function applyOrchestrationV2ProjectionEvent(
     // Visited tracking is read state, not activity: skip the updatedAt bump.
     case "thread.visited":
     case "thread.marked-unread":
-    // Fork: the restart-request flag is UI state, not activity.
+    // Fork: the restart-request flag and cache keep-alive are UI state, not activity.
     case "thread.restart-request-updated":
+    case "thread.cache-keep-alive-updated":
       return { ...projection, thread: event.payload };
     case "run.created":
     case "run.updated": {

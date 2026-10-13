@@ -3,6 +3,7 @@ import {
   type OrchestrationV2CreationSource,
   ScheduledTaskId,
 } from "@t3tools/contracts";
+import { isCacheKeepAliveMessageId } from "@t3tools/shared/cacheKeepAlive";
 
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;
 const LEGACY_AUTOMATION_MESSAGE_ID = /^scheduled-task-message:(.+):\d+:(?:scheduled|manual)$/;
@@ -21,7 +22,7 @@ export function resolveUserMessagePresentation(message: {
 }): {
   readonly text: string;
   /** Who sent a user-role message the user did not type. */
-  readonly attribution: "automation" | "agent" | "t3code" | null;
+  readonly attribution: "automation" | "agent" | "t3code" | "cache-keep-alive" | null;
   readonly scheduledTaskId: ScheduledTaskId | undefined;
 } {
   if (message.role !== "user") {
@@ -33,6 +34,10 @@ export function resolveUserMessagePresentation(message: {
       attribution: "automation",
       scheduledTaskId: message.scheduledTaskId,
     };
+  }
+  // Fork: the server's prompt-cache keep-alive ping (system-sent, fixed id prefix).
+  if (message.createdBy === "system" && isCacheKeepAliveMessageId(message.id)) {
+    return { text: message.text, attribution: "cache-keep-alive", scheduledTaskId: undefined };
   }
   const legacyPrefix = LEGACY_AUTOMATION_PREFIX.exec(message.text);
   const legacyTaskId = legacyPrefix

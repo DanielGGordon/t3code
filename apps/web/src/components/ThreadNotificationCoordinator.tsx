@@ -139,9 +139,11 @@ function EnvironmentNotifications({
           : null;
       const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
       // Commands left running (a dev server) read as ready; subagents and monitors wait.
+      // A prompt-cache keep-alive ping finishing is never news.
       const completion =
         status === "ready" &&
         thread.latestRun?.status === "completed" &&
+        thread.latestRun.runId !== rawThread.cacheKeepAlive?.lastNudgeRunId &&
         Number.isFinite(completedAt)
           ? completedAt
           : (prior?.completion ?? null);

@@ -2474,6 +2474,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         >
           Sent by T3 Code
         </p>
+      ) : userMessage.attribution === "cache-keep-alive" ? (
+        <p
+          className="me-1 text-2xs text-muted-foreground/70"
+          data-user-message-attribution="cache-keep-alive"
+        >
+          Sent automatically to keep the prompt cache warm
+        </p>
       ) : userMessage.attribution === "agent" ? (
         <p className="me-1 text-2xs text-muted-foreground/70" data-user-message-attribution="agent">
           {senderThreadId ? (

@@ -37,6 +37,7 @@ import {
   type DismissThreadUserInputInput,
   type RevertThreadCheckpointInput,
   type SetRestartRequestInput,
+  type SetCacheKeepAliveInput,
   type SetThreadInteractionModeInput,
   type SetThreadRuntimeModeInput,
   type PinThreadInput,
@@ -74,6 +75,7 @@ import {
   dismissThreadUserInput,
   revertThreadCheckpoint,
   setRestartRequest,
+  setCacheKeepAlive,
   setThreadInteractionMode,
   setThreadRuntimeMode,
   pinThread,
@@ -120,6 +122,7 @@ export type {
   DismissThreadUserInputInput,
   RevertThreadCheckpointInput,
   SetRestartRequestInput,
+  SetCacheKeepAliveInput,
   SetThreadInteractionModeInput,
   SetThreadRuntimeModeInput,
   PinThreadInput,
@@ -281,6 +284,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     setRestartRequest: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:set-restart-request",
       execute: (input: SetRestartRequestInput) => setRestartRequest(input),
+      scheduler,
+      concurrency,
+    }),
+    setCacheKeepAlive: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-cache-keep-alive",
+      execute: (input: SetCacheKeepAliveInput) => setCacheKeepAlive(input),
       scheduler,
       concurrency,
     }),
@@ -477,6 +486,24 @@ export function createThreadEnvironmentAtoms<R, E>(
           }
         : null,
     })),
+    // Mirrors the server: on keeps a running budget, resumes a paused one.
+    setCacheKeepAlive: optimistic.wrap(commands.setCacheKeepAlive, (thread, input, now) => {
+      const current = thread.cacheKeepAlive ?? null;
+      return {
+        ...thread,
+        cacheKeepAlive: !input.enabled
+          ? null
+          : current !== null && current.pausedAt === null
+            ? current
+            : {
+                enabledAt: current?.enabledAt ?? now,
+                nudgeCount: 0,
+                pausedAt: null,
+                lastNudgeRunId: current?.lastNudgeRunId ?? null,
+                lastNudgeAfterRead: current?.lastNudgeAfterRead ?? false,
+              },
+      };
+    }),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
       pinnedAt: thread.pinnedAt ?? now,

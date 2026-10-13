@@ -317,6 +317,14 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
+        case "keep_cache_warm":
+        case "stop_keeping_cache_warm":
+          command = {
+            ...common,
+            type: "thread.cache-keep-alive.set",
+            enabled: input.action === "keep_cache_warm",
+          };
+          break;
         default:
           command = { ...common, type: `thread.${input.action}` };
       }

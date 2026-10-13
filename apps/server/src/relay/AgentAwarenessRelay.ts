@@ -112,6 +112,7 @@ export function shouldPublishAgentAwarenessEvent(
     case "thread.unsnoozed":
     case "thread.auto-settle-set":
     case "thread.restart-request-updated":
+    case "thread.cache-keep-alive-updated":
     case "thread.pinned":
     case "thread.unpinned":
     case "thread.pin-reordered":

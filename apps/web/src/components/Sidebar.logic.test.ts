@@ -530,6 +530,24 @@ describe("hasUnseenCompletion", () => {
       }),
     ).toBe(false);
   });
+
+  it("does not flag a keep-alive ping sent after the thread was read, but flags other runs", () => {
+    const thread = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestRun: makeLatestRun(),
+      lastVisitedAt: "2026-03-09T10:04:00.000Z",
+      runtime: null,
+    };
+    expect(
+      hasUnseenCompletion({ ...thread, quietCacheKeepAliveRunId: thread.latestRun.runId }),
+    ).toBe(false);
+    expect(hasUnseenCompletion({ ...thread, quietCacheKeepAliveRunId: "run:older-ping" })).toBe(
+      true,
+    );
+  });
 });
 
 describe("shouldRecedeSidebarThread", () => {

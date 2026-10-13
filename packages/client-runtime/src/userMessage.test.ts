@@ -88,4 +88,13 @@ describe("resolveUserMessagePresentation", () => {
       });
     }
   });
+
+  it("marks the server's prompt-cache keep-alive pings", () => {
+    const ping = { id: "cache-keep-alive:thread:run", role: "user", text: "Keep-alive ping" };
+    expect(resolveUserMessagePresentation({ ...ping, createdBy: "system" }).attribution).toBe(
+      "cache-keep-alive",
+    );
+    // Only the server sends them; a user message with a look-alike id is the user's.
+    expect(resolveUserMessagePresentation({ ...ping, createdBy: "user" }).attribution).toBeNull();
+  });
 });
