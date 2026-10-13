@@ -6,6 +6,10 @@ import {
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
 import {
+  CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
+  cacheKeepAliveState,
+} from "@t3tools/shared/cacheKeepAlive";
+import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
   threadPullRequestKeysEqual,
@@ -395,6 +399,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unsnooze":
     case "thread.auto-settle.set":
     case "thread.restart-request.set":
+    case "thread.cache-keep-alive.set":
     case "thread.pin":
     case "thread.unpin":
     case "thread.pin.reorder":
@@ -2363,6 +2368,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.unsnooze"
           | "thread.auto-settle.set"
           | "thread.restart-request.set"
+          | "thread.cache-keep-alive.set"
           | "thread.pin"
           | "thread.unpin"
           | "thread.pin.reorder"
@@ -2829,6 +2835,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: unchanged ? thread.updatedAt : now,
           };
         }
+        // Fork: the prompt-cache keep-alive toggle. UI state like the restart
+        // flag below, so it does not bump updatedAt. Turning it on while it
+        // runs keeps its count; while paused (or off) it starts a fresh budget.
+        case "thread.cache-keep-alive.set": {
+          const current = thread.cacheKeepAlive ?? null;
+          return {
+            ...thread,
+            cacheKeepAlive: !command.enabled
+              ? null
+              : current !== null && current.pausedAt === null
+                ? current
+                : {
+                    enabledAt: current?.enabledAt ?? now,
+                    nudgeCount: 0,
+                    pausedAt: null,
+                    lastNudgeRunId: current?.lastNudgeRunId ?? null,
+                    lastNudgeAfterRead: current?.lastNudgeAfterRead ?? false,
+                  },
+          };
+        }
         // Fork: transient "agent asked for a server restart" flag. Does not
         // bump updatedAt — it is UI state, not thread activity, and must not
         // defeat automatic settlement or reorder the sidebar.
@@ -3198,6 +3224,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.auto-settle-set" as const;
         case "thread.restart-request.set":
           return "thread.restart-request-updated" as const;
+        case "thread.cache-keep-alive.set":
+          return "thread.cache-keep-alive-updated" as const;
         case "thread.pin":
           return "thread.pinned" as const;
         case "thread.unpin":
@@ -4428,6 +4456,61 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
     });
 
+  /**
+   * Fork: count an accepted keep-alive ping and remember the run it started,
+   * so clients can keep that run's completion quiet. The ping that reaches the
+   * cap pauses keep-alive straight away: its own cache stays warm for the
+   * hour, and the header says so instead of going silent later.
+   */
+  const recordCacheKeepAliveNudge = (
+    command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) =>
+    Effect.gen(function* () {
+      const projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const keepAlive = projection.thread.cacheKeepAlive ?? null;
+      if (keepAlive === null) return;
+      const now = yield* DateTime.now;
+      const nudgeCount = keepAlive.nudgeCount + 1;
+      const run = projection.runs.find(
+        (candidate) => candidate.userMessageId === command.messageId,
+      );
+      // Read means visited since the kept-warm run finished (never-visited
+      // counts as read, as in the sidebar); a run that was itself a quiet
+      // ping carries its predecessor's answer forward.
+      const keptWarm = projection.runs.find(
+        (candidate) => candidate.id === command.cacheKeepAliveOfRunId,
+      );
+      const lastVisitedAt = projection.thread.lastVisitedAt;
+      const readBeforePing =
+        lastVisitedAt === null ||
+        (keptWarm?.completedAt != null &&
+          DateTime.toEpochMillis(lastVisitedAt) >= DateTime.toEpochMillis(keptWarm.completedAt)) ||
+        (keptWarm !== undefined &&
+          keptWarm.id === keepAlive.lastNudgeRunId &&
+          keepAlive.lastNudgeAfterRead);
+      const thread: OrchestrationV2AppThread = {
+        ...projection.thread,
+        cacheKeepAlive: {
+          ...keepAlive,
+          nudgeCount,
+          pausedAt: nudgeCount >= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES ? now : null,
+          lastNudgeRunId: run?.id ?? keepAlive.lastNudgeRunId,
+          lastNudgeAfterRead: readBeforePing,
+        },
+      };
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.cache-keep-alive-updated",
+        threadId: command.threadId,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: now,
+        payload: thread,
+      });
+    });
+
   const dispatchMessage = (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -4435,6 +4518,39 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const isCacheKeepAlive = command.cacheKeepAliveOfRunId !== undefined;
+      if (isCacheKeepAlive) {
+        // Fork: a keep-alive ping only reaches a thread that is still idle on
+        // the finished run the sweep saw, judged by the same rule the sweep and
+        // the chat header use. Its command id is per run, so a rejection is
+        // final for that idle period.
+        const providerThread = projection.providerThreads.find(
+          (candidate) => candidate.id === projection.thread.activeProviderThreadId,
+        );
+        const state = cacheKeepAliveState({
+          thread: threadShellFromProjection(projection),
+          driver:
+            providerThread?.providerInstanceId === projection.thread.providerInstanceId
+              ? providerThread.driver
+              : undefined,
+          nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+        });
+        if (
+          command.createdBy !== "system" ||
+          command.creationSource !== "server" ||
+          command.dispatchMode.type !== "start_immediately" ||
+          state.kind !== "due" ||
+          state.runId !== command.cacheKeepAliveOfRunId ||
+          // The shell's latest run skips a held queue; a ping never jumps one.
+          projection.runs.some((run) => run.status === "queued")
+        ) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "This thread is no longer waiting for a cache keep-alive ping.",
+          });
+        }
+      }
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -4529,7 +4645,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
-      if (projection.thread.settledOverride !== null) {
+      // A keep-alive ping is not activity: it leaves an explicit "keep active"
+      // override and an expired snooze as they are.
+      if (projection.thread.settledOverride !== null && !isCacheKeepAlive) {
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
           ...projection.thread,
@@ -4553,7 +4671,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
-      if (projection.thread.snoozedUntil != null) {
+      if (projection.thread.snoozedUntil != null && !isCacheKeepAlive) {
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
           ...projection.thread,
@@ -4582,6 +4700,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command,
         )({
           type: "thread.restart-request-updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: yield* DateTime.now,
+          payload: thread,
+        });
+        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      }
+      // Fork: the user writing again restarts the keep-alive ping budget, which
+      // also resumes keep-alive if the budget had run out. Server-sent turns
+      // (limit recovery, scheduled work) do not count as the user.
+      const keepAlive = projection.thread.cacheKeepAlive ?? null;
+      if (
+        command.createdBy === "user" &&
+        command.creationSource !== "server" &&
+        keepAlive !== null &&
+        (keepAlive.nudgeCount > 0 || keepAlive.pausedAt !== null)
+      ) {
+        const thread: OrchestrationV2AppThread = {
+          ...projection.thread,
+          cacheKeepAlive: { ...keepAlive, nudgeCount: 0, pausedAt: null },
+        };
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.cache-keep-alive-updated",
           threadId: command.threadId,
           providerInstanceId: thread.providerInstanceId,
           occurredAt: yield* DateTime.now,
@@ -10223,6 +10367,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.unsnooze":
       case "thread.auto-settle.set":
       case "thread.restart-request.set":
+      case "thread.cache-keep-alive.set":
       case "thread.pin":
       case "thread.unpin":
       case "thread.pin.reorder":
@@ -10265,6 +10410,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
         }
         yield* dispatchMessage(command, events, effects);
+        if (command.cacheKeepAliveOfRunId !== undefined) {
+          yield* recordCacheKeepAliveNudge(command, events);
+        }
         break;
       }
       case "notification.delivery.accept":

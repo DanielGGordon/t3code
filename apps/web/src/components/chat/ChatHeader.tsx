@@ -41,6 +41,7 @@ import {
   selectHeaderUsageStats,
   selectHeaderUsageStatsVisibility,
 } from "./HeaderUsageStats";
+import { CacheKeepAliveToggle } from "./CacheKeepAliveToggle";
 import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
 import { TokenUsageBadge } from "./TokenUsageBadge";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
@@ -419,6 +420,12 @@ export const ChatHeader = memo(function ChatHeader({
           stockSymbol={stockSymbol}
           onPatch={updateClientSettings}
         />
+        {isServerThread ? (
+          <CacheKeepAliveToggle
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+          />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

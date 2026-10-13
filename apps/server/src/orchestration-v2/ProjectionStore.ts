@@ -61,6 +61,7 @@ import {
   isOrchestrationV2TurnItemVisible,
 } from "@t3tools/shared/orchestrationV2Timeline";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+import { CACHE_KEEP_ALIVE_LEAD_MS, PROMPT_CACHE_TTL_MS } from "@t3tools/shared/cacheKeepAlive";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -153,6 +154,16 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "limitRecovery"
   | "snoozedUntil"
 >;
+
+/**
+ * Fork: a thread with prompt-cache keep-alive on, and the driver of the provider
+ * thread that holds its conversation (null when the next turn would run on a
+ * different provider instance).
+ */
+export interface ProjectionCacheKeepAliveCandidate {
+  readonly threadId: ThreadId;
+  readonly driver: string | null;
+}
 
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
@@ -347,6 +358,13 @@ export interface ProjectionStoreV2Shape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
+  /**
+   * Fork: keep-alive threads that look due for a ping. A cheap pre-filter; the
+   * caller judges each one with its full shell (`cacheKeepAliveState`).
+   */
+  readonly getCacheKeepAliveCandidates: (options: {
+    readonly now: DateTime.Utc;
+  }) => Effect.Effect<ReadonlyArray<ProjectionCacheKeepAliveCandidate>, ProjectionStoreV2Error>;
   readonly getLimitRecoveryCandidates: (options: {
     readonly now: DateTime.Utc;
     readonly autoResume: boolean;
@@ -676,8 +694,10 @@ export function applyToProjection(
     // viewing a thread does not surface it as recently active.
     case "thread.visited":
     case "thread.marked-unread":
-    // Fork: the restart-request flag is UI state, not activity.
+    // Fork: the restart-request flag and the cache keep-alive toggle are UI
+    // state, not activity.
     case "thread.restart-request-updated":
+    case "thread.cache-keep-alive-updated":
       return {
         ...projection,
         thread: event.payload,
@@ -1478,6 +1498,7 @@ export function threadShellFromProjection(
 
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
     restartRequest: projection.thread.restartRequest ?? null,
+    cacheKeepAlive: projection.thread.cacheKeepAlive ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -1747,6 +1768,7 @@ function shellFromState(input: {
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
     restartRequest: input.state.thread.restartRequest ?? null,
+    cacheKeepAlive: input.state.thread.cacheKeepAlive ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     lastVisitedAt: input.state.thread.lastVisitedAt,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -1793,6 +1815,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "thread.visited":
           case "thread.marked-unread":
           case "thread.restart-request-updated":
+          case "thread.cache-keep-alive-updated":
           case "thread.metadata-updated":
           case "thread.pull-request-synced":
           case "thread.runtime-mode-updated":
@@ -2625,6 +2648,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.visited" &&
           event.type !== "thread.marked-unread" &&
           event.type !== "thread.restart-request-updated" &&
+          event.type !== "thread.cache-keep-alive-updated" &&
           event.type !== "thread.metadata-updated" &&
           event.type !== "thread.runtime-mode-updated" &&
           event.type !== "thread.interaction-mode-updated" &&
@@ -3384,6 +3408,45 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             : new ProjectionStoreReadError({ threadId, cause }),
         ),
       );
+
+    const getCacheKeepAliveCandidates = Effect.fn("ProjectionStore.getCacheKeepAliveCandidates")(
+      function* (options: Parameters<ProjectionStoreV2Shape["getCacheKeepAliveCandidates"]>[0]) {
+        // Enabled, unpaused, idle threads whose last run ended inside the ping
+        // window (between the cache's expiry and the ping lead before it).
+        const windowStart = DateTime.formatIso(
+          DateTime.subtract(options.now, { milliseconds: PROMPT_CACHE_TTL_MS }),
+        );
+        const windowEnd = DateTime.formatIso(
+          DateTime.subtract(options.now, {
+            milliseconds: PROMPT_CACHE_TTL_MS - CACHE_KEEP_ALIVE_LEAD_MS,
+          }),
+        );
+        const rows = yield* sql<{ readonly thread_id: string; readonly driver: string | null }>`
+          SELECT t.thread_id, pt.driver
+          FROM orchestration_v2_projection_threads t
+          LEFT JOIN orchestration_v2_projection_provider_threads pt
+            ON pt.provider_thread_id = t.active_provider_thread_id
+            AND pt.provider_instance_id = t.provider_instance_id
+          WHERE t.deleted_at IS NULL
+            AND t.archived_at IS NULL
+            AND json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
+            AND json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runs active
+              WHERE active.thread_id = t.thread_id
+                AND active.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
+            )
+            AND (
+              SELECT MAX(julianday(finished.completed_at))
+              FROM orchestration_v2_projection_runs finished
+              WHERE finished.thread_id = t.thread_id
+            ) BETWEEN julianday(${windowStart}) AND julianday(${windowEnd})
+          ORDER BY t.thread_id
+        `;
+        return rows.map((row) => ({ threadId: ThreadId.make(row.thread_id), driver: row.driver }));
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
 
     const getLimitRecoveryCandidates = Effect.fn("ProjectionStore.getLimitRecoveryCandidates")(
       function* (options: Parameters<ProjectionStoreV2Shape["getLimitRecoveryCandidates"]>[0]) {
@@ -5725,6 +5788,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
+      getCacheKeepAliveCandidates,
       getLimitRecoveryCandidates,
       getRecoveryThreadIds,
       getUnreadableThreadIds,
@@ -5866,6 +5930,32 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 settledAt: thread.settledAt,
                 pullRequests: thread.pullRequests ?? [],
               })),
+          ),
+        ),
+      getCacheKeepAliveCandidates: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .filter(
+                ({ thread }) =>
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null &&
+                  thread.cacheKeepAlive != null &&
+                  thread.cacheKeepAlive.pausedAt === null,
+              )
+              .map(({ thread, providerThreads }) => {
+                const active = providerThreads.find(
+                  (candidate) => candidate.id === thread.activeProviderThreadId,
+                );
+                return {
+                  threadId: thread.id,
+                  driver:
+                    active !== undefined && active.providerInstanceId === thread.providerInstanceId
+                      ? active.driver
+                      : null,
+                };
+              })
+              .toSorted((left, right) => left.threadId.localeCompare(right.threadId)),
           ),
         ),
       getLimitRecoveryCandidates: (options) =>

@@ -144,6 +144,7 @@ function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<Thread
     case "thread.unsnooze":
     case "thread.auto-settle.set":
     case "thread.restart-request.set":
+    case "thread.cache-keep-alive.set":
     case "thread.pin":
     case "thread.unpin":
     case "thread.pin.reorder":

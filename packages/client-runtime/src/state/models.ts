@@ -134,6 +134,11 @@ export interface EnvironmentThreadShell {
   readonly requestingRestart?: boolean;
   /** Fork: why the restart was requested; null when unknown or manual. */
   readonly restartRequestReason?: string | null;
+  /**
+   * Fork: a prompt-cache keep-alive ping run that went out after the user had
+   * read the thread, so its completion is not news.
+   */
+  readonly quietCacheKeepAliveRunId?: string | null;
   /** Slot in the user-arranged pinned order; null for keyless (legacy) pins. */
   readonly pinOrderKey: string | null;
   /** Slot in the user-arranged active order; null for keyless active threads. */
@@ -283,6 +288,9 @@ export function presentThreadShell(
     autoSettleDisabledAt: nullableIso(thread.autoSettleDisabledAt ?? null),
     requestingRestart: thread.restartRequest != null,
     restartRequestReason: thread.restartRequest?.reason ?? null,
+    quietCacheKeepAliveRunId: thread.cacheKeepAlive?.lastNudgeAfterRead
+      ? thread.cacheKeepAlive.lastNudgeRunId
+      : null,
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,
     ...(thread.lastVisitedAt === undefined

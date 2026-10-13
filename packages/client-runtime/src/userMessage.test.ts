@@ -9,7 +9,12 @@ describe("resolveUserMessagePresentation", () => {
   it("removes attribution from legacy scheduled prompts", () => {
     expect(
       resolveUserMessagePresentation({ role: "user", createdBy: "agent", text: legacyText }),
-    ).toEqual({ text: "Check for crashes.\n", isAutomation: true, scheduledTaskId: undefined });
+    ).toEqual({
+      text: "Check for crashes.\n",
+      isAutomation: true,
+      isCacheKeepAlive: false,
+      scheduledTaskId: undefined,
+    });
   });
 
   it("uses task metadata without changing the prompt", () => {
@@ -20,7 +25,12 @@ describe("resolveUserMessagePresentation", () => {
         scheduledTaskId: ScheduledTaskId.make("task-1"),
         text: legacyText,
       }),
-    ).toEqual({ text: legacyText, isAutomation: true, scheduledTaskId: "task-1" });
+    ).toEqual({
+      text: legacyText,
+      isAutomation: true,
+      isCacheKeepAlive: false,
+      scheduledTaskId: "task-1",
+    });
   });
 
   it("preserves user-written and assistant-quoted schedule headers", () => {
@@ -32,6 +42,7 @@ describe("resolveUserMessagePresentation", () => {
       expect(resolveUserMessagePresentation({ ...message, text: legacyText })).toEqual({
         text: legacyText,
         isAutomation: false,
+        isCacheKeepAlive: false,
         scheduledTaskId: undefined,
       });
     }
@@ -46,6 +57,7 @@ describe("resolveUserMessagePresentation", () => {
       expect(resolveUserMessagePresentation({ role: "user", createdBy: "agent", text })).toEqual({
         text,
         isAutomation: false,
+        isCacheKeepAlive: false,
         scheduledTaskId: undefined,
       });
     }
@@ -63,8 +75,20 @@ describe("resolveUserMessagePresentation", () => {
       ).toEqual({
         text: "Check for crashes.\n",
         isAutomation: true,
+        isCacheKeepAlive: false,
         scheduledTaskId: "task:daily-audit",
       });
     }
+  });
+
+  it("marks the server's prompt-cache keep-alive pings", () => {
+    const ping = { id: "cache-keep-alive:thread:run", role: "user", text: "Keep-alive ping" };
+    expect(resolveUserMessagePresentation({ ...ping, createdBy: "system" }).isCacheKeepAlive).toBe(
+      true,
+    );
+    // Only the server sends them; a user message with a look-alike id is the user's.
+    expect(resolveUserMessagePresentation({ ...ping, createdBy: "user" }).isCacheKeepAlive).toBe(
+      false,
+    );
   });
 });

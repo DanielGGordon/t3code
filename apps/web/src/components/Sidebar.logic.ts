@@ -658,6 +658,7 @@ type ThreadStatusInput = Pick<
 > & {
   lastVisitedAt?: string | null | undefined;
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
+  quietCacheKeepAliveRunId?: string | null | undefined;
 };
 
 export interface ThreadJumpHintVisibilityController {
@@ -772,6 +773,13 @@ export function resolveThreadLastVisitedAt(
 
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   if (!thread.latestRun?.completedAt) return false;
+  // A keep-alive ping sent after the user read the thread only adds an "ok".
+  if (
+    thread.quietCacheKeepAliveRunId != null &&
+    thread.latestRun.runId === thread.quietCacheKeepAliveRunId
+  ) {
+    return false;
+  }
   const completedAt = Date.parse(thread.latestRun.completedAt);
   if (Number.isNaN(completedAt)) return false;
   if (!thread.lastVisitedAt) return false;
