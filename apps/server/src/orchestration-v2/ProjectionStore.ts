@@ -66,6 +66,7 @@ import {
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
   CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX,
+  CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES,
   isCacheKeepAliveMessageId,
 } from "@t3tools/shared/cacheKeepAlive";
 import * as Context from "effect/Context";
@@ -1545,12 +1546,7 @@ function activeProviderGoalForShell(
   return providerThreads.find((thread) => thread.id === activeProviderThreadId)?.goal ?? null;
 }
 
-// Turn items that are not provider output: they do not mark a provider request.
-const NON_PROVIDER_ITEM_TYPES: ReadonlySet<string> = new Set([
-  "user_message",
-  "notification",
-  "error",
-]);
+const PROVIDER_ITEM_TYPES: ReadonlySet<string> = new Set(CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES);
 
 /**
  * Fork: keep-alive's view of a thread. Mirrors the SQL in
@@ -1571,7 +1567,7 @@ function cacheKeepAliveContextForShell(
       item.runId !== run.id ||
       item.nodeId !== run.rootNodeId ||
       item.startedAt === null ||
-      NON_PROVIDER_ITEM_TYPES.has(item.type)
+      !PROVIDER_ITEM_TYPES.has(item.type)
     ) {
       continue;
     }
@@ -5192,7 +5188,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         WHERE ki.thread_id = t.thread_id
                           AND ki.run_id = kr.run_id
                           AND ki.node_id IS json_extract(kr.payload_json, '$.rootNodeId')
-                          AND ki.type NOT IN ('user_message', 'notification', 'error')
+                          AND ki.type IN ${sql.in(CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES)}
                       )
                     )
                     FROM orchestration_v2_projection_runs kr

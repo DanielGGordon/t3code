@@ -4,6 +4,8 @@ import {
   CACHE_KEEP_ALIVE_NUDGE_TEXT,
 } from "@t3tools/shared/cacheKeepAlive";
 import {
+  CheckpointId,
+  CheckpointScopeId,
   CommandId,
   EventId,
   MessageId,
@@ -386,8 +388,39 @@ it.effect(
       yield* createThread(threadId);
       const lastRequestAt = yield* DateTime.now;
       const run = runFixture(threadId, 1, lastRequestAt);
-      // Claude finished at once; checkpoint capture marked the run done 5 minutes later.
-      yield* recordRun(run, { lastRequestAt, completedAt: yield* minutesFromNow(5) });
+      // Claude finished at once; checkpoint capture marked the run done 5 minutes
+      // later and wrote its checkpoint item on the root node then.
+      const checkpointAt = yield* minutesFromNow(5);
+      yield* recordRun(run, { lastRequestAt, completedAt: checkpointAt });
+      yield* write([
+        {
+          id: EventId.make(`event:${threadId}:checkpoint`),
+          type: "turn-item.updated",
+          threadId,
+          runId: run.id,
+          occurredAt: checkpointAt,
+          payload: {
+            id: TurnItemId.make(`item:${threadId}:checkpoint`),
+            threadId,
+            runId: run.id,
+            nodeId: run.rootNodeId,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: ++fixtureCounter,
+            status: "completed",
+            title: null,
+            startedAt: checkpointAt,
+            completedAt: checkpointAt,
+            updatedAt: checkpointAt,
+            type: "checkpoint",
+            checkpointId: CheckpointId.make(`checkpoint:${threadId}`),
+            scopeId: CheckpointScopeId.make(`scope:${threadId}`),
+            files: [],
+          },
+        },
+      ]);
 
       const shell = yield* shellOf(threadId);
       expect(shell.cacheKeepAliveContext?.run).toMatchObject({ id: run.id });

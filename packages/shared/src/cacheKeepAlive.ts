@@ -31,6 +31,28 @@ export const CACHE_KEEP_ALIVE_NUDGE_TEXT =
 /** Ping messages use `<prefix><threadId>:<runId>` ids, which also mark them in the transcript. */
 export const CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX = "cache-keep-alive:";
 
+/**
+ * Turn items a model response produces. The latest one on a run's root node
+ * began just after the run's last provider request, which is when the cache
+ * clock last restarted. Checkpoints, errors, notices and bookkeeping items are
+ * written by the server, often minutes later, so they do not count.
+ */
+export const CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES: ReadonlyArray<string> = [
+  "assistant_message",
+  "reasoning",
+  "proposed_plan",
+  "todo_list",
+  "user_input_request",
+  "approval_request",
+  "secret_request",
+  "file_change",
+  "command_execution",
+  "file_search",
+  "web_search",
+  "dynamic_tool",
+  "subagent",
+];
+
 const CACHE_KEEP_ALIVE_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent"]);
 const BUSY_RUN_STATUSES: ReadonlySet<string> = new Set([
   "preparing",
