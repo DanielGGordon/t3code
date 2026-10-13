@@ -39,7 +39,25 @@ import { join } from "node:path";
 // Pool constants
 // ---------------------------------------------------------------------------
 
+/**
+ * The box's public address. Used for the legacy `https://<HOST>:<port>` test
+ * URLs (still served by the bare-IP Caddy sites) and in the SSH-tunnel
+ * instructions. The repo never hardcodes it: set `T3_TEST_DEPLOY_HOST`.
+ */
 export const HOST = process.env.T3_TEST_DEPLOY_HOST ?? "<SERVER_IP>";
+const HOST_PLACEHOLDER = "<SERVER_IP>";
+
+/**
+ * Template for a slot's external URL; `{port}` is replaced by the external
+ * port. Default: one hostname per slot under the wildcard `*.gordonlabs.dev`
+ * DNS record (Let's Encrypt certs, `caddy-t3-trusted`), named like the unit
+ * (`t3-test-7450.service` -> `https://t3-test-7450.gordonlabs.dev`). A single
+ * label, so the wildcard covers it, and one domain a content filter can allow
+ * once instead of ten ports. Override with `T3_TEST_DEPLOY_URL_TEMPLATE`.
+ */
+export const DEFAULT_TEST_URL_TEMPLATE = "https://t3-test-{port}.gordonlabs.dev";
+export const TEST_URL_TEMPLATE =
+  process.env.T3_TEST_DEPLOY_URL_TEMPLATE?.trim() || DEFAULT_TEST_URL_TEMPLATE;
 export const SLOT_COUNT = 10;
 export const EXTERNAL_PORT_BASE = 7444; // slots 0..9 -> 7444..7453
 export const LOOPBACK_PORT_BASE = 3774; // slots 0..9 -> 3774..3783
@@ -102,8 +120,33 @@ export function unitForExternal(externalPort: number): string {
   return `t3-test-${externalPort}.service`;
 }
 
-export function testUrlFor(externalPort: number): string {
-  return `https://${HOST}:${externalPort}`;
+/** The slot's external URL (no trailing slash): the hostname form by default. */
+export function testUrlFor(externalPort: number, template: string = TEST_URL_TEMPLATE): string {
+  return template.replaceAll("{port}", String(externalPort)).replace(/\/+$/, "");
+}
+
+/**
+ * The old `https://<HOST>:<port>` URL (bare-IP Caddy site, pinned self-signed
+ * cert). Kept as a fallback while those sites still exist; null when
+ * `T3_TEST_DEPLOY_HOST` is unset (the placeholder is not an address).
+ */
+export function legacyTestUrlFor(externalPort: number, host: string = HOST): string | null {
+  return host === HOST_PLACEHOLDER || host.length === 0 ? null : `https://${host}:${externalPort}`;
+}
+
+/** URLs to try for a slot, preferred first: the template URL, then the legacy one. */
+export function testUrlCandidates(externalPort: number): string[] {
+  const urls = [testUrlFor(externalPort)];
+  const legacy = legacyTestUrlFor(externalPort);
+  if (legacy !== null && !urls.includes(legacy)) {
+    urls.push(legacy);
+  }
+  return urls;
+}
+
+/** The Caddy site address for a slot: the template URL's `host[:port]`. */
+export function testSiteAddressFor(externalPort: number): string {
+  return new URL(testUrlFor(externalPort)).host;
 }
 
 export function isValidExternalPort(externalPort: number): boolean {
@@ -1187,7 +1230,7 @@ export function buildPrCommentBody(input: PrCommentInput): string {
     "",
     `**[Open the test instance](${input.pairedUrl})** — ${input.pairedUrl}`,
     "",
-    "That link pairs you and logs you in on this port for 30 days. It is",
+    "That link pairs you and logs you in on this test instance for 30 days. It is",
     "single-use and expires in ~1h. To mint a fresh pairing link:",
     "",
     "```bash",
@@ -1223,24 +1266,53 @@ export function postPrComment(prUrl: string, body: string): { ok: boolean; detai
   };
 }
 
+export interface ExternalProbe {
+  /** The URL that answered (base, no trailing slash). Mint pairing links against it. */
+  readonly url: string;
+  /** Its HTTP status code. */
+  readonly code: string;
+}
+
 /**
- * Probe the external HTTPS surface for a slot. Returns the HTTP status code
- * string if Caddy proxies through, or null if the external path is unreachable
- * (connection refused / timeout / not yet bootstrapped).
+ * Probe the external HTTPS surface for a slot. Tries each of
+ * `testUrlCandidates` in order (the hostname first, then the legacy
+ * `https://<HOST>:<port>` site) and returns the first that Caddy answers, or
+ * null if none is reachable (connection refused / timeout / not yet
+ * bootstrapped). Any HTTP status counts: the unit is already known to be
+ * serving on loopback when this runs.
  *
- * LIMITATION: this curls the box's own public IP from the box itself, so it can
- * only confirm that LOCAL Caddy is up and proxying — it CANNOT prove the OVH
+ * LIMITATION: this curls the box's own public address from the box itself, so
+ * it can only confirm that LOCAL Caddy is up and proxying — it CANNOT prove the
  * network firewall is open to the outside (loopback→own-public-IP bypasses that
- * filter). Actual external reachability is asserted out-of-band by the operator:
- * the documented bootstrap opens inbound TCP 7444-7453 in the OVH panel BEFORE
- * `touch`-ing the `caddy-bootstrapped` marker (see test-deploy-caddy.ts). This
- * probe is therefore a Caddy-health check gated behind that operator assertion,
- * not an end-to-end firewall check.
+ * filter). Actual external reachability is asserted out-of-band by the
+ * operator, who `touch`es the `caddy-bootstrapped` marker after the one-time
+ * Caddy bootstrap (see test-deploy-caddy.ts). This probe is therefore a
+ * Caddy-health check gated behind that operator assertion, not an end-to-end
+ * firewall check.
  */
-export function probeExternal(externalPort: number): string | null {
+export function probeExternal(
+  externalPort: number,
+  curl: (url: string) => string | null = curlStatus,
+  candidates: ReadonlyArray<string> = testUrlCandidates(externalPort),
+): ExternalProbe | null {
   if (!isBootstrapped()) {
     return null;
   }
+  for (const url of candidates) {
+    const code = curl(`${url}/`);
+    if (code !== null) {
+      return { url, code };
+    }
+  }
+  return null;
+}
+
+/**
+ * HTTP status for a URL, or null when nothing answered. `-k` because the
+ * legacy bare-IP sites use the pinned self-signed cert; this is a reachability
+ * check, not a trust check.
+ */
+function curlStatus(url: string): string | null {
   const result = runCapture("curl", [
     "-sko",
     "/dev/null",
@@ -1248,13 +1320,10 @@ export function probeExternal(externalPort: number): string | null {
     "%{http_code}",
     "--max-time",
     "4",
-    `${testUrlFor(externalPort)}/`,
+    url,
   ]);
   const code = result.stdout.trim();
-  if (result.status === 0 && /^\d{3}$/.test(code) && code !== "000") {
-    return code;
-  }
-  return null;
+  return result.status === 0 && /^\d{3}$/.test(code) && code !== "000" ? code : null;
 }
 
 // ---------------------------------------------------------------------------

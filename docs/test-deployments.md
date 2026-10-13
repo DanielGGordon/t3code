@@ -14,14 +14,18 @@ This is the full reference. `AGENTS.md` carries only a short pointer to this fil
 
 ## The pool (10 fixed slots)
 
-Each slot is one external HTTPS port fronted by Caddy plus one loopback port that `t3 serve` binds on `127.0.0.1`. Conversion: `loopback = external - 3670`.
+Each slot has an external port number (it names the slot, the unit `t3-test-<port>.service` and the claim file) plus one loopback port that `t3 serve` binds on `127.0.0.1`. Conversion: `loopback = external - 3670`. The test URL is the slot's **own hostname**, `https://t3-test-<port>.gordonlabs.dev`, served by the `caddy-t3-trusted` Caddy on `:443` with a Let's Encrypt cert (the wildcard `*.gordonlabs.dev` DNS record already points at the box, so no DNS change per slot). One domain is one allowance in a phone content filter; ten ports were ten.
 
-| slot | external (Caddy TLS) | loopback (t3 serve) | test URL                 |
-| ---- | -------------------- | ------------------- | ------------------------ |
-| 0    | 7444                 | 3774                | https://<SERVER_IP>:7444 |
-| 1    | 7445                 | 3775                | https://<SERVER_IP>:7445 |
-| …    | …                    | …                   | …                        |
-| 9    | 7453                 | 3783                | https://<SERVER_IP>:7453 |
+| slot | external port | loopback (t3 serve) | test URL                            | legacy URL (fallback)    |
+| ---- | ------------- | ------------------- | ----------------------------------- | ------------------------ |
+| 0    | 7444          | 3774                | https://t3-test-7444.gordonlabs.dev | https://<SERVER_IP>:7444 |
+| 1    | 7445          | 3775                | https://t3-test-7445.gordonlabs.dev | https://<SERVER_IP>:7445 |
+| …    | …             | …                   | …                                   | …                        |
+| 9    | 7453          | 3783                | https://t3-test-7453.gordonlabs.dev | https://<SERVER_IP>:7453 |
+
+- **Override the URL** with `T3_TEST_DEPLOY_URL_TEMPLATE` (`{port}` is replaced by the external port), e.g. `T3_TEST_DEPLOY_URL_TEMPLATE='https://{port}.example.test'`. `scripts/test-deploy-caddy.ts` follows the same template.
+- **Legacy fallback:** the original bare-IP sites `https://<SERVER_IP>:<port>` (main `caddy`, pinned self-signed cert) still exist. When `T3_TEST_DEPLOY_HOST` is set, `test-deploy` probes the hostname first and falls back to the legacy URL only if the hostname does not answer; the pairing link is minted for whichever answered. Without `T3_TEST_DEPLOY_HOST` there is no fallback (the repo never hardcodes the IP).
+- Pairing is per origin: a link minted for the hostname logs you in on the hostname only, and vice versa.
 
 **Hard-forbidden values (asserted in every script):** external `7443`, loopback `3773`, unit `t3code.service`.
 
@@ -48,17 +52,17 @@ The comment body (rendered on the PR) reads:
 
 > ## Test deployment
 >
-> **[Open the test instance](https://<SERVER_IP>:<port>/pair#token=…)** — https://<SERVER_IP>:&lt;port&gt;/pair#token=…
+> **[Open the test instance](https://t3-test-<port>.gordonlabs.dev/pair#token=…)** — https://t3-test-&lt;port&gt;.gordonlabs.dev/pair#token=…
 >
-> That link pairs you and logs you in on this port for 30 days. It is single-use and expires in ~1h. To mint a fresh pairing link: `node scripts/test-status.ts --pair <port>`
+> That link pairs you and logs you in on this test instance for 30 days. It is single-use and expires in ~1h. To mint a fresh pairing link: `node scripts/test-status.ts --pair <port>`
 
-In degraded mode (external port not reachable) the comment instead contains the SSH-tunnel instructions and the `--base-url` re-mint command. Never skip this step: the PR must always carry a live path into the running instance.
+In degraded mode (neither the hostname nor the legacy URL reachable) the comment instead contains the SSH-tunnel instructions and the `--base-url` re-mint command. Never skip this step: the PR must always carry a live path into the running instance.
 
 ## The handoff message (say exactly this, with the real URLs filled in)
 
 > Ok I finished that feature and pushed it to `<test-url>`. PR is here `<pr-url>`. Try it out and let me know if it is good. If it is, I'll merge the PR to main and re-deploy prod.
 
-`<test-url>` is the full `https://<SERVER_IP>:<port>/pair#token=…` link `test-deploy` printed. Pairing tokens last ~1 hour; after that (or after a purge), re-mint with `node scripts/test-status.ts --pair <port>`. Once the user pairs, they stay logged in on that port for 30 days — redeploying the same branch to the same slot keeps them paired.
+`<test-url>` is the full `https://t3-test-<port>.gordonlabs.dev/pair#token=…` link `test-deploy` printed. Pairing tokens last ~1 hour; after that (or after a purge), re-mint with `node scripts/test-status.ts --pair <port>`. Once the user pairs, they stay logged in on that slot's URL for 30 days — redeploying the same branch to the same slot keeps them paired.
 
 ## Other commands
 
@@ -155,13 +159,13 @@ swap and retains the newest two builds under `~/.t3-test-deploy/seed-versions/`.
 
 ## Pairing UX
 
-The one-time token is single-use and short-lived; `test-deploy` mints it with `--ttl 1h`. The URL is `<baseUrl>/pair#token=<credential>`; consuming it mints a **30-day per-origin bearer session**. Because each slot is a distinct `host:port` origin, the user pairs **once per test port**. If the token expires before they click (or after a `--purge` teardown), re-mint:
+The one-time token is single-use and short-lived; `test-deploy` mints it with `--ttl 1h`. The URL is `<baseUrl>/pair#token=<credential>`; consuming it mints a **30-day per-origin bearer session**. Because each slot is a distinct origin (its own hostname), the user pairs **once per slot**. If the token expires before they click (or after a `--purge` teardown), re-mint:
 
 ```bash
 node scripts/test-status.ts --pair <port>
 ```
 
-**Degraded mode** (external port not reachable — Caddy not bootstrapped or OVH port closed): the instance still runs on loopback. The handoff and PR comment give an SSH tunnel plus a re-mint bound to the tunnel origin:
+**Degraded mode** (no external URL reachable — Caddy not bootstrapped, or the slot's site missing): the instance still runs on loopback. The handoff and PR comment give an SSH tunnel plus a re-mint bound to the tunnel origin:
 
 ```bash
 ssh -L 8080:127.0.0.1:<loopbackPort> dgordon@<SERVER_IP>
@@ -221,41 +225,42 @@ External URLs require a one-time, user-approved privileged step (the single sanc
 
 ### 1. Caddy bootstrap (external exposure)
 
-`scripts/test-deploy-caddy.ts` prints 10 additive `reverse_proxy` blocks (external `7444–7453` → loopback `3774–3783`), reusing the existing self-signed cert pair shared across the prod blocks. It only prints; appending and reloading is the privileged step:
+**Done on this box** (hostnames since 2026-10-13, bare-IP ports since 2026-07-09; the `caddy-bootstrapped` marker is set). Redo it only on a new box.
+
+`scripts/test-deploy-caddy.ts` prints the pool's Caddy config; it only prints. By default it prints ten hostname sites (`t3-test-7444.gordonlabs.dev` → `127.0.0.1:3774` … `t3-test-7453.gordonlabs.dev` → `127.0.0.1:3783`, following `T3_TEST_DEPLOY_URL_TEMPLATE`) between `# --- BEGIN t3-test-pool-hosts` / `# --- END t3-test-pool-hosts ---` markers. They belong in the **`caddy-t3-trusted`** instance (`/etc/caddy/t3-trusted.Caddyfile`, `:443`, Let's Encrypt), which has no `tls` lines: Caddy obtains one cert per hostname on start. That instance runs `admin off`, so a change is validate → restart → probe the existing sites → restore the backup on failure, under the shared lock:
 
 ```bash
-# 1. Preview the blocks
+# 1. Preview
 node scripts/test-deploy-caddy.ts
 
-# 2. Back up, append, validate, reload (passwordless sudo on this box)
-sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%s)
-node scripts/test-deploy-caddy.ts | sudo tee -a /etc/caddy/Caddyfile >/dev/null
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl reload caddy
+# 2. Under the shared lock: back up, splice the marked block in (above the
+#    `# --- BEGIN factory-clients` block; replace an existing marked block in place),
+#    validate as the caddy user, restart, probe.
+exec 9</etc/caddy/t3-trusted.Caddyfile.lock && flock 9
+sudo cp -p /etc/caddy/t3-trusted.Caddyfile /etc/caddy/t3-trusted.Caddyfile.bak.$(date +%s)
+#    ... edit ...
+sudo -u caddy caddy validate --adapter caddyfile --config /etc/caddy/t3-trusted.Caddyfile
+sudo systemctl restart caddy-t3-trusted          # not reload: admin is off
+curl -s -o /dev/null -w '%{http_code}\n' https://gordonlabs.dev/      # must not be 000/5xx
+curl -s -o /dev/null -w '%{http_code}\n' https://t3.gordonlabs.dev/   # must not be 000/5xx
+#    (on failure: copy the backup back and restart again)
 
-# 3. In the OVH control panel: open inbound TCP 7444-7453 (or confirm the cloud
-#    firewall is disabled). Cannot be done from inside the VM.
+# 3. Each slot answers once its cert is issued (502 while the slot is idle):
+curl -s -o /dev/null -w '%{http_code}\n' https://t3-test-7444.gordonlabs.dev/
 
-# 4. VERIFY external reachability from OFF the box (do NOT skip — see note below).
-#    From your laptop / any external host, one open pool port should answer:
-#      curl -sko /dev/null -w '%{http_code}\n' https://<SERVER_IP>:7444/
-#    Expect an HTTP status (e.g. 200/302/404), NOT a connection timeout/refused.
-
-# 5. Mark the framework as externally-enabled
+# 4. Mark the framework as externally-enabled
 touch ~/.t3-test-deploy/caddy-bootstrapped
 ```
 
-> **Why step 4 matters (marker semantics):** `probeExternal` curls the box's own
-> public IP _from the box_, so it only proves local Caddy is proxying — it
-> **cannot** prove the OVH firewall is actually open to the outside (loopback →
-> own-public-IP bypasses that filter). The `caddy-bootstrapped` marker is an
-> operator assertion that inbound `7444–7453` is genuinely reachable. If you
-> `touch` it without opening the firewall, `test-deploy` will mint and post an
-> `https://<SERVER_IP>:<port>/pair` link that external users get
-> connection-refused on. Run the step-4 external `curl` before creating the
-> marker (and again if the OVH firewall ever changes).
+`--legacy-ip` prints the original bare-IP sites (`https://<SERVER_IP>:7444` … `:7453`, `T3_TEST_DEPLOY_HOST` required) for the main `caddy` instance on the pinned self-signed cert `/etc/caddy/dancode-server.crt`. They are appended at the end of `/etc/caddy/Caddyfile` and need inbound `7444–7453` open in the host and cloud firewalls; the hostnames need only `443`. They stay until nothing uses them, then become 308 redirects to the hostnames or are removed.
 
-Until this is done, `test-deploy` runs in **degraded mode** and hands off SSH-tunnel instructions instead of an `https://…` URL. This is non-destructive: the existing `7443/8443/9443` blocks are never touched; only the additive `7444–7453` blocks are appended.
+> **Marker semantics:** `probeExternal` curls the slot's URLs _from the box_, so it
+> only proves local Caddy is answering — not that the outside world can reach
+> it. The `caddy-bootstrapped` marker is an operator assertion that the URLs are
+> genuinely reachable from outside (for the hostnames: public DNS and port 443).
+> Check one from off the box before creating the marker.
+
+Until this is done, `test-deploy` runs in **degraded mode** and hands off SSH-tunnel instructions instead of an `https://…` URL.
 
 ### 2. `gh` install + auth (user-local, no sudo)
 
@@ -279,7 +284,7 @@ The agent **cannot** authenticate `gh` non-interactively without a secret the us
 
 ## Non-goals
 
-- No rewrites of prod Caddy config beyond the additive `7444–7453` blocks. No touching the `7443/8443/9443` blocks.
+- No rewrites of prod Caddy config beyond the pool's own blocks (the marked `t3-test-pool-hosts` block in `t3-trusted.Caddyfile`, the legacy `7444–7453` blocks in `Caddyfile`). No touching any other site.
 - No auto-merge of PRs. Merging happens only after explicit user approval.
 - No prod restarts except the explicit, user-approved post-merge step; web-only changes never restart prod.
 - No `--host 0.0.0.0` / direct internet binding for test instances (loopback + Caddy only).
