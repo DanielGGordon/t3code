@@ -1226,8 +1226,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --secondary-foreground: #586e75;
   --muted: #eee8d5;
   --muted-foreground: #657b83;
-  --accent: #eee8d5;
-  --accent-foreground: #586e75;
+  /* Hover/highlight lift: must differ from both --popover and the selected
+     tint (foreground/8%), which an opaque #eee8d5 did not. */
+  --accent: color-mix(in srgb, #586e75 14%, transparent);
+  --accent-foreground: #073642;
   --destructive: #dc322f;
   --destructive-foreground: #b52b28;
   --border: #e6dfc8;
@@ -1259,7 +1261,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --secondary-foreground: #93a1a1;
     --muted: color-mix(in srgb, #93a1a1 8%, transparent);
     --muted-foreground: #657b83;
-    --accent: color-mix(in srgb, #93a1a1 12%, transparent);
+    --accent: color-mix(in srgb, #93a1a1 14%, transparent);
     --accent-foreground: #eee8d5;
     --destructive: #dc322f;
     --destructive-foreground: #e56b68;
@@ -2574,12 +2576,14 @@ code {
   --popover-foreground: #586e75;
   --primary: var(--accent-blue);
   --primary-foreground: #fdf6e3;
-  --secondary: #eee8d5;
+  /* secondary/muted/accent are translucent lifts, not opaque base2: popover and
+     card are base2 too, so opaque values made hover:bg-accent invisible. */
+  --secondary: color-mix(in srgb, #586e75 8%, transparent);
   --secondary-foreground: #586e75;
-  --muted: #eee8d5;
+  --muted: color-mix(in srgb, #586e75 8%, transparent);
   --muted-foreground: #93a1a1; /* base1 — secondary text on light */
-  --accent: #eee8d5;
-  --accent-foreground: #586e75;
+  --accent: color-mix(in srgb, #586e75 12%, transparent);
+  --accent-foreground: #073642;
   --destructive: var(--accent-red);
   --destructive-foreground: #fdf6e3;
   --border: color-mix(in srgb, #93a1a1 45%, transparent); /* base1-derived subtle border */
@@ -2613,12 +2617,12 @@ code {
     --popover-foreground: #93a1a1;
     --primary: var(--accent-blue);
     --primary-foreground: #002b36;
-    --secondary: #073642;
+    --secondary: color-mix(in srgb, #93a1a1 7%, transparent);
     --secondary-foreground: #93a1a1;
-    --muted: #073642;
+    --muted: color-mix(in srgb, #93a1a1 8%, transparent);
     --muted-foreground: #93a1a1; /* base1 — secondary text on dark */
-    --accent: #073642;
-    --accent-foreground: #93a1a1;
+    --accent: color-mix(in srgb, #93a1a1 12%, transparent);
+    --accent-foreground: #eee8d5;
     --destructive: var(--accent-red);
     --destructive-foreground: #fdf6e3;
     --border: color-mix(in srgb, #586e75 55%, transparent); /* base01-derived hairline */
