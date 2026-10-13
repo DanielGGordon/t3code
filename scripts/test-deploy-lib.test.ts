@@ -22,6 +22,7 @@ import {
   claimSlot,
   computeSlotState,
   createClaimExclusive,
+  DEFAULT_TEST_URL_TEMPLATE,
   derivedClaimForPort,
   ensureRegistry,
   externalForLoopback,
@@ -30,9 +31,11 @@ import {
   ghCommentArgs,
   ghCommentCommandLine,
   HOST,
+  legacyTestUrlFor,
   loopbackForExternal,
   parsePairingUrl,
   PoolExhaustedError,
+  probeExternal,
   readClaim,
   readSeedManifest,
   registryPaths,
@@ -40,6 +43,8 @@ import {
   resolveSeedTemplate,
   seedBaseDir,
   STARTUP_GRACE_MS,
+  testSiteAddressFor,
+  testUrlCandidates,
   testUrlFor,
   toSafeThreadAttachmentSegment,
   unitForExternal,
@@ -90,7 +95,6 @@ describe("pool math + guards", () => {
     assert.equal(loopbackForExternal(7453), 3783);
     assert.equal(externalForLoopback(3774), 7444);
     assert.equal(unitForExternal(7444), "t3-test-7444.service");
-    assert.equal(testUrlFor(7444), `https://${HOST}:7444`);
   });
 
   it("assertNotProd throws on every forbidden target", () => {
@@ -401,6 +405,82 @@ describe("attachment segment helpers", () => {
   it("rejects file names that are not attachment ids", () => {
     assert.isNull(attachmentFileThreadSegment("no-extension"));
     assert.isNull(attachmentFileThreadSegment("not-a-real-uuid.png"));
+  });
+});
+
+describe("external test URLs", () => {
+  it("defaults to one gordonlabs.dev hostname per slot, named like the unit", () => {
+    assert.equal(DEFAULT_TEST_URL_TEMPLATE, "https://t3-test-{port}.gordonlabs.dev");
+    assert.equal(
+      testUrlFor(7444, DEFAULT_TEST_URL_TEMPLATE),
+      "https://t3-test-7444.gordonlabs.dev",
+    );
+    assert.equal(
+      testUrlFor(7453, DEFAULT_TEST_URL_TEMPLATE),
+      "https://t3-test-7453.gordonlabs.dev",
+    );
+  });
+
+  it("honours a custom template and drops a trailing slash", () => {
+    assert.equal(testUrlFor(7450, "https://{port}.example.test/"), "https://7450.example.test");
+    assert.equal(
+      testUrlFor(7450, "https://box.example.test:{port}"),
+      "https://box.example.test:7450",
+    );
+  });
+
+  it("keeps the legacy https://<HOST>:<port> form as a fallback, never the placeholder", () => {
+    assert.equal(legacyTestUrlFor(7450, "203.0.113.7"), "https://203.0.113.7:7450");
+    assert.isNull(legacyTestUrlFor(7450, "<SERVER_IP>"));
+    assert.isNull(legacyTestUrlFor(7450, ""));
+  });
+
+  it("tries the template URL first", () => {
+    const candidates = testUrlCandidates(7450);
+    assert.equal(candidates[0], testUrlFor(7450));
+    assert.equal(new Set(candidates).size, candidates.length);
+    if (HOST === "<SERVER_IP>") {
+      assert.lengthOf(candidates, 1);
+    }
+  });
+
+  it("derives the Caddy site address from the URL", () => {
+    assert.equal(testSiteAddressFor(7450), new URL(testUrlFor(7450)).host);
+  });
+});
+
+describe("probeExternal", () => {
+  const urls = ["https://t3-test-7450.gordonlabs.dev", "https://203.0.113.7:7450"];
+
+  it("is null until Caddy is bootstrapped", () => {
+    ensureRegistry();
+    assert.isNull(probeExternal(7450, () => "200", urls));
+  });
+
+  it("returns the first URL that answers", () => {
+    ensureRegistry();
+    writeFileSync(registryPaths().bootstrapMarker, "");
+    const asked: string[] = [];
+    const hit = probeExternal(
+      7450,
+      (url) => {
+        asked.push(url);
+        return "502";
+      },
+      urls,
+    );
+    assert.deepEqual(hit, { url: urls[0], code: "502" });
+    assert.deepEqual(asked, [`${urls[0]}/`]);
+  });
+
+  it("falls back to the legacy URL, then to degraded (null)", () => {
+    ensureRegistry();
+    writeFileSync(registryPaths().bootstrapMarker, "");
+    assert.deepEqual(
+      probeExternal(7450, (url) => (url.startsWith(urls[1]!) ? "200" : null), urls),
+      { url: urls[1], code: "200" },
+    );
+    assert.isNull(probeExternal(7450, () => null, urls));
   });
 });
 

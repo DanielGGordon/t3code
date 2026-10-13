@@ -262,7 +262,7 @@ function printHandoff(handoff: Handoff): void {
     // token must be minted against the tunnel origin (we do not know the user's
     // chosen local port yet). Do not print a token-less external URL as if live.
     process.stdout.write(
-      "DEGRADED MODE: external HTTPS port not reachable (Caddy not bootstrapped or OVH port closed).\n" +
+      `DEGRADED MODE: external HTTPS not reachable at ${testUrlFor(claim.externalPort)} (Caddy not bootstrapped, or its site missing).\n` +
         "The instance is running on loopback only; the external URL is NOT reachable — do not paste it.\n" +
         "Hand the user an SSH tunnel and mint the pairing link against the tunnel origin:\n\n" +
         `  ssh -L 8080:127.0.0.1:${claim.loopbackPort} dgordon@${HOST}\n` +
@@ -441,8 +441,9 @@ function main(): void {
       claim = updateClaim(externalPort, { prUrl: prUrlArg });
     }
 
-    const externalCode = probeExternal(externalPort);
-    const degraded = externalCode === null;
+    // The hostname URL first, then the legacy https://<HOST>:<port> site.
+    const external = probeExternal(externalPort);
+    const degraded = external === null;
 
     // Only mint a real (external) pairing link when the external path is live.
     // In degraded mode we cannot mint a usable link (the token is bound to the
@@ -457,7 +458,7 @@ function main(): void {
       pairedUrl = mintPairingLink({
         worktreePath,
         baseDir: claim.baseDir,
-        baseUrl: testUrlFor(externalPort),
+        baseUrl: external.url,
         ttl: "1h",
         label: `${unit} ${branch}`,
       });
