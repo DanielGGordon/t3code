@@ -205,6 +205,22 @@ export class OrchestratorCommandPreviouslyRejectedError extends Schema.TaggedErr
   }
 }
 
+/**
+ * Fork: the guard's answer to a prompt-cache keep-alive ping for a thread that
+ * is no longer due one (it got busy, was put away, or moved on to another run).
+ * Carried as the cause of the dispatch error so the sweep can tell this normal
+ * race from an infrastructure failure worth retrying.
+ */
+export class OrchestratorCacheKeepAliveRefusal extends Schema.TaggedError<OrchestratorCacheKeepAliveRefusal>()(
+  "OrchestratorCacheKeepAliveRefusal",
+  { threadId: ThreadId, runId: RunId },
+) {
+  override get message(): string {
+    return "This thread is no longer waiting for a cache keep-alive ping.";
+  }
+}
+export const isOrchestratorCacheKeepAliveRefusal = Schema.is(OrchestratorCacheKeepAliveRefusal);
+
 export class OrchestratorCommandIdConflictError extends Schema.TaggedError<OrchestratorCommandIdConflictError>()(
   "OrchestratorCommandIdConflictError",
   {
@@ -382,13 +398,14 @@ const ASYNC_ANSWER_MESSAGE_ID_PREFIX = "async-answer:";
 /**
  * Fork: a message the user wrote, for keep-alive's ping budget. Clients' sends
  * are stamped `user`; answers to a question the agent asked asynchronously are
- * relayed by the server under `async-answer:` ids. Other server-sent turns
- * (usage-limit recovery, scheduled work, the pings) and agents do not count.
+ * relayed by the server under `async-answer:` ids. Scheduled tasks (sent as the
+ * user who created them), other server-sent turns (usage-limit recovery, the
+ * pings) and agents do not count.
  */
 function isUserActivity(
   command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
 ): boolean {
-  if (command.createdBy !== "user") return false;
+  if (command.createdBy !== "user" || command.scheduledTaskId !== undefined) return false;
   return (
     command.creationSource !== "server" ||
     command.messageId.startsWith(ASYNC_ANSWER_MESSAGE_ID_PREFIX)
@@ -4572,7 +4589,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
-            cause: "This thread is no longer waiting for a cache keep-alive ping.",
+            cause: new OrchestratorCacheKeepAliveRefusal({
+              threadId: command.threadId,
+              runId: command.cacheKeepAliveOfRunId!,
+            }),
           });
         }
       }

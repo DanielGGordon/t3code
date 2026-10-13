@@ -1908,9 +1908,11 @@ export const OrchestrationV2ThreadCacheKeepAliveContext = Schema.Struct({
       status: OrchestrationV2RunStatus,
       completedAt: Schema.NullOr(Schema.DateTimeUtc),
       /**
-       * When the run's last provider item began (its root node's assistant,
-       * reasoning or tool items): about when its last provider request went
-       * out, which is what the cache counts from.
+       * When the latest model-produced item on the run's root node began
+       * (`CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES`; for Claude in practice its last
+       * root reasoning item, since assistant and most tool items sit on child
+       * nodes): about when its last provider request went out, which is what
+       * the cache counts from. Null when the root node has none.
        */
       lastProviderActivityAt: Schema.NullOr(Schema.DateTimeUtc),
     }),

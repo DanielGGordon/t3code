@@ -18,24 +18,37 @@ import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroun
 
 export const PROMPT_CACHE_TTL_MS = 60 * 60_000;
 /**
- * How long before expiry the ping goes out. The cache clock is dated by the
- * start of the run's last provider item, a little after the request that
- * produced it, and the server sweeps every 30 s; two minutes covers both.
+ * How long before expiry the ping goes out, so pings land 55–57 minutes after
+ * the anchor. T3 releases a Claude session after 30 idle minutes, so a ping
+ * first restarts Claude Code and its MCP servers: after a long idle, request to
+ * first response measured p50 8 s, p90 40 s, and occasionally over a minute. A
+ * ping that lands after expiry is the costliest outcome (a full cache write),
+ * so the lead is generous on purpose. It also covers the anchor sitting a few
+ * seconds after the request and the 30 s sweep.
  */
-export const CACHE_KEEP_ALIVE_LEAD_MS = 2 * 60_000;
+export const CACHE_KEEP_ALIVE_LEAD_MS = 5 * 60_000;
 /** Pings in a row without a user message before keep-alive pauses (about 8 h). */
 export const CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES = 8;
 /** Shared verbatim with Alfred's manual nudge button. */
 export const CACHE_KEEP_ALIVE_NUDGE_TEXT =
   'Keep-alive ping to keep the prompt cache warm. No action needed — just reply "ok".';
-/** Ping messages use `<prefix><threadId>:<runId>` ids, which also mark them in the transcript. */
+/**
+ * Ping messages use `<prefix><threadId>:<runId>:<attempt>` ids, which also mark
+ * them in the transcript.
+ */
 export const CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX = "cache-keep-alive:";
 
 /**
- * Turn items a model response produces. The latest one on a run's root node
- * began just after the run's last provider request, which is when the cache
- * clock last restarted. Checkpoints, errors, notices and bookkeeping items are
+ * Turn items a model response produces; the anchor is the latest one on the
+ * run's root node. Checkpoints, errors, notices and bookkeeping items are
  * written by the server, often minutes later, so they do not count.
+ *
+ * Only the root node is read. The Claude adapter puts assistant messages and
+ * most tool items on per-item child nodes (subagents, which do not touch the
+ * parent's cache, are child nodes too), so in practice the anchor is the run's
+ * last root `reasoning` item: measured within about 9 s of the true last
+ * request. A run with no root provider item falls back to its completion time
+ * when it completed, and is not pinged when it was stopped.
  */
 export const CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES: ReadonlyArray<string> = [
   "assistant_message",

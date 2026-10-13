@@ -66,8 +66,9 @@ Behavior**; both apply to the device you set them on.
 ### Keep cache warm
 
 To keep a conversation's cache from lapsing at all, turn on **Keep cache warm** in the
-chat header. About two minutes before the cache would expire, the server sends the
-thread a short ping asking Claude to reply "ok", which starts a fresh hour. It works
+chat header. About five minutes before the cache would expire, the server sends the
+thread a short ping asking Claude to reply "ok", which starts a fresh hour. The early
+start leaves room for Claude Code to restart after a long idle. It works
 with every browser closed, and the setting is saved with the thread. Hover the button
 to see when the next ping is due. Agents can turn it on or off with the
 `t3_thread_organize` tool.

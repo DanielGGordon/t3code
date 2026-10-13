@@ -16,6 +16,7 @@ import {
   ProviderThreadId,
   RunId,
   RuntimeRequestId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2Command,
@@ -99,40 +100,65 @@ const runFixture = (threadId: ThreadId, ordinal: number, at: DateTime.Utc): Orch
   contextHandoffId: null,
 });
 
-/** A provider item on the run's root node: the provider's request time. */
-const providerItem = (
+/**
+ * What the Claude adapter records for a model response, as it really lays it
+ * out: a `reasoning` item on the run's root node, which begins just after the
+ * request, and the assistant message on a per-item child node a little later.
+ * Only the root item dates the cache.
+ */
+const providerItems = (
   run: OrchestrationV2Run,
   startedAt: DateTime.Utc,
-): OrchestrationV2DomainEvent => {
-  const id = nextId("item");
-  return {
-    id: EventId.make(`event:${id}`),
-    type: "turn-item.updated",
-    threadId: run.threadId,
-    runId: run.id,
-    driver,
-    occurredAt: startedAt,
-    payload: {
-      id: TurnItemId.make(id),
-      threadId: run.threadId,
-      runId: run.id,
-      nodeId: run.rootNodeId,
-      providerThreadId: run.providerThreadId,
-      providerTurnId: null,
-      nativeItemRef: null,
-      parentItemId: null,
-      ordinal: fixtureCounter,
-      status: "completed",
-      title: null,
-      startedAt,
-      completedAt: startedAt,
-      updatedAt: startedAt,
-      type: "assistant_message",
-      messageId: MessageId.make(`assistant:${id}`),
-      text: "Done.",
-      streaming: false,
-    },
+): ReadonlyArray<OrchestrationV2DomainEvent> => {
+  const base = (nodeId: NodeId | null, at: DateTime.Utc) => {
+    const id = nextId("item");
+    return {
+      id,
+      event: {
+        id: EventId.make(`event:${id}`),
+        type: "turn-item.updated" as const,
+        threadId: run.threadId,
+        runId: run.id,
+        driver,
+        occurredAt: at,
+      },
+      payload: {
+        id: TurnItemId.make(id),
+        threadId: run.threadId,
+        runId: run.id,
+        nodeId,
+        providerThreadId: run.providerThreadId,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: fixtureCounter,
+        status: "completed" as const,
+        title: null,
+        startedAt: at,
+        completedAt: at,
+        updatedAt: at,
+      },
+    };
   };
+  const root = base(run.rootNodeId, startedAt);
+  const answeredAt = DateTime.add(startedAt, { seconds: 5 });
+  const child = base(NodeId.make(`${run.rootNodeId}:child:${fixtureCounter}`), answeredAt);
+  return [
+    {
+      ...root.event,
+      payload: { ...root.payload, type: "reasoning", text: "Thinking.", streaming: false },
+    },
+    {
+      ...child.event,
+      payload: {
+        ...child.payload,
+        type: "assistant_message",
+        messageId: MessageId.make(`assistant:${child.id}`),
+        text: "Done.",
+        streaming: false,
+      },
+    },
+  ];
 };
 
 const runUpdated = (run: OrchestrationV2Run): OrchestrationV2DomainEvent => ({
@@ -158,7 +184,7 @@ const recordRun = (
   },
 ) =>
   write([
-    ...(options.lastRequestAt === null ? [] : [providerItem(run, options.lastRequestAt)]),
+    ...(options.lastRequestAt === null ? [] : providerItems(run, options.lastRequestAt)),
     runUpdated({
       ...run,
       status: options.status ?? "completed",
@@ -424,16 +450,18 @@ it.effect(
 
       const shell = yield* shellOf(threadId);
       expect(shell.cacheKeepAliveContext?.run).toMatchObject({ id: run.id });
+      // The root reasoning item dates it: not the checkpoint item, and not the
+      // assistant message on its child node 5 s later.
       assert.deepEqual(shell.cacheKeepAliveContext?.run?.lastProviderActivityAt, lastRequestAt);
-      // The in-memory shell builder agrees with the SQL one.
+      // The in-memory shell builder agrees with the SQL one on that layout.
       assert.deepEqual(
         ProjectionStore.threadShellFromProjection(yield* projections.getThreadProjection(threadId))
           .cacheKeepAliveContext,
         shell.cacheKeepAliveContext,
       );
 
-      // 58 minutes after the last request (53 after the recorded completion) it is due.
-      yield* TestClock.adjust("58 minutes");
+      // 55 minutes after the last request (50 after the recorded completion) it is due.
+      yield* TestClock.adjust("55 minutes");
       const ping = yield* pingCommand(threadId);
       assert.isNotNull(ping);
       yield* (yield* Orchestrator.OrchestratorV2).dispatch(ping!);
@@ -460,7 +488,7 @@ it.effect("dates a stopped run by its last request, and never guesses without on
       status: "interrupted",
     });
 
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     const ping = yield* pingCommand(stoppedId);
     expect(ping).toMatchObject({ cacheKeepAliveOfRunId: stopped.id });
     yield* (yield* Orchestrator.OrchestratorV2).dispatch(ping!);
@@ -486,7 +514,7 @@ it.effect("keeps the run that executed last warm, whatever order runs were queue
     yield* recordRun(resumed, { lastRequestAt: yield* DateTime.now });
 
     expect((yield* shellOf(threadId)).cacheKeepAliveContext?.run).toMatchObject({ id: resumed.id });
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     const ping = yield* pingCommand(threadId);
     expect(ping).toMatchObject({ cacheKeepAliveOfRunId: resumed.id });
     yield* (yield* Orchestrator.OrchestratorV2).dispatch(ping!);
@@ -509,7 +537,7 @@ it.effect("a queued message cancelled before it started leaves the warm run in c
     ]);
     expect((yield* shellOf(threadId)).cacheKeepAliveContext?.run).toMatchObject({ id: warm.id });
 
-    yield* TestClock.adjust("53 minutes");
+    yield* TestClock.adjust("50 minutes");
     const ping = yield* pingCommand(threadId);
     expect(ping).toMatchObject({ cacheKeepAliveOfRunId: warm.id });
     yield* (yield* Orchestrator.OrchestratorV2).dispatch(ping!);
@@ -529,7 +557,7 @@ it.effect("refuses pings mid-turn, off Claude, and for archived, snoozed or sett
         return { kind, threadId, run: yield* createIdleThread(threadId) };
       }),
     );
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
 
     // Due, then the user starts a turn before the ping lands.
     const ping = yield* pingCommand(busyId);
@@ -567,7 +595,7 @@ it.effect("the user's messages reset the ping count; agents' do not", () =>
     const threadId = ThreadId.make("thread:keep-alive-reset");
     yield* createIdleThread(threadId);
     for (let sent = 1; sent <= 2; sent++) {
-      yield* TestClock.adjust("58 minutes");
+      yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
     assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, 2);
@@ -575,6 +603,12 @@ it.effect("the user's messages reset the ping count; agents' do not", () =>
     yield* orchestrator.dispatch(
       sendMessage(threadId, { createdBy: "agent", creationSource: "mcp" }),
     );
+    assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, 2);
+    // A web-created scheduled task is sent as the user who made it; still not the user.
+    yield* orchestrator.dispatch({
+      ...userMessage(threadId),
+      scheduledTaskId: ScheduledTaskId.make("task:daily-audit"),
+    });
     assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, 2);
 
     yield* orchestrator.dispatch(userMessage(threadId));
@@ -587,7 +621,7 @@ it.effect("a user message sent while a ping runs makes that run real work, not a
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const threadId = ThreadId.make("thread:keep-alive-steer");
     yield* createIdleThread(threadId);
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     const ping = yield* pingCommand(threadId);
     yield* orchestrator.dispatch(ping!);
     expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 1, lastNudgeAfterRead: true });
@@ -610,7 +644,7 @@ it.effect("answering an agent's question counts as the user writing", () =>
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const threadId = ThreadId.make("thread:keep-alive-answer");
     yield* createIdleThread(threadId);
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     const pingRun = yield* pingAndFinish(threadId);
     assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, 1);
 
@@ -675,7 +709,7 @@ it.effect("marking the thread unread overrides a quiet ping", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:keep-alive-unread");
     yield* createIdleThread(threadId);
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     yield* pingAndFinish(threadId);
     assert.isTrue((yield* keepAliveOf(threadId))?.lastNudgeAfterRead);
     yield* (yield* Orchestrator.OrchestratorV2).dispatch({
@@ -694,13 +728,13 @@ it.effect("pauses after the ping budget; the user's next message or the toggle r
     const threadId = ThreadId.make("thread:keep-alive-cap");
     yield* createIdleThread(threadId);
     for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
-      yield* TestClock.adjust("58 minutes");
+      yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
       assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, sent);
     }
     const paused = (yield* keepAliveOf(threadId))!;
     assert.isNotNull(paused.pausedAt);
-    yield* TestClock.adjust("58 minutes");
+    yield* TestClock.adjust("55 minutes");
     assert.isNull(yield* pingCommand(threadId));
     assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
 
@@ -715,7 +749,7 @@ it.effect("pauses after the ping budget; the user's next message or the toggle r
     for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
       const run = (yield* projections.getThreadProjection(threadId)).runs.at(-1)!;
       yield* recordRun(run, { lastRequestAt: yield* DateTime.now });
-      yield* TestClock.adjust("58 minutes");
+      yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
     assert.isNotNull((yield* keepAliveOf(threadId))?.pausedAt ?? null);
@@ -729,7 +763,7 @@ it.effect("the toggle, count and pause rebuild from the event log", () =>
     const threadId = ThreadId.make("thread:keep-alive-rebuild");
     yield* createIdleThread(threadId);
     for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
-      yield* TestClock.adjust("58 minutes");
+      yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
     const live = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThread(threadId))
@@ -820,7 +854,7 @@ it.effect("the real sweep pings a due thread through the projection and the orch
       Layer.provide(Layer.merge(ThreadManagementService.layer, Scheduler.layer)),
     );
     yield* Effect.gen(function* () {
-      yield* TestClock.adjust("58 minutes");
+      yield* TestClock.adjust("55 minutes");
       // The scheduler fiber runs the sweep after the tick; let it finish.
       let keepAlive = yield* keepAliveOf(threadId);
       for (let turn = 0; turn < 200 && keepAlive?.nudgeCount !== 1; turn++) {
@@ -839,15 +873,27 @@ it.effect("the real sweep pings a due thread through the projection and the orch
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("the sweep runs every 30 seconds and sends each idle period's ping once", () =>
+/**
+ * The worker against a due thread, with the orchestrator mocked so a test can
+ * script each dispatch's outcome.
+ */
+const runMockedSweep = (
+  outcome: (attempt: number) => Effect.Effect<void, Orchestrator.OrchestratorV2Error>,
+  body: (state: {
+    readonly commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>;
+    readonly sweeps: Ref.Ref<number>;
+    readonly runId: RunId;
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<void>,
+) =>
   Effect.gen(function* () {
-    const completedAt = yield* DateTime.now;
+    const anchor = yield* DateTime.now;
     const threadId = ThreadId.make("thread:keep-alive-sweep");
     const runId = RunId.make("run:keep-alive-sweep");
     const shell = {
       id: threadId,
       cacheKeepAlive: {
-        enabledAt: completedAt,
+        enabledAt: anchor,
         nudgeCount: 0,
         pausedAt: null,
         lastNudgeRunId: null,
@@ -855,7 +901,12 @@ it.effect("the sweep runs every 30 seconds and sends each idle period's ping onc
       },
       cacheKeepAliveContext: {
         driver,
-        run: { id: runId, status: "completed", completedAt, lastProviderActivityAt: completedAt },
+        run: {
+          id: runId,
+          status: "completed",
+          completedAt: anchor,
+          lastProviderActivityAt: anchor,
+        },
         hasQueuedRun: false,
       },
       archivedAt: null,
@@ -880,7 +931,8 @@ it.effect("the sweep runs every 30 seconds and sends each idle period's ping onc
           }),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             dispatch: (command) =>
-              Ref.update(commands, (all) => [...all, command]).pipe(
+              Ref.updateAndGet(commands, (all) => [...all, command]).pipe(
+                Effect.flatMap((all) => outcome(all.length)),
                 Effect.as({ sequence: 1, storedEvents: [] }),
               ),
           }),
@@ -888,24 +940,107 @@ it.effect("the sweep runs every 30 seconds and sends each idle period's ping onc
       ),
       Layer.provide(Scheduler.layer),
     );
-    yield* Effect.gen(function* () {
-      yield* TestClock.adjust("58 minutes");
-      expect(yield* Ref.get(commands)).toMatchObject([
-        {
-          type: "message.dispatch",
-          commandId: `cache-keep-alive:${threadId}:${runId}`,
-          messageId: `cache-keep-alive:${threadId}:${runId}`,
-          cacheKeepAliveOfRunId: runId,
-        },
-      ]);
-      // Scheduler ticks every 5 s; the keep-alive sweep runs at most every 30 s.
-      const sweepsSoFar = yield* Ref.get(sweeps);
-      yield* TestClock.adjust("25 seconds");
-      assert.equal(yield* Ref.get(sweeps), sweepsSoFar);
-      yield* TestClock.adjust("5 seconds");
-      assert.equal(yield* Ref.get(sweeps), sweepsSoFar + 1);
-      // The same idle period's ping is not sent again (its receipt settles it).
-      assert.equal((yield* Ref.get(commands)).length, 1);
-    }).pipe(Effect.provide(layerWorker));
-  }),
+    yield* body({ commands, sweeps, runId, threadId }).pipe(Effect.provide(layerWorker));
+  });
+
+const commandIds = (commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>) =>
+  Effect.map(Ref.get(commands), (all) => all.map((command) => command.commandId));
+
+it.effect("the sweep runs every 30 seconds and sends each idle period's ping once", () =>
+  runMockedSweep(
+    () => Effect.void,
+    ({ commands, sweeps, runId, threadId }) =>
+      Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        expect(yield* Ref.get(commands)).toMatchObject([
+          {
+            type: "message.dispatch",
+            commandId: `cache-keep-alive:${threadId}:${runId}:1`,
+            messageId: `cache-keep-alive:${threadId}:${runId}:1`,
+            cacheKeepAliveOfRunId: runId,
+          },
+        ]);
+        // Scheduler ticks every 5 s; the keep-alive sweep runs at most every 30 s.
+        const sweepsSoFar = yield* Ref.get(sweeps);
+        yield* TestClock.adjust("25 seconds");
+        assert.equal(yield* Ref.get(sweeps), sweepsSoFar);
+        yield* TestClock.adjust("5 seconds");
+        assert.equal(yield* Ref.get(sweeps), sweepsSoFar + 1);
+        // The accepted ping is not sent again.
+        assert.equal((yield* Ref.get(commands)).length, 1);
+      }),
+  ),
+);
+
+it.effect("an infrastructure failure is retried under a new command id, at most twice", () =>
+  runMockedSweep(
+    (attempt) =>
+      attempt <= 3
+        ? Effect.fail(
+            new Orchestrator.OrchestratorDispatchError({
+              commandId: CommandId.make(`failed:${attempt}`),
+              commandType: "message.dispatch",
+              cause: new Error("database is locked"),
+            }),
+          )
+        : Effect.void,
+    ({ commands, runId, threadId }) =>
+      Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        yield* TestClock.adjust("30 seconds");
+        yield* TestClock.adjust("30 seconds");
+        yield* TestClock.adjust("30 seconds");
+        assert.deepEqual(yield* commandIds(commands), [
+          `cache-keep-alive:${threadId}:${runId}:1`,
+          `cache-keep-alive:${threadId}:${runId}:2`,
+          `cache-keep-alive:${threadId}:${runId}:3`,
+        ]);
+      }),
+  ),
+);
+
+it.effect("a transient failure followed by success sends one ping", () =>
+  runMockedSweep(
+    (attempt) =>
+      attempt === 1
+        ? Effect.fail(
+            new Orchestrator.OrchestratorDispatchError({
+              commandId: CommandId.make("failed:once"),
+              commandType: "message.dispatch",
+              cause: new Error("database is locked"),
+            }),
+          )
+        : Effect.void,
+    ({ commands, runId, threadId }) =>
+      Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        yield* TestClock.adjust("90 seconds");
+        assert.deepEqual(yield* commandIds(commands), [
+          `cache-keep-alive:${threadId}:${runId}:1`,
+          `cache-keep-alive:${threadId}:${runId}:2`,
+        ]);
+      }),
+  ),
+);
+
+it.effect("the guard's refusal is final for the idle period", () =>
+  runMockedSweep(
+    () =>
+      Effect.fail(
+        new Orchestrator.OrchestratorDispatchError({
+          commandId: CommandId.make("refused"),
+          commandType: "message.dispatch",
+          cause: new Orchestrator.OrchestratorCacheKeepAliveRefusal({
+            threadId: ThreadId.make("thread:keep-alive-sweep"),
+            runId: RunId.make("run:keep-alive-sweep"),
+          }),
+        }),
+      ),
+    ({ commands }) =>
+      Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        yield* TestClock.adjust("90 seconds");
+        assert.equal((yield* Ref.get(commands)).length, 1);
+      }),
+  ),
 );
