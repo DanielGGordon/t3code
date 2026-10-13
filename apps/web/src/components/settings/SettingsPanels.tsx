@@ -32,6 +32,7 @@ import {
   MAX_INTERFACE_FONT_SIZE,
   MAX_PANEL_ANIMATION_DURATION_MS,
   MAX_PROMPT_FONT_SIZE,
+  MAX_CACHE_EXPIRY_BANNER_TOKENS,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MAX_TERMINAL_FONT_SIZE,
   MIN_CODE_FONT_SIZE,
@@ -40,6 +41,7 @@ import {
   MIN_INTERFACE_FONT_SIZE,
   MIN_PANEL_ANIMATION_DURATION_MS,
   MIN_PROMPT_FONT_SIZE,
+  MIN_CACHE_EXPIRY_BANNER_TOKENS,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   type ResponseStreamingMode,
   MIN_TERMINAL_FONT_SIZE,
@@ -2075,12 +2077,20 @@ function FontFamilySettingsRow({
 
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
-function AutoSettleDaysInput({
+function IntegerSettingInput({
   value,
+  min,
+  max,
+  className = "w-full sm:w-24",
+  ariaLabel,
   onCommit,
 }: {
   value: number;
-  onCommit: (days: number) => void;
+  min: number;
+  max: number;
+  className?: string;
+  ariaLabel: string;
+  onCommit: (value: number) => void;
 }) {
   // Local draft so the field can be emptied mid-edit; the setting only moves
   // on valid input and snaps back to the persisted value on blur.
@@ -2093,9 +2103,9 @@ function AutoSettleDaysInput({
     <Input
       size="sm"
       type="number"
-      min={MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
-      max={MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
-      className="w-full sm:w-24"
+      min={min}
+      max={max}
+      className={className}
       value={draft}
       onChange={(event) => {
         setDraft(event.target.value);
@@ -2103,16 +2113,12 @@ function AutoSettleDaysInput({
         // committed 3 while the field shows 3.5) — commit only when the
         // persisted value matches the displayed one.
         const parsed = Number(event.target.value);
-        if (
-          Number.isInteger(parsed) &&
-          parsed >= MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS &&
-          parsed <= MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS
-        ) {
+        if (Number.isInteger(parsed) && parsed >= min && parsed <= max) {
           onCommit(parsed);
         }
       }}
       onBlur={() => setDraft(String(value))}
-      aria-label="Days of inactivity before auto-settle"
+      aria-label={ariaLabel}
     />
   );
 }
@@ -2507,8 +2513,11 @@ export function GeneralSettingsPanel() {
                 title={searchableSetting("days-before-auto-settle").title}
                 description="Any new activity un-settles a thread automatically."
                 control={
-                  <AutoSettleDaysInput
+                  <IntegerSettingInput
                     value={settings.sidebarAutoSettleAfterDays}
+                    min={MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
+                    max={MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
+                    ariaLabel="Days of inactivity before auto-settle"
                     onCommit={(days) => updateSettings({ sidebarAutoSettleAfterDays: days })}
                   />
                 }
@@ -2531,6 +2540,33 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <SettingsRow
+          {...searchableSetting("cache-expiry-banners")}
+          description="A banner, until you close it, when an idle Claude conversation is 10 minutes from losing its one-hour prompt cache. Applies to this device."
+          control={
+            <Switch
+              checked={settings.cacheExpiryBannerEnabled}
+              onCheckedChange={(checked) => updateSettings({ cacheExpiryBannerEnabled: checked })}
+              aria-label="Cache expiry banners"
+            />
+          }
+        />
+        {settings.cacheExpiryBannerEnabled ? (
+          <SettingsRow
+            {...searchableSetting("cache-expiry-banner-min-tokens")}
+            description="Only conversations with at least this many tokens of context."
+            control={
+              <IntegerSettingInput
+                value={settings.cacheExpiryBannerMinTokens}
+                min={MIN_CACHE_EXPIRY_BANNER_TOKENS}
+                max={MAX_CACHE_EXPIRY_BANNER_TOKENS}
+                className="w-full sm:w-32"
+                ariaLabel="Minimum context tokens for cache expiry banners"
+                onCommit={(tokens) => updateSettings({ cacheExpiryBannerMinTokens: tokens })}
+              />
+            }
+          />
+        ) : null}
         <SettingsRow
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."

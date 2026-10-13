@@ -1457,6 +1457,13 @@ export function threadShellFromProjection(
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
+    idleContextTokens:
+      activeRun === null
+        ? activeProviderContextTokensForShell(
+            projection.providerThreads,
+            projection.thread.activeProviderThreadId,
+          )
+        : null,
     itemCount: activeLocalTurnItems(projection).length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
@@ -1513,6 +1520,17 @@ function activeProviderGoalForShell(
   return providerThreads.find((thread) => thread.id === activeProviderThreadId)?.goal ?? null;
 }
 
+/** Context size of the provider thread that currently owns the conversation. */
+function activeProviderContextTokensForShell(
+  providerThreads: ReadonlyArray<OrchestrationV2ThreadProjection["providerThreads"][number]>,
+  activeProviderThreadId: OrchestrationV2ThreadProjection["thread"]["activeProviderThreadId"],
+): number | null {
+  return (
+    providerThreads.find((thread) => thread.id === activeProviderThreadId)?.contextUsage
+      ?.usedTokens ?? null
+  );
+}
+
 function isInterruptibleRunForShell(run: OrchestrationV2ThreadProjection["runs"][number]): boolean {
   return run.status === "preparing" || run.status === "starting" || run.status === "running";
 }
@@ -1547,6 +1565,7 @@ type ShellThreadState = {
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
+  readonly activeContextTokens: number | null;
   readonly itemCount: number;
   readonly runlessItemCount: number;
   readonly updatedAt: OrchestrationV2ThreadProjection["updatedAt"];
@@ -1713,6 +1732,7 @@ function shellFromState(input: {
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
+    idleContextTokens: input.state.activeRunId === null ? input.state.activeContextTokens : null,
     itemCount: input.state.itemCount,
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
@@ -5495,6 +5515,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             providerThreads: providerThreadsByThreadId.get(thread.id) ?? [],
           }),
           goal: activeProviderGoalForShell(
+            providerThreadsByThreadId.get(thread.id) ?? [],
+            thread.activeProviderThreadId,
+          ),
+          activeContextTokens: activeProviderContextTokensForShell(
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),

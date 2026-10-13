@@ -1684,6 +1684,121 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
+  it.effect("shows the active provider thread's context size on an idle shell only", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:idle-context");
+      const runId = RunId.make("run:idle-context");
+      const rootNodeId = NodeId.make("node:idle-context");
+      yield* projectionStore.apply({
+        id: EventId.make("event:idle-context:thread"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("project:idle-context"),
+          title: "Idle context",
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:idle-context:provider-thread"),
+        type: "provider-thread.updated",
+        threadId,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: ProviderThreadId.make("provider-thread:idle-context"),
+          driver,
+          providerInstanceId,
+          providerSessionId: null,
+          appThreadId: threadId,
+          ownerNodeId: null,
+          nativeThreadRef: null,
+          nativeConversationHeadRef: null,
+          status: "idle",
+          firstRunOrdinal: null,
+          lastRunOrdinal: null,
+          handoffIds: [],
+          forkedFrom: null,
+          contextUsage: { usedTokens: 182_000, maxTokens: 1_000_000 },
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const run = {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection,
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:idle-context"),
+        rootNodeId,
+        activeAttemptId: null,
+        status: "running" as const,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      const contextTokens = Effect.gen(function* () {
+        const fromSnapshot = (yield* projectionStore.getShellSnapshot()).threads.find(
+          (thread) => thread.id === threadId,
+        )?.idleContextTokens;
+        const fromThread = (yield* projectionStore.getThreadShell(threadId))?.idleContextTokens;
+        assert.strictEqual(fromSnapshot, fromThread);
+        return fromThread;
+      });
+
+      assert.strictEqual(yield* contextTokens, 182_000);
+      yield* projectionStore.apply({
+        id: EventId.make("event:idle-context:run-created"),
+        type: "run.created",
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: run,
+      });
+      // Mid-turn token updates must not change the shell, so it reads null.
+      assert.isNull(yield* contextTokens);
+      yield* projectionStore.apply({
+        id: EventId.make("event:idle-context:run-completed"),
+        type: "run.updated",
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        driver,
+        occurredAt: DateTime.add(now, { seconds: 1 }),
+        payload: { ...run, status: "completed", completedAt: DateTime.add(now, { seconds: 1 }) },
+      });
+      assert.strictEqual(yield* contextTokens, 182_000);
+    }),
+  );
+
   it.effect("does not treat visited or marked-unread state as thread activity", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;

@@ -115,6 +115,8 @@ export interface EnvironmentThreadShell {
   readonly providerInstanceHistory: ReadonlyArray<ProviderInstanceId>;
   /** Native `/goal` on the active provider thread. */
   readonly goal: OrchestrationV2ProviderGoal | null;
+  /** Fork: context tokens while no run is active; null mid-run or from older servers. */
+  readonly idleContextTokens?: number | null;
   readonly itemCount: number;
   readonly visibleItemCount: number;
   readonly createdAt: string;
@@ -265,6 +267,7 @@ export function presentThreadShell(
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
     providerInstanceHistory: thread.providerInstanceHistory ?? [],
     goal: thread.goal ?? null,
+    idleContextTokens: thread.idleContextTokens ?? null,
     itemCount: thread.itemCount,
     visibleItemCount: thread.visibleItemCount,
     createdAt: iso(thread.createdAt),
