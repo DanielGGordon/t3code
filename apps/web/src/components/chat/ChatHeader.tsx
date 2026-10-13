@@ -529,6 +529,7 @@ export const ChatHeader = memo(function ChatHeader({
                 className="shrink-0 touch:size-12 touch:min-w-12"
                 pressed={restartRequested}
                 onPressedChange={onToggleRestartRequest}
+                disabled={!canOperateThread}
                 aria-label="Flag this chat as needing a service restart"
                 variant="outline-destructive"
                 size="xs"

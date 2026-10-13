@@ -2605,7 +2605,7 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const activeProjectDefaultModelSelection = activeProjectSettings.settings.defaultModelSelection;
   const activeThreadRestartRequested = activeThreadShell?.requestingRestart ?? false;
-  const setRestartRequest = useAtomCommand(threadEnvironment.setRestartRequest, {
+  const setRestartRequest = useOrchestrationCommand(threadEnvironment.setRestartRequest, {
     reportFailure: false,
   });
   const handleToggleRestartRequest = useCallback(() => {
