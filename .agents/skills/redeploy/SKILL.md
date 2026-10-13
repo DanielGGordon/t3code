@@ -80,6 +80,17 @@ Then:
 Never restart `t3code.service` by any other means — always go through this script so the
 restart is detached and survives the session drop.
 
+## Rolling back to a build with fewer migrations
+
+The fork's name-aware ledger reconcile (`persistence/reconcileMigrationLedger.ts`) **refuses
+to start** when the ledger has migrations above the build's last id ("migrated by a newer or
+foreign T3 Code build"). After a deploy that adds migrations, the previous build will not
+start on the migrated `statev2.sqlite`. When such a deploy is planned, copy the database
+first, for example with node:sqlite `backup()` to `~/backups/`. To roll back, stop the
+service and either restore that copy, or delete the newer rows from `effect_sql_migrations`
+before starting the older build. Do this only for migrations that just add columns, tables or
+indexes. The 2026-10-13 sync added ids 60–62 (see `UPSTREAM_DIVERGENCE.md`).
+
 ## Rolling back across the orchestration-v2 cutover (v2 → v1 → v2)
 
 A v1 build reads and writes only `state.sqlite`; a v2 build reads and writes only
