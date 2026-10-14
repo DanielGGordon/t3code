@@ -393,7 +393,9 @@ export function isTerminalPasteShortcut(
     return event.shiftKey && !event.ctrlKey && !event.metaKey;
   }
   if (key !== "v") return false;
-  return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && event.shiftKey;
+  // Plain Ctrl+V pastes too (Windows Terminal convention); it no longer
+  // reaches the shell as a literal ^V.
+  return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && !event.metaKey;
 }
 
 /**
