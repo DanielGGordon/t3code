@@ -97,7 +97,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
   "/settings/projects": "Project",
   "/settings/general": "General",
-  "/settings/features": "Features",
+  // Everything on this page is a fork addition, not upstream T3 Code.
+  "/settings/features": "Fork Features",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",

@@ -40,7 +40,7 @@ import {
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
-import { useCondensedChrome, useDriveMode } from "../../hooks/useTouchLayout";
+import { useCondensedChrome, useDriveMode, useTouchLayout } from "../../hooks/useTouchLayout";
 import {
   HeaderUsageStats,
   HeaderUsageStatsMenu,
@@ -132,6 +132,7 @@ export const ChatHeader = memo(function ChatHeader({
   // compact stack that never collapses, so the ticker and the session/weekly
   // percentages stay readable at a glance.
   const driveMode = useDriveMode();
+  const touchLayout = useTouchLayout();
   const usageStats = selectHeaderUsageStats({
     visibility: usageStatsVisibility,
     contextWindow,
@@ -523,8 +524,10 @@ export const ChatHeader = memo(function ChatHeader({
           stockSymbol={stockSymbol}
           onPatch={updateClientSettings}
         />
-        {isServerThread ? (
+        {/* Elsewhere the toggle lives in the composer footer beside the access mode. */}
+        {isServerThread && touchLayout ? (
           <CacheKeepAliveToggle
+            placement="header"
             environmentId={activeThreadEnvironmentId}
             threadId={activeThreadId}
           />

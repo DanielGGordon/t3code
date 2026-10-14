@@ -446,6 +446,10 @@ export const ClientSettingsSchema = Schema.Struct({
   composerAutoRuntimeModeVisible: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  // The access-mode select ("Full access") in the composer footer. On by
+  // default; per device, hidden from Settings -> Features. The folded touch
+  // menu still lists access modes.
+  composerRuntimeModeVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Touch screens used mostly for dictation (e.g. a car display): tapping the
   // composer does not raise the on-screen keyboard; a keyboard button does.
   composerKeyboardOnDemand: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1797,6 +1801,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffFilesCollapsed: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   composerAutoRuntimeModeVisible: Schema.optionalKey(Schema.Boolean),
+  composerRuntimeModeVisible: Schema.optionalKey(Schema.Boolean),
   composerKeyboardOnDemand: Schema.optionalKey(Schema.Boolean),
   touchLayout: Schema.optionalKey(Schema.Boolean),
   fileExplorerShowDotfiles: Schema.optionalKey(Schema.Boolean),

@@ -69,8 +69,9 @@ Behavior**; both apply to the device you set them on.
 
 ### Keep cache warm
 
-To keep a conversation's cache from lapsing at all, turn on **Keep cache warm** in the
-chat header. About five minutes before the cache would expire, the server sends the
+To keep a conversation's cache from lapsing at all, turn on **Keep cache warm** (the flame
+button) at the bottom of the chat, next to the access mode. In the touch / car layout it is in the
+chat header instead. About five minutes before the cache would expire, the server sends the
 thread a short ping asking Claude to reply "ok", which starts a fresh hour. The early
 start leaves room for Claude Code to restart after a long idle. It works
 with every browser closed, and the setting is saved with the thread. Hover the button
