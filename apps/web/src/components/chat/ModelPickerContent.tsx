@@ -42,6 +42,7 @@ import {
   useEnvironmentModelPreferences,
   useToggleEnvironmentModelFavorite,
 } from "~/hooks/useSettings";
+import { useTouchLayout } from "~/hooks/useTouchLayout";
 import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
@@ -288,29 +289,36 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     searchInputRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // Focusing the search field raises the on-screen keyboard on touch devices
+  // (a Tesla's browser included), so there it only takes focus when tapped.
+  const touchLayout = useTouchLayout();
+  const autoFocusSearchInput = useCallback(() => {
+    if (!touchLayout) focusSearchInput();
+  }, [focusSearchInput, touchLayout]);
+
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId | "favorites") => {
       setSelectedInstanceId(instanceId);
       window.requestAnimationFrame(() => {
-        focusSearchInput();
+        autoFocusSearchInput();
       });
     },
-    [focusSearchInput],
+    [autoFocusSearchInput],
   );
 
   useLayoutEffect(() => {
-    focusSearchInput();
+    autoFocusSearchInput();
     const frame = window.requestAnimationFrame(() => {
-      focusSearchInput();
+      autoFocusSearchInput();
     });
     const timeout = window.setTimeout(() => {
-      focusSearchInput();
+      autoFocusSearchInput();
     }, 0);
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeout);
     };
-  }, [focusSearchInput]);
+  }, [autoFocusSearchInput]);
 
   // Create a Set for efficient lookup. Favorites are keyed by
   // `${instanceId}:${slug}`; the storage schema widened from ProviderDriverKind
