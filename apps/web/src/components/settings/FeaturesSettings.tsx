@@ -5,6 +5,7 @@ import {
   KeyboardIcon,
   TabletSmartphoneIcon,
   PlayIcon,
+  ShieldIcon,
   SparklesIcon,
   SquareArrowOutUpRightIcon,
 } from "lucide-react";
@@ -79,6 +80,7 @@ export function FeaturesSettingsPanel() {
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
+    composerRuntimeModeVisible: s.composerRuntimeModeVisible,
     composerKeyboardOnDemand: s.composerKeyboardOnDemand,
     touchLayout: s.touchLayout,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
@@ -123,6 +125,24 @@ export function FeaturesSettingsPanel() {
             />
           );
         })}
+      </SettingsSection>
+      <SettingsSection title="Composer">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <ShieldIcon className="size-3.5" />
+              Access mode
+            </span>
+          }
+          description="Show the access selector (“Full access”, “Supervised”) at the bottom of the composer. Hiding it only removes the button; the thread keeps its current mode, and the touch layout's controls menu still lists it. Stored on this device only."
+          control={
+            <Switch
+              checked={settings.composerRuntimeModeVisible}
+              onCheckedChange={(checked) => updateSettings({ composerRuntimeModeVisible: checked })}
+              aria-label="Show the access mode in the composer"
+            />
+          }
+        />
       </SettingsSection>
       <SettingsSection title="Touch screens">
         <SettingsRow
