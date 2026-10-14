@@ -1,4 +1,5 @@
 import { RunId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -64,6 +65,27 @@ describe("dueCacheExpiryBanners", () => {
     expect(due([idleThread()], inWindow, "codex")).toHaveLength(0);
     // A snooze that already ran out does not hide it.
     expect(due([idleThread({ snoozedUntil: COMPLETED })])).toHaveLength(1);
+  });
+
+  it("stays quiet while keep-alive is pinging the thread", () => {
+    const withKeepAlive = (pausedAt: string | null) => {
+      const { source } = idleThread();
+      return idleThread({
+        source: {
+          ...source,
+          cacheKeepAlive: {
+            enabledAt: DateTime.makeUnsafe(COMPLETED),
+            nudgeCount: 0,
+            pausedAt: pausedAt === null ? null : DateTime.makeUnsafe(pausedAt),
+            lastNudgeRunId: null,
+            lastNudgeAfterRead: false,
+          },
+        },
+      });
+    };
+    expect(due([withKeepAlive(null)])).toHaveLength(0);
+    // Out of pings: the cache will lapse after all, so the banner returns.
+    expect(due([withKeepAlive(COMPLETED)])).toHaveLength(1);
   });
 
   it("formats context sizes", () => {
