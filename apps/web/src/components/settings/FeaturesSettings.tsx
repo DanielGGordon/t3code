@@ -90,6 +90,10 @@ export function FeaturesSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <p className="px-1 text-sm text-muted-foreground">
+        Features added in DanielGGordon&apos;s fork of T3 Code. They are not part of upstream T3
+        Code, and each one is stored on this device only.
+      </p>
       <SettingsSection title="Header actions">
         {HEADER_CONTROL_ROWS.map((row) => {
           const visibility = settings[row.key];
