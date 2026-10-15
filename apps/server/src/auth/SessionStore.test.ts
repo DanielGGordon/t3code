@@ -20,6 +20,7 @@ import { PersistenceSqlError } from "../persistence/Errors.ts";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AuthSessions from "../persistence/AuthSessions.ts";
+import * as SecurityAlerts from "./SecurityAlerts.ts";
 import * as SessionStore from "./SessionStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import { base64UrlDecodeUtf8, base64UrlEncode, signPayload } from "./utils.ts";
@@ -41,11 +42,20 @@ const layerServerEnvironment = (environmentId: EnvironmentId) =>
     getEnvironmentId: Effect.succeed(environmentId),
   });
 
+// Records alerts instead of delivering them.
+const layerSecurityAlerts = (
+  alerts: Array<SecurityAlerts.SecurityAlert> = [],
+  notify: SecurityAlerts.SecurityAlerts["Service"]["notify"] = (alert) =>
+    Effect.sync(() => alerts.push(alert)).pipe(Effect.andThen(Effect.forkDetach(Effect.void))),
+) => Layer.succeed(SecurityAlerts.SecurityAlerts, SecurityAlerts.SecurityAlerts.of({ notify }));
+
 const layerSessionStore = (
   overrides?: Partial<ServerConfig.ServerConfig["Service"]>,
   environmentId = EnvironmentId.make("test-environment"),
+  alerts: Layer.Layer<SecurityAlerts.SecurityAlerts> = layerSecurityAlerts(),
 ) =>
   SessionStore.layer.pipe(
+    Layer.provide(alerts),
     Layer.provide(SqlitePersistence.layerMemory),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(layerServerEnvironment(environmentId)),
@@ -71,6 +81,7 @@ const makeDiskSessionStoreLayer = Effect.fn("makeDiskSessionStoreLayer")(functio
   yield* ServerConfig.ensureServerDirectories(paths);
   const layerPersistence = SqlitePersistence.layerFromPath(paths.dbPath);
   return SessionStore.layer.pipe(
+    Layer.provide(layerSecurityAlerts()),
     Layer.provide(layerPersistence),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(layerServerEnvironment(EnvironmentId.make(baseDir))),
@@ -101,6 +112,7 @@ const layerFailingSessionLookupRepository = Layer.succeed(AuthSessions.AuthSessi
   revokeAllExcept: () => Effect.fail(repositoryFailure),
   setLastConnectedAt: () => Effect.void,
   setClientConnection: () => Effect.void,
+  recordClientIp: () => Effect.succeed({ isNew: false, previousIp: null }),
 });
 
 const layerFailingSessionLookupCredential = Layer.effect(
@@ -108,6 +120,7 @@ const layerFailingSessionLookupCredential = Layer.effect(
   SessionStore.make,
 ).pipe(
   Layer.provide(layerFailingSessionLookupRepository),
+  Layer.provide(layerSecurityAlerts()),
   Layer.provide(ServerSecretStore.layer),
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(layerServerEnvironment(EnvironmentId.make("test-environment"))),
@@ -363,6 +376,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     }).pipe(
       Effect.provide(
         SessionStore.layer.pipe(
+          Layer.provide(layerSecurityAlerts()),
           Layer.provideMerge(ServerSecretStore.layer),
           Layer.provide(SqlitePersistence.layerMemory),
           Layer.provide(layerServerEnvironment(EnvironmentId.make("test-environment"))),
@@ -852,5 +866,119 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       yield* sessions.recordClientConnection(issued.sessionId, {});
       expect((yield* readRow)[0]).toEqual({ surface: "mobile", appVersion: "1.3.0" });
     }).pipe(Effect.provide(Layer.mergeAll(layerSessionStore(), SqlitePersistence.layerMemory))),
+  );
+
+  it.effect("alerts once when a known session connects from an address it never used", () => {
+    const alerts: Array<SecurityAlerts.SecurityAlert> = [];
+    return Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const sql = yield* SqlClient.SqlClient;
+      const issued = yield* sessions.issue({
+        subject: "client-address-test",
+        client: {
+          label: "Dan's phone",
+          ipAddress: "203.0.113.7",
+          deviceType: "mobile",
+          os: "iOS",
+          browser: "Safari",
+        },
+      });
+      const readIp = sql<{ readonly ip: string | null }>`
+        SELECT client_ip_address AS "ip" FROM auth_sessions WHERE session_id = ${issued.sessionId}
+      `;
+
+      // The pairing address is already known.
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "203.0.113.7" });
+      expect(alerts).toEqual([]);
+
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "198.51.100.4" });
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "198.51.100.4" });
+      // Returning to an address it used before is not new either.
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "203.0.113.7" });
+      expect(alerts).toEqual([
+        {
+          kind: "new-client-ip",
+          sessionId: issued.sessionId,
+          method: "browser-session-cookie",
+          client: {
+            label: "Dan's phone",
+            deviceType: "mobile",
+            os: "iOS",
+            browser: "Safari",
+            ipAddress: "198.51.100.4",
+          },
+          previousIp: "203.0.113.7",
+        },
+      ]);
+
+      // The session row tracks the latest address; metadata-only reports keep it.
+      expect((yield* readIp)[0]?.ip).toBe("203.0.113.7");
+      yield* sessions.recordClientConnection(issued.sessionId, { appVersion: "1.4.0" });
+      expect((yield* readIp)[0]?.ip).toBe("203.0.113.7");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerSessionStore(undefined, undefined, layerSecurityAlerts(alerts)),
+          SqlitePersistence.layerMemory,
+        ),
+      ),
+    );
+  });
+
+  it.effect("adopts the first address of a session issued without one silently", () => {
+    const alerts: Array<SecurityAlerts.SecurityAlert> = [];
+    return Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({
+        subject: "cli",
+        method: "bearer-access-token",
+        client: { label: "t3 project cli", deviceType: "bot" },
+      });
+
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "127.0.0.1" });
+      expect(alerts).toEqual([]);
+
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "203.0.113.9" });
+      expect(alerts).toMatchObject([
+        {
+          kind: "new-client-ip",
+          sessionId: issued.sessionId,
+          client: { label: "t3 project cli", deviceType: "bot", ipAddress: "203.0.113.9" },
+          previousIp: "127.0.0.1",
+        },
+      ]);
+    }).pipe(Effect.provide(layerSessionStore(undefined, undefined, layerSecurityAlerts(alerts))));
+  });
+
+  it.effect("still records a connection when alerting fails", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const sql = yield* SqlClient.SqlClient;
+      const issued = yield* sessions.issue({
+        subject: "alert-failure-test",
+        client: { ipAddress: "203.0.113.7", deviceType: "desktop" },
+      });
+
+      yield* sessions.recordClientConnection(issued.sessionId, { ipAddress: "198.51.100.4" });
+
+      const seen = yield* sql<{ readonly ip: string }>`
+        SELECT ip_address AS "ip" FROM auth_session_client_ips
+        WHERE session_id = ${issued.sessionId}
+        ORDER BY ip_address
+      `;
+      expect(seen.map((row) => row.ip)).toEqual(["198.51.100.4", "203.0.113.7"]);
+      expect((yield* sessions.verify(issued.token)).sessionId).toBe(issued.sessionId);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerSessionStore(
+            undefined,
+            undefined,
+            layerSecurityAlerts([], () => Effect.die(new Error("alert sink is down"))),
+          ),
+          SqlitePersistence.layerMemory,
+        ),
+      ),
+    ),
   );
 });

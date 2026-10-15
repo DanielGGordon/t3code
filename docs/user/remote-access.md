@@ -311,6 +311,24 @@ your login; `t3 connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
+### Alerts for new devices and addresses
+
+The server can notify you when a device pairs, or when a paired session connects
+from an IP address it has not used before. Set either or both in the server's
+environment before starting it:
+
+- `T3CODE_SECURITY_ALERT_WEBHOOK_URL`: receives a JSON `{"text": "…"}` POST, such
+  as a Slack incoming webhook.
+- `T3CODE_SECURITY_ALERT_COMMAND`: a shell command run with the alert text in
+  `$T3CODE_SECURITY_ALERT_TEXT`.
+
+Every alert is also written to the server log. T3 Connect connections and the
+desktop app's own connection do not raise pairing alerts. A session paired before
+alerts were available adopts the first address it connects from without an alert.
+Behind a reverse proxy on the same machine, the server reads the client address
+from `X-Real-IP`, or else the last `X-Forwarded-For` entry; configure the proxy to
+overwrite `X-Real-IP` so clients cannot choose their own.
+
 ## T3 Connect troubleshooting
 
 Run `t3 connect status` on the host to inspect saved authorization and link

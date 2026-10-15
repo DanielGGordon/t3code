@@ -5,11 +5,15 @@ import {
   AuthStandardClientScopes,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -361,6 +365,87 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(verified.sessionId).toBe(bearer.sessionId);
     }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
   );
+
+  it.effect("logs a revoked credential's retries once per window with its client address", () => {
+    const warnings: Array<string> = [];
+    const logger = Logger.make(({ logLevel, message }) => {
+      const line = Array.isArray(message) ? message[0] : message;
+      if (logLevel === "Warn" && typeof line === "string") warnings.push(line);
+    });
+    return Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const bearer = yield* serverAuth.issueSession();
+      yield* serverAuth.revokeSession(bearer.sessionId);
+      const request = {
+        cookies: {},
+        headers: { authorization: `Bearer ${bearer.token}`, "x-real-ip": "203.0.113.7" },
+        source: { socket: { remoteAddress: "127.0.0.1" } },
+      } as never;
+      const retry = Effect.exit(serverAuth.authenticateHttpRequest(request));
+
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        expect(Exit.isFailure(yield* retry)).toBe(true);
+      }
+      yield* TestClock.adjust(Duration.minutes(10));
+      expect(Exit.isFailure(yield* retry)).toBe(true);
+
+      const sessionPrefix = bearer.sessionId.slice(0, 8);
+      expect(warnings).toEqual([
+        `Rejected authenticated session credential. reason="Session token revoked." session=${sessionPrefix} ip=203.0.113.7`,
+        `Rejected authenticated session credential. reason="Session token revoked." session=${sessionPrefix} ip=203.0.113.7 repeats_suppressed=49`,
+      ]);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          layerEnvironmentAuth({ mode: "web", host: "127.0.0.1" }),
+          Logger.layer([logger], { mergeWithExisting: false }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("raises a security alert for each device paired, but not for CLI sessions", () => {
+    const alerts: Array<string> = [];
+    const logger = Logger.make(({ logLevel, message }) => {
+      const line = Array.isArray(message) ? message[0] : message;
+      if (logLevel === "Warn" && typeof line === "string" && line.startsWith("Security alert:")) {
+        alerts.push(line);
+      }
+    });
+    return Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const browserLink = yield* serverAuth.issuePairingCredential({ label: "Dan's laptop" });
+      yield* serverAuth.createBrowserSession(browserLink.credential, {
+        ...requestMetadata,
+        ipAddress: "203.0.113.7",
+        userAgent: "Mozilla/5.0 <!channel>",
+      });
+      const phoneLink = yield* serverAuth.issuePairingCredential({ label: "Dan's phone" });
+      yield* serverAuth.exchangeBootstrapCredentialForAccessToken(phoneLink.credential, undefined, {
+        deviceType: "mobile",
+        os: "Android",
+        ipAddress: "198.51.100.4",
+      });
+      yield* serverAuth.issueSession({ label: "t3 project cli" });
+
+      expect(alerts).toHaveLength(2);
+      expect(alerts[0]).toContain("a new device paired.");
+      expect(alerts[0]).toContain('Device: "Dan\'s laptop" — desktop, macOS, Chrome');
+      expect(alerts[0]).toContain("IP: 203.0.113.7");
+      expect(alerts[0]).toContain("(browser-session-cookie)");
+      expect(alerts[0]).toContain("User agent: Mozilla/5.0 &lt;!channel&gt;");
+      expect(alerts[1]).toContain('Device: "Dan\'s phone" — mobile, Android');
+      expect(alerts[1]).toContain("IP: 198.51.100.4");
+      expect(alerts[1]).toContain("(bearer-access-token)");
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          layerEnvironmentAuth({ mode: "web", host: "127.0.0.1" }),
+          Logger.layer([logger], { mergeWithExisting: false }),
+        ),
+      ),
+    );
+  });
 
   it.effect("preserves pairing grants after rejecting scopes they do not grant", () =>
     Effect.gen(function* () {

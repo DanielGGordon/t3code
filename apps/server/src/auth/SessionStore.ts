@@ -25,6 +25,7 @@ import * as Option from "effect/Option";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as AuthSessions from "../persistence/AuthSessions.ts";
+import * as SecurityAlerts from "./SecurityAlerts.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import {
   REUSABLE_DEV_SESSION_EXPIRES_AT,
@@ -423,6 +424,7 @@ export class SessionStore extends Context.Service<
       client: {
         readonly surface?: ClientSurface | undefined;
         readonly appVersion?: string | undefined;
+        readonly ipAddress?: string | undefined;
       },
     ) => Effect.Effect<void, never>;
   }
@@ -482,6 +484,16 @@ function toClientMetadata(record: {
   };
 }
 
+function toAlertClient(record: AuthSessions.AuthSessionClientMetadataRecord): AuthClientMetadata {
+  return {
+    ...(record.label ? { label: record.label } : {}),
+    ...(record.userAgent ? { userAgent: record.userAgent } : {}),
+    deviceType: record.deviceType,
+    ...(record.os ? { os: record.os } : {}),
+    ...(record.browser ? { browser: record.browser } : {}),
+  };
+}
+
 function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthClientSession {
   return {
     ...input,
@@ -495,6 +507,7 @@ export const make = Effect.gen(function* () {
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const authSessions = yield* AuthSessions.AuthSessionRepository;
+  const securityAlerts = yield* SecurityAlerts.SecurityAlerts;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<AuthSessionId, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
@@ -608,27 +621,56 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("SessionStore.markConnected"),
     );
 
+  // A session already seen from some address that now connects from a new one
+  // raises an alert. A session with no recorded address (it predates the
+  // address table, or was issued without one, like CLI sessions) adopts its
+  // first address silently.
+  const checkClientIp = (sessionId: AuthSessionId, ipAddress: string) =>
+    Effect.gen(function* () {
+      const observation = yield* authSessions.recordClientIp({
+        sessionId,
+        ipAddress,
+        seenAt: yield* DateTime.now,
+      });
+      if (!observation.isNew || observation.previousIp === null) return;
+      const session = yield* authSessions.getById({ sessionId });
+      if (Option.isNone(session) || session.value.revokedAt !== null) return;
+      yield* securityAlerts.notify({
+        kind: "new-client-ip",
+        sessionId,
+        method: session.value.method,
+        client: { ...toAlertClient(session.value.client), ipAddress },
+        previousIp: observation.previousIp,
+      });
+    });
+
   // Best-effort: connection metadata must never block or fail a connect.
   const recordClientConnection: SessionStore["Service"]["recordClientConnection"] = (
     sessionId,
     client,
   ) =>
-    client.surface === undefined && client.appVersion === undefined
+    client.surface === undefined &&
+    client.appVersion === undefined &&
+    client.ipAddress === undefined
       ? Effect.void
-      : authSessions
-          .setClientConnection({
+      : Effect.gen(function* () {
+          yield* authSessions.setClientConnection({
             sessionId,
             surface: client.surface ?? null,
             appVersion: client.appVersion ?? null,
-          })
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to record session client connection metadata.").pipe(
-                Effect.annotateLogs({ sessionId, cause }),
-              ),
+            ipAddress: client.ipAddress ?? null,
+          });
+          if (client.ipAddress !== undefined) {
+            yield* checkClientIp(sessionId, client.ipAddress);
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Failed to record session client connection metadata.").pipe(
+              Effect.annotateLogs({ sessionId, cause }),
             ),
-            Effect.withSpan("SessionStore.recordClientConnection"),
-          );
+          ),
+          Effect.withSpan("SessionStore.recordClientConnection"),
+        );
 
   const markDisconnected: SessionStore["Service"]["markDisconnected"] = (sessionId) =>
     Ref.update(connectedSessionsRef, (current) => {
@@ -750,6 +792,19 @@ export const make = Effect.gen(function* () {
           connected: false,
         }),
       );
+      // The issuing address is the session's first known one, so its first
+      // connect from there is not reported as new.
+      if (client.ipAddress !== undefined) {
+        yield* authSessions
+          .recordClientIp({ sessionId, ipAddress: client.ipAddress, seenAt: issuedAt })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to record session client address.").pipe(
+                Effect.annotateLogs({ sessionId, cause }),
+              ),
+            ),
+          );
+      }
 
       return {
         sessionId,

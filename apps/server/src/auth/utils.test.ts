@@ -3,8 +3,59 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   deriveAuthClientMetadata,
   isRemoteReachableHost,
+  resolveClientIpAddress,
   resolveSessionCookieName,
 } from "./utils.ts";
+
+const requestFrom = (remoteAddress: string, headers: Record<string, string> = {}) =>
+  ({ headers, source: { socket: { remoteAddress } } }) as never;
+
+describe("resolveClientIpAddress", () => {
+  it("takes the client from the local reverse proxy's X-Real-IP", () => {
+    expect(
+      resolveClientIpAddress(
+        requestFrom("::ffff:127.0.0.1", {
+          "x-real-ip": "203.0.113.7",
+          "x-forwarded-for": "198.51.100.1",
+        }),
+      ),
+    ).toBe("203.0.113.7");
+  });
+
+  it("falls back to the right-most X-Forwarded-For entry, which the proxy appended", () => {
+    expect(
+      resolveClientIpAddress(
+        requestFrom("::1", { "x-forwarded-for": "10.9.9.9, 198.51.100.4 , 203.0.113.9" }),
+      ),
+    ).toBe("203.0.113.9");
+  });
+
+  it("uses the loopback peer itself when no proxy header is present", () => {
+    expect(resolveClientIpAddress(requestFrom("127.0.0.1"))).toBe("127.0.0.1");
+  });
+
+  it("skips a forwarding header that is not an address", () => {
+    expect(
+      resolveClientIpAddress(
+        requestFrom("127.0.0.1", {
+          "x-real-ip": "<!channel>",
+          "x-forwarded-for": "198.51.100.4, unknown",
+        }),
+      ),
+    ).toBe("127.0.0.1");
+  });
+
+  it("ignores forwarding headers from a non-loopback peer", () => {
+    expect(
+      resolveClientIpAddress(
+        requestFrom("::ffff:192.168.1.20", {
+          "x-real-ip": "127.0.0.1",
+          "x-forwarded-for": "127.0.0.1",
+        }),
+      ),
+    ).toBe("192.168.1.20");
+  });
+});
 
 describe("deriveAuthClientMetadata", () => {
   it("labels Electron user agents as Electron instead of Chrome", () => {

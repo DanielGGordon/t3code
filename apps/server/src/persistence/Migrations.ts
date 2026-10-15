@@ -85,6 +85,9 @@ import Migration0059 from "./Migrations/058_WebhookRelayDeliveries.ts";
 import Migration0060 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0061 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0062 from "./Migrations/061_PullRequestReviewGuides.ts";
+// FORK MIGRATION — id 63 is this fork's own (recorded on production once
+// deployed). From the next sync on, upstream's 062+ run at +2 (062 -> 64).
+import Migration0063 from "./Migrations/063_AuthSessionClientIps.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -163,6 +166,8 @@ export const migrationEntries = [
   [60, "McpAppModelContext", Migration0060],
   [61, "ThreadSnapshotWindowIndexes", Migration0061],
   [62, "PullRequestReviewGuides", Migration0062],
+  // Fork-only; upstream's 062+ shift to 64+ (see the import block above).
+  [63, "AuthSessionClientIps", Migration0063],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
