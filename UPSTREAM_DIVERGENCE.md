@@ -23,6 +23,13 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-10-15 — Fork migration 63 (no upstream sync)
+
+The fork adds its second own migration, **63 `AuthSessionClientIps`** (security session
+alerts). Upstream has no 062 yet; at the next sync, upstream's **062 and later run at +2**
+(062 → 64). Never renumber 63 upward once prod has recorded it. It is
+`CREATE TABLE IF NOT EXISTS`, so `reconcileMigrationLedger` can run it as a gap safely.
+
 ## 2026-10-13 — True merge of upstream through `98a6246d0` (2026-10-13)
 
 589 upstream commits since `ac8e9453c` (139 fork-only commits). 37 files conflicted (15
