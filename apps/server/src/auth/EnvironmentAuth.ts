@@ -26,6 +26,7 @@ import {
   type DpopFailureReason as DpopFailureReasonType,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -41,9 +42,12 @@ import * as ServerConfig from "../config.ts";
 import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
+import * as SecurityAlerts from "./SecurityAlerts.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./ReusableDevAuth.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
+import { makeLogThrottle } from "./logThrottle.ts";
+import { resolveClientIpAddress } from "./utils.ts";
 import { DESKTOP_RENDERER_ORIGINS } from "../httpCors.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 
@@ -734,14 +738,63 @@ export const make = Effect.gen(function* () {
   const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
   const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
   const sessions = yield* SessionStore.SessionStore;
+  const securityAlerts = yield* SecurityAlerts.SecurityAlerts;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
   const descriptor = yield* policy.getDescriptor();
   const config = yield* ServerConfig.ServerConfig;
   const devAuth = resolveReusableDevAuth(config);
 
+  // A pairing link turned into a session is a new device. The desktop shell's
+  // own bootstrap, the reusable dev token and T3 Connect's per-connection
+  // links (gated by the linked cloud account) are not alerts.
+  const alertIfDevicePaired = (
+    grant: { readonly method: string; readonly subject: string },
+    session: SessionStore.IssuedSession,
+  ) =>
+    grant.method === "one-time-token" && grant.subject !== "cloud-connect"
+      ? securityAlerts
+          .notify({
+            kind: "session-paired",
+            sessionId: session.sessionId,
+            method: session.method,
+            client: session.client,
+          })
+          .pipe(Effect.asVoid)
+      : Effect.void;
+
+  // A client stuck retrying a revoked credential must not flood the journal:
+  // one line per credential and client address every ten minutes.
+  const shouldLogRejectedCredential = makeLogThrottle({
+    windowMs: Duration.toMillis(Duration.minutes(10)),
+    maxKeys: 1_000,
+  });
+  const logRejectedCredential = (
+    cause: SessionStore.SessionCredentialInvalidError,
+    clientIp: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const sessionId = "sessionId" in cause ? cause.sessionId : undefined;
+      const decision = shouldLogRejectedCredential(
+        `${cause._tag}:${sessionId ?? "-"}:${clientIp ?? "-"}`,
+        yield* Clock.currentTimeMillis,
+      );
+      if (!decision.log) return;
+      // Kept on one line so each rejection is a single journal entry.
+      yield* Effect.logWarning(
+        [
+          "Rejected authenticated session credential.",
+          `reason="${cause.message}"`,
+          `session=${sessionId?.slice(0, 8) ?? "-"}`,
+          `ip=${clientIp ?? "unknown"}`,
+          ...(decision.suppressed > 0 ? [`repeats_suppressed=${decision.suppressed}`] : []),
+        ].join(" "),
+      );
+    });
+
   const authenticateToken = (
     token: string,
+    clientIp?: string,
   ): Effect.Effect<
     AuthenticatedSession,
     ServerAuthInvalidCredentialError | ServerAuthInternalError
@@ -749,11 +802,7 @@ export const make = Effect.gen(function* () {
     sessions.verify(token).pipe(
       Effect.tapError((cause) =>
         SessionStore.isSessionCredentialInvalidError(cause)
-          ? Effect.logWarning("Rejected authenticated session credential.").pipe(
-              Effect.annotateLogs({
-                reason: cause.message,
-              }),
-            )
+          ? logRejectedCredential(cause, clientIp)
           : Effect.void,
       ),
       mapSessionVerificationErrors,
@@ -811,7 +860,7 @@ export const make = Effect.gen(function* () {
         }),
       );
     }
-    return authenticateToken(credential.token).pipe(
+    return authenticateToken(credential.token, resolveClientIpAddress(request)).pipe(
       Effect.flatMap((session) => {
         if (session.proofKeyThumbprint) {
           if (!dpopToken || dpopToken !== credential.token) {
@@ -917,6 +966,7 @@ export const make = Effect.gen(function* () {
         },
       })
       .pipe(Effect.mapError((cause) => new ServerAuthAuthenticatedSessionIssueError({ cause })));
+    yield* alertIfDevicePaired(grant, session);
     return {
       response: {
         authenticated: true,
@@ -1006,6 +1056,7 @@ export const make = Effect.gen(function* () {
                 Effect.mapError(
                   (cause) => new ServerAuthAuthenticatedAccessTokenIssueError({ cause }),
                 ),
+                Effect.tap((session) => alertIfDevicePaired(grant, session)),
               );
           }),
         ),
@@ -1382,6 +1433,7 @@ export const layer = Layer.effect(EnvironmentAuth, make).pipe(
   Layer.provideMerge(PairingGrantStore.layer),
   Layer.provideMerge(SessionStore.layer),
   Layer.provideMerge(EnvironmentAuthPolicy.layer),
+  Layer.provideMerge(SecurityAlerts.layer),
 );
 
 const layerStorage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerConfig);

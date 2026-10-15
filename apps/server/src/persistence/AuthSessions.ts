@@ -96,8 +96,23 @@ export const SetAuthSessionClientConnectionInput = Schema.Struct({
   sessionId: AuthSessionId,
   surface: Schema.NullOr(ClientSurface),
   appVersion: Schema.NullOr(Schema.String),
+  ipAddress: Schema.NullOr(Schema.String),
 });
 export type SetAuthSessionClientConnectionInput = typeof SetAuthSessionClientConnectionInput.Type;
+
+export const RecordAuthSessionClientIpInput = Schema.Struct({
+  sessionId: AuthSessionId,
+  ipAddress: Schema.String,
+  seenAt: Schema.DateTimeUtcFromString,
+});
+export type RecordAuthSessionClientIpInput = typeof RecordAuthSessionClientIpInput.Type;
+
+export interface AuthSessionClientIpObservation {
+  /** True the first time this session is seen from this address. */
+  readonly isNew: boolean;
+  /** The address the session was most recently seen from before this one, if any. */
+  readonly previousIp: string | null;
+}
 
 export class AuthSessionRepository extends Context.Service<
   AuthSessionRepository,
@@ -129,6 +144,10 @@ export class AuthSessionRepository extends Context.Service<
     readonly setClientConnection: (
       input: SetAuthSessionClientConnectionInput,
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
+    /** Remembers that a session used a client address, reporting whether it is new. */
+    readonly recordClientIp: (
+      input: RecordAuthSessionClientIpInput,
+    ) => Effect.Effect<AuthSessionClientIpObservation, AuthSessionRepositoryError>;
   }
 >()("t3/persistence/AuthSessions/AuthSessionRepository") {}
 
@@ -335,13 +354,52 @@ export const make = Effect.gen(function* () {
   // a partial report never nulls out data a fuller client stored earlier.
   const setClientConnectionRow = SqlSchema.void({
     Request: SetAuthSessionClientConnectionInput,
-    execute: ({ sessionId, surface, appVersion }) =>
+    execute: ({ sessionId, surface, appVersion, ipAddress }) =>
       sql`
         UPDATE auth_sessions
         SET client_surface = COALESCE(${surface}, client_surface),
-            client_app_version = COALESCE(${appVersion}, client_app_version)
+            client_app_version = COALESCE(${appVersion}, client_app_version),
+            client_ip_address = COALESCE(${ipAddress}, client_ip_address)
         WHERE session_id = ${sessionId}
           AND revoked_at IS NULL
+      `,
+  });
+
+  const findLatestClientIpRow = SqlSchema.findOneOption({
+    Request: RecordAuthSessionClientIpInput,
+    Result: Schema.Struct({ ipAddress: Schema.String }),
+    execute: ({ sessionId }) =>
+      sql`
+        SELECT ip_address AS "ipAddress"
+        FROM auth_session_client_ips
+        WHERE session_id = ${sessionId}
+        ORDER BY last_seen_at DESC
+        LIMIT 1
+      `,
+  });
+
+  // RETURNING yields a row only when the insert happened, so two concurrent
+  // connects from one new address report it as new exactly once.
+  const insertClientIpRow = SqlSchema.findAll({
+    Request: RecordAuthSessionClientIpInput,
+    Result: Schema.Struct({ ipAddress: Schema.String }),
+    execute: ({ sessionId, ipAddress, seenAt }) =>
+      sql`
+        INSERT INTO auth_session_client_ips (session_id, ip_address, first_seen_at, last_seen_at)
+        VALUES (${sessionId}, ${ipAddress}, ${seenAt}, ${seenAt})
+        ON CONFLICT(session_id, ip_address) DO NOTHING
+        RETURNING ip_address AS "ipAddress"
+      `,
+  });
+
+  const touchClientIpRow = SqlSchema.void({
+    Request: RecordAuthSessionClientIpInput,
+    execute: ({ sessionId, ipAddress, seenAt }) =>
+      sql`
+        UPDATE auth_session_client_ips
+        SET last_seen_at = ${seenAt}
+        WHERE session_id = ${sessionId}
+          AND ip_address = ${ipAddress}
       `,
   });
 
@@ -513,6 +571,27 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const recordClientIp: AuthSessionRepository["Service"]["recordClientIp"] = (input) =>
+    Effect.gen(function* () {
+      const latest = yield* findLatestClientIpRow(input);
+      const inserted = yield* insertClientIpRow(input);
+      if (inserted.length === 0) {
+        yield* touchClientIpRow(input);
+      }
+      return {
+        isNew: inserted.length > 0,
+        previousIp: Option.isSome(latest) ? latest.value.ipAddress : null,
+      } satisfies AuthSessionClientIpObservation;
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "AuthSessionRepository.recordClientIp:query",
+          "AuthSessionRepository.recordClientIp:encodeRequest",
+          { sessionId: input.sessionId },
+        ),
+      ),
+    );
+
   return {
     create,
     createReplacingActive,
@@ -523,6 +602,7 @@ export const make = Effect.gen(function* () {
     revokeAllExcept,
     setLastConnectedAt,
     setClientConnection,
+    recordClientIp,
   } satisfies AuthSessionRepository["Service"];
 });
 

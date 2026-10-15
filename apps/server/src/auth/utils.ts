@@ -6,6 +6,7 @@ import type {
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no createHmac or timingSafeEqual.
 import * as NodeCrypto from "node:crypto";
+import * as NodeNet from "node:net";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Result from "effect/Result";
 
@@ -179,12 +180,44 @@ function readRemoteAddressFromSource(source: unknown): string | undefined {
   return normalizeIpAddress(candidate.socket?.remoteAddress ?? candidate.remoteAddress);
 }
 
+function isLoopbackAddress(address: string): boolean {
+  return address === "::1" || address.startsWith("127.");
+}
+
+function readForwardedIpAddress(value: string | undefined): string | undefined {
+  const address = normalizeIpAddress(value);
+  return address !== undefined && NodeNet.isIP(address) !== 0 ? address : undefined;
+}
+
+/**
+ * The address of the client behind this request. When the TCP peer is
+ * loopback, the request came through the host's local reverse proxy (Caddy),
+ * so the client is the proxy's `X-Real-IP`, or else the right-most
+ * `X-Forwarded-For` entry (the one the proxy itself appended). Those headers
+ * are ignored from any other peer, which could set them to anything. The proxy
+ * must overwrite `X-Real-IP` (Caddy: `header_up X-Real-IP {remote_host}`), or
+ * a client could choose its own reported address.
+ */
+export function resolveClientIpAddress(
+  request: Pick<HttpServerRequest.HttpServerRequest, "headers" | "source">,
+): string | undefined {
+  const peer = readRemoteAddressFromSource(request.source);
+  if (peer === undefined || !isLoopbackAddress(peer)) {
+    return peer;
+  }
+  return (
+    readForwardedIpAddress(request.headers["x-real-ip"]) ??
+    readForwardedIpAddress(request.headers["x-forwarded-for"]?.split(",").at(-1)) ??
+    peer
+  );
+}
+
 export function deriveAuthClientMetadata(input: {
   readonly request: HttpServerRequest.HttpServerRequest;
   readonly presented?: AuthClientPresentationMetadata;
 }): AuthClientMetadata {
   const userAgent = normalizeNonEmptyString(input.request.headers["user-agent"]);
-  const ipAddress = readRemoteAddressFromSource(input.request.source);
+  const ipAddress = resolveClientIpAddress(input.request);
   const os = input.presented?.os ?? inferOs(userAgent);
   const browser = inferBrowser(userAgent);
   return {
