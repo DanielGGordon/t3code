@@ -870,7 +870,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       const mcp = yield* auth.issueMcpClientSession({
         label: "External agent",
         access: "read-only",
-        client: {},
+        client: { deviceType: "unknown" },
       });
       yield* Effect.flip(auth.authenticateMcpClient(makeBearerRequest(mcp.token)));
       const mcpSession = yield* auth.authenticateFactorRequest(makeBearerRequest(mcp.token));
