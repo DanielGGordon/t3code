@@ -219,8 +219,31 @@ const hubEnvironment = Effect.fn("LocalDeviceHost.hubEnvironment")(function* (
       env.XDG_RUNTIME_DIR = runtimeDir;
     }
   }
+  if (platform === "linux") {
+    const fs = yield* FileSystem.FileSystem;
+    const renderNodes = yield* fs.readDirectory("/dev/dri").pipe(Effect.orElseSucceed(() => []));
+    const extraArgs = emulatorExtraArgs(
+      env.EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS,
+      renderNodes.some((name) => name.startsWith("renderD")),
+    );
+    if (extraArgs !== undefined) env.EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS = extraArgs;
+  }
   return env;
 });
+
+/**
+ * Extra emulator flags for a Linux host. expo-device-hub always launches with
+ * `-gpu auto`, which without a GPU render node picks the SwiftShader GL
+ * translator: WebGL stalls in Chrome and crashes the emulator from a WebView.
+ * ANGLE on SwiftShader (`swangle_indirect`) runs it. The hub appends
+ * EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS after its own flags and the emulator
+ * honours the last `-gpu`, so a mode the user sets there wins.
+ * Mirrored in the SSH host script.
+ */
+export const emulatorExtraArgs = (extraArgs: string | undefined, hasRenderNode: boolean) =>
+  hasRenderNode || /(?:^|\s)-gpu(?:\s|$)/.test(extraArgs ?? "")
+    ? extraArgs
+    : `${extraArgs ?? ""} -gpu swangle_indirect`.trim();
 
 export const make = Effect.fn("LocalDeviceHost.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

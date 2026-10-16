@@ -215,3 +215,20 @@ it.effect(
       expect(yield* fs.exists(`${baseDir}/tools`)).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+describe("emulatorExtraArgs", () => {
+  it("selects ANGLE on SwiftShader only when the host has no GPU render node", () => {
+    expect(LocalDeviceHost.emulatorExtraArgs(undefined, false)).toBe("-gpu swangle_indirect");
+    expect(LocalDeviceHost.emulatorExtraArgs("-no-snapshot", false)).toBe(
+      "-no-snapshot -gpu swangle_indirect",
+    );
+    expect(LocalDeviceHost.emulatorExtraArgs(undefined, true)).toBeUndefined();
+  });
+
+  it("keeps a GPU mode the user configured", () => {
+    expect(LocalDeviceHost.emulatorExtraArgs("-gpu host", false)).toBe("-gpu host");
+    expect(LocalDeviceHost.emulatorExtraArgs("-no-snapshot -gpu lavapipe", false)).toBe(
+      "-no-snapshot -gpu lavapipe",
+    );
+  });
+});

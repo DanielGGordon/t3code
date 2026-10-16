@@ -398,6 +398,20 @@ export class DeviceNotFoundError extends Schema.TaggedError<DeviceNotFoundError>
   }
 }
 
+/** A device that was open stopped running without being closed or shut down through T3. */
+export class DeviceStoppedError extends Schema.TaggedError<DeviceStoppedError>()(
+  "DeviceStoppedError",
+  {
+    hostId: DeviceHostId,
+    deviceId: DeviceId,
+    name: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.name} (${this.deviceId}) is no longer running: the simulator or emulator exited, crashed, or was shut down outside T3. Call device_open to boot it again.`;
+  }
+}
+
 export class DeviceBootError extends Schema.TaggedError<DeviceBootError>()("DeviceBootError", {
   hostId: DeviceHostId,
   deviceId: DeviceId,
@@ -461,6 +475,7 @@ export const DeviceError = Schema.Union([
   DeviceHostUnavailableError,
   DevicePlatformUnavailableError,
   DeviceNotFoundError,
+  DeviceStoppedError,
   DeviceBootError,
   DeviceOperationError,
   DeviceActionUnavailableError,
@@ -566,6 +581,7 @@ export const DeviceToolError = Schema.Union([
   DeviceHostUnavailableError,
   DevicePlatformUnavailableError,
   DeviceNotFoundError,
+  DeviceStoppedError,
   DeviceBootError,
   DeviceOperationError,
   DeviceActionUnavailableError,

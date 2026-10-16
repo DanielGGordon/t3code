@@ -77,12 +77,29 @@ const fixture = Effect.fn("fixture")(function* (
   const requests: string[] = [];
   let booted = false;
   let shutDown = false;
+  // What adb reports for the booted emulator once the hub stops listing it.
+  const emulator = { dropped: false, adbState: null as "offline" | null };
   const ready: DeviceHost.DeviceHostReady = {
     nodePath: process.execPath,
     hub: { origin: "http://device.test" },
     helpers: { serveSimAxSettings: null, serveSimCli: null },
-    run: () => Effect.succeed({ code: 0, stdout: "Pixel_API_35\n", stderr: "" }),
+    run: (command) =>
+      Effect.succeed({
+        code: 0,
+        stdout:
+          command === "adb"
+            ? `List of devices attached\n${emulator.adbState ? `emulator-5554\t${emulator.adbState}\n` : ""}`
+            : "Pixel_API_35\n",
+        stderr: "",
+      }),
   };
+  /** The emulator leaves the hub's list: dead, or only offline in adb. */
+  const dropEmulator = (adbState: "offline" | null) =>
+    Effect.sync(() => {
+      booted = false;
+      emulator.dropped = true;
+      emulator.adbState = adbState;
+    });
   const host: DeviceHost.DeviceHost["Service"] = {
     ...(inspectError
       ? {
@@ -165,6 +182,9 @@ const fixture = Effect.fn("fixture")(function* (
         Effect.gen(function* () {
           requests.push(request.url);
           if (request.url.includes("/api/screenshot")) {
+            if (emulator.dropped) {
+              return HttpClientResponse.fromWeb(request, new Response("gone", { status: 500 }));
+            }
             return HttpClientResponse.fromWeb(
               request,
               new Response(new Uint8Array([137, 80, 78, 71])),
@@ -213,7 +233,7 @@ const fixture = Effect.fn("fixture")(function* (
       ),
     ),
   );
-  return { service, starts, agentStarts, agentStops, requests, settings };
+  return { service, starts, agentStarts, agentStops, requests, settings, dropEmulator };
 });
 
 describe("device setup consent", () => {
@@ -739,3 +759,78 @@ it.effect("failed manual installation leaves lifecycle state unchanged and can b
     expect(agentStarts).toEqual([]);
   }).pipe(Effect.scoped),
 );
+
+describe("devices that stop running while open", () => {
+  it.effect("reports a dead emulator to the thread that had it open until it reopens", () =>
+    Effect.gen(function* () {
+      const { service, dropEmulator } = yield* fixture();
+      yield* service.configure({ enabled: true });
+      const threadId = ThreadId.make("crashed");
+      const session = yield* service.open({
+        threadId,
+        deviceId: "Pixel_API_35",
+        platform: "android",
+      });
+      yield* dropEmulator(null);
+
+      const error = yield* service.screenshot({ deviceId: session.deviceId }).pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "DeviceStoppedError",
+        deviceId: "emulator-5554",
+        name: "Pixel_API_35",
+      });
+      expect(error.message).toContain("no longer running");
+      expect((yield* service.state).sessions).toEqual([]);
+      expect(yield* service.stoppedSessionsForThread(threadId)).toMatchObject([
+        { deviceId: "emulator-5554", name: "Pixel_API_35" },
+      ]);
+
+      yield* service.open({ threadId, deviceId: "Pixel_API_35", platform: "android" });
+      expect(yield* service.stoppedSessionsForThread(threadId)).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps the session of an emulator adb still lists as offline", () =>
+    Effect.gen(function* () {
+      const { service, dropEmulator } = yield* fixture();
+      yield* service.configure({ enabled: true });
+      const threadId = ThreadId.make("offline");
+      yield* service.open({ threadId, deviceId: "Pixel_API_35", platform: "android" });
+      yield* dropEmulator("offline");
+
+      const state = yield* service.list;
+      expect(state.sessions.map((session) => session.deviceId)).toEqual(["emulator-5554"]);
+      expect(yield* service.stoppedSessionsForThread(threadId)).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+});
+
+describe("close with shutdown", () => {
+  it.effect("shuts down a booted device this thread never opened, by serial or AVD name", () =>
+    Effect.gen(function* () {
+      for (const deviceId of ["emulator-5554", "Pixel_API_35"]) {
+        const { service, requests } = yield* fixture();
+        yield* service.configure({ enabled: true });
+        const owner = ThreadId.make("owner");
+        yield* service.open({ threadId: owner, deviceId: "Pixel_API_35", platform: "android" });
+
+        yield* service.close({ threadId: ThreadId.make("other"), deviceId, shutdown: true });
+        expect(requests.filter((url) => url.endsWith("/api/devices/shutdown"))).toHaveLength(1);
+        const state = yield* service.state;
+        expect(state.sessions).toEqual([]);
+        expect(state.devices.some((device) => device.booted)).toBe(false);
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails for a device that does not exist", () =>
+    Effect.gen(function* () {
+      const { service } = yield* fixture();
+      yield* service.configure({ enabled: true });
+      const error = yield* service
+        .close({ threadId: ThreadId.make("t"), deviceId: "emulator-9999", shutdown: true })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("DeviceNotFoundError");
+    }).pipe(Effect.scoped),
+  );
+});
