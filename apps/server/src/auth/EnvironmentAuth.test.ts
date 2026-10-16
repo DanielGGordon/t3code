@@ -5,6 +5,8 @@ import {
   AuthStandardClientScopes,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import { totp } from "./totp.ts";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -849,5 +851,56 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       } as never);
       expect(verified.sessionId).toBe(bearer.sessionId);
     }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
+  );
+  it.effect("gates HTTP and pre-issued websocket tickets until this session verifies", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const first = yield* auth.issueSession();
+      const second = yield* auth.issueSession();
+      const ticket = yield* auth.issueWebSocketTicket(second);
+      const setup = yield* sessions.twoFactor.begin(first.sessionId);
+      const bits = [...setup.secret]
+        .map((c) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0"))
+        .join("");
+      const secret = Buffer.from(bits.match(/.{8}/g)!.map((byte) => Number.parseInt(byte, 2)));
+      const code = totp(secret, Math.floor((yield* Clock.currentTimeMillis) / 30_000));
+      const { recoveryCodes } = yield* sessions.twoFactor.confirm(first.sessionId, code);
+      yield* auth.authenticateHttpRequest(makeBearerRequest(first.token));
+      const mcp = yield* auth.issueMcpClientSession({
+        label: "External agent",
+        access: "read-only",
+        client: { deviceType: "unknown" },
+      });
+      yield* Effect.flip(auth.authenticateMcpClient(makeBearerRequest(mcp.token)));
+      const mcpSession = yield* auth.authenticateFactorRequest(makeBearerRequest(mcp.token));
+      yield* sessions.twoFactor.verifyCode(mcpSession.sessionId, recoveryCodes[2]!, false);
+      yield* auth.authenticateMcpClient(makeBearerRequest(mcp.token));
+      // MFA does not widen the MCP token's audience to the normal API.
+      yield* Effect.flip(auth.authenticateHttpRequest(makeBearerRequest(mcp.token)));
+
+      const rejected = yield* Effect.flip(
+        auth.authenticateHttpRequest(makeBearerRequest(second.token)),
+      );
+      expect(rejected).toMatchObject({ twoFactorRequired: true });
+      const state = yield* auth.getSessionState(makeBearerRequest(second.token));
+      expect(state.authenticated).toBe(true);
+      expect(state.twoFactor?.required).toBe(true);
+      yield* auth.authenticateFactorRequest(makeBearerRequest(second.token));
+      const socketRequest = {
+        url: `/ws?wsTicket=${ticket.ticket}`,
+        cookies: {},
+        headers: { host: "localhost" },
+      } as never;
+      yield* Effect.flip(auth.authenticateWebSocketUpgrade(socketRequest));
+      yield* sessions.twoFactor.verifyCode(second.sessionId, recoveryCodes[0]!, false);
+      yield* auth.authenticateHttpRequest(makeBearerRequest(second.token));
+      yield* auth.authenticateWebSocketUpgrade(socketRequest);
+      yield* TestClock.adjust("48 hours");
+      const expired = yield* Effect.flip(
+        auth.authenticateHttpRequest(makeBearerRequest(second.token)),
+      );
+      expect(expired).toMatchObject({ twoFactorRequired: true });
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 });

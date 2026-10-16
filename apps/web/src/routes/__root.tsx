@@ -1,3 +1,4 @@
+import { TwoFactorGate } from "../components/auth/TwoFactor";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -120,7 +121,7 @@ export const Route = createRootRoute({
       authGateState,
     };
   },
-  component: RootRouteView,
+  component: RootRouteSecurityGate,
   errorComponent: RootRouteErrorView,
   notFoundComponent: RootRouteNotFoundView,
   head: () => ({
@@ -140,6 +141,15 @@ function RootRouteNotFoundView() {
         <Button render={<Link to="/" replace />}>Go home</Button>
       </div>
     </main>
+  );
+}
+
+function RootRouteSecurityGate() {
+  const { authGateState } = Route.useRouteContext();
+  return (
+    <TwoFactorGate enabled={authGateState.status === "authenticated"}>
+      <RootRouteView />
+    </TwoFactorGate>
   );
 }
 

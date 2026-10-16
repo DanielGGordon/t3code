@@ -398,6 +398,7 @@ export class ServerAuthInvalidCredentialError extends Schema.TaggedError<ServerA
   "ServerAuthInvalidCredentialError",
   {
     diagnostic: Schema.optional(Schema.String),
+    twoFactorRequired: Schema.optionalKey(Schema.Boolean),
     dpopFailureReason: Schema.optionalKey(DpopFailureReason),
     cause: Schema.optional(Schema.Defect()),
   },
@@ -415,8 +416,12 @@ export type ServerAuthCredentialError = typeof ServerAuthCredentialError.Type;
 export const isServerAuthCredentialError = Schema.is(ServerAuthCredentialError);
 export const serverAuthCredentialReason = (
   error: ServerAuthCredentialError,
-): "missing_credential" | "invalid_credential" =>
-  error._tag === "ServerAuthMissingCredentialError" ? "missing_credential" : "invalid_credential";
+): "missing_credential" | "invalid_credential" | "two_factor_required" =>
+  error._tag === "ServerAuthMissingCredentialError"
+    ? "missing_credential"
+    : error.twoFactorRequired
+      ? "two_factor_required"
+      : "invalid_credential";
 
 export const serverAuthDpopFailureReason = (
   error: ServerAuthCredentialError,
@@ -550,6 +555,12 @@ export class EnvironmentAuth extends Context.Service<
     readonly revokeOtherClientSessions: (
       currentSessionId: AuthSessionId,
     ) => Effect.Effect<number, ServerAuthInternalError>;
+    readonly awaitSessionInvalidation: (
+      sessionId: AuthSessionId,
+    ) => Effect.Effect<void, ServerAuthInternalError>;
+    readonly authenticateFactorRequest: (
+      request: HttpServerRequest.HttpServerRequest,
+    ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
     readonly authenticateHttpRequest: (
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
@@ -795,6 +806,7 @@ export const make = Effect.gen(function* () {
   const authenticateToken = (
     token: string,
     clientIp?: string,
+    allowMcp = false,
   ): Effect.Effect<
     AuthenticatedSession,
     ServerAuthInvalidCredentialError | ServerAuthInternalError
@@ -806,7 +818,9 @@ export const make = Effect.gen(function* () {
           : Effect.void,
       ),
       mapSessionVerificationErrors,
-      Effect.flatMap(rejectMcpClientAudience),
+      Effect.flatMap((session) =>
+        allowMcp ? Effect.succeed(session) : rejectMcpClientAudience(session),
+      ),
       Effect.map((session) => ({
         sessionId: session.sessionId,
         subject: session.subject,
@@ -844,6 +858,7 @@ export const make = Effect.gen(function* () {
 
   const authenticateRequest = (
     request: HttpServerRequest.HttpServerRequest,
+    allowMcp = false,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
     const dpopToken = parseDpopToken(request);
     const credential = resolveRequestCredential(request);
@@ -860,7 +875,7 @@ export const make = Effect.gen(function* () {
         }),
       );
     }
-    return authenticateToken(credential.token, resolveClientIpAddress(request)).pipe(
+    return authenticateToken(credential.token, resolveClientIpAddress(request), allowMcp).pipe(
       Effect.flatMap((session) => {
         if (session.proofKeyThumbprint) {
           if (!dpopToken || dpopToken !== credential.token) {
@@ -896,15 +911,21 @@ export const make = Effect.gen(function* () {
 
   const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = (request) =>
     authenticateRequest(request).pipe(
-      Effect.map(
-        (session) =>
-          ({
-            authenticated: true,
-            auth: descriptor,
-            ...authScopeResponse(session.scopes),
-            sessionMethod: session.method,
-            ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
-          }) satisfies AuthSessionState,
+      Effect.flatMap((session) =>
+        sessions.twoFactor.status(session.sessionId).pipe(
+          Effect.mapError((cause) => new ServerAuthSessionCredentialValidationError({ cause })),
+          Effect.map(
+            (twoFactor) =>
+              ({
+                twoFactor,
+                authenticated: true,
+                auth: descriptor,
+                ...authScopeResponse(session.scopes),
+                sessionMethod: session.method,
+                ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
+              }) satisfies AuthSessionState,
+          ),
+        ),
       ),
       Effect.catchIf(isServerAuthCredentialError, () =>
         Effect.succeed({
@@ -1294,10 +1315,26 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
     );
 
+  const requireSecondFactor = (session: AuthenticatedSession) =>
+    sessions.twoFactor.requireVerified(session.sessionId).pipe(
+      Effect.catchTags({
+        TwoFactorError: () =>
+          Effect.fail(new ServerAuthInvalidCredentialError({ twoFactorRequired: true })),
+      }),
+      Effect.mapError((cause) =>
+        cause._tag === "ServerAuthInvalidCredentialError"
+          ? cause
+          : new ServerAuthSessionCredentialValidationError({ cause }),
+      ),
+    );
+
   const authenticateHttpRequest: EnvironmentAuth["Service"]["authenticateHttpRequest"] = (
     request,
   ) =>
-    authenticateRequest(request).pipe(Effect.withSpan("EnvironmentAuth.authenticateHttpRequest"));
+    authenticateRequest(request).pipe(
+      Effect.tap(requireSecondFactor),
+      Effect.withSpan("EnvironmentAuth.authenticateHttpRequest"),
+    );
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request) {
@@ -1307,6 +1344,7 @@ export const make = Effect.gen(function* () {
         if (websocketTicket && websocketTicket.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketTicket).pipe(
             mapSessionVerificationErrors,
+            Effect.tap(requireSecondFactor),
             Effect.flatMap(rejectMcpClientAudience),
             Effect.map((session) => ({
               sessionId: session.sessionId,
@@ -1319,7 +1357,7 @@ export const make = Effect.gen(function* () {
         }
       }
 
-      return yield* authenticateRequest(request);
+      return yield* authenticateRequest(request).pipe(Effect.tap(requireSecondFactor));
     });
 
   const authenticateMcpClient: EnvironmentAuth["Service"]["authenticateMcpClient"] = (request) => {
@@ -1327,6 +1365,7 @@ export const make = Effect.gen(function* () {
     if (token === null) return Effect.fail(new ServerAuthMissingCredentialError({}));
     return sessions.verify(token).pipe(
       mapSessionVerificationErrors,
+      Effect.tap(requireSecondFactor),
       Effect.flatMap((session) =>
         session.subject === MCP_CLIENT_SUBJECT && session.method === "bearer-access-token"
           ? Effect.succeed({
@@ -1370,6 +1409,7 @@ export const make = Effect.gen(function* () {
       return Effect.fail(new ServerAuthMissingCredentialError({}));
     }
     return authenticateRequest(request).pipe(
+      Effect.tap(requireSecondFactor),
       Effect.filterOrFail(
         (session) => session.method === "browser-session-cookie",
         () => new ServerAuthInvalidCredentialError({ diagnostic: "Not a browser session." }),
@@ -1418,6 +1458,13 @@ export const make = Effect.gen(function* () {
     listClientSessions,
     revokeClientSession,
     revokeOtherClientSessions,
+    awaitSessionInvalidation: (sessionId) =>
+      sessions
+        .awaitInvalidation(sessionId)
+        .pipe(
+          Effect.mapError((cause) => new ServerAuthSessionCredentialValidationError({ cause })),
+        ),
+    authenticateFactorRequest: (request) => authenticateRequest(request, true),
     authenticateHttpRequest,
     authenticateWebSocketUpgrade,
     issueWebSocketTicket,

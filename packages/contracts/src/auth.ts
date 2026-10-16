@@ -458,7 +458,14 @@ export const AuthCreatePairingCredentialInput = Schema.Struct({
 });
 export type AuthCreatePairingCredentialInput = typeof AuthCreatePairingCredentialInput.Type;
 
+export const AuthTwoFactorStatus = Schema.Struct({
+  enabled: Schema.Boolean,
+  required: Schema.Boolean,
+  expiresAt: Schema.NullOr(Schema.Number),
+});
+
 export const AuthSessionState = Schema.Struct({
+  twoFactor: Schema.optionalKey(AuthTwoFactorStatus),
   authenticated: Schema.Boolean,
   auth: ServerAuthDescriptor,
   scopes: Schema.optionalKey(AuthEnvironmentScopes),

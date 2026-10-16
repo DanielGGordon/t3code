@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import { NodeWS } from "@effect/platform-node/NodeSocket";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/http";
@@ -14,8 +15,9 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as DeviceService from "./DeviceService.ts";
 import * as DeviceHubProxy from "./DeviceHubProxy.ts";
 
-it.effect("preserves binary input and admission frames through the real socket proxy", () =>
+it.effect("preserves binary frames and closes the live proxy when its session is invalidated", () =>
   Effect.gen(function* () {
+    const invalidated = yield* Deferred.make<void>();
     const hub = yield* Effect.acquireRelease(
       Effect.sync(() => new NodeWS.WebSocketServer({ port: 0 })),
       (server) =>
@@ -40,6 +42,7 @@ it.effect("preserves binary input and admission frames through the real socket p
         Layer.provideMerge(NodeHttpServer.layerTest),
         Layer.provide(
           Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
+            awaitSessionInvalidation: () => Deferred.await(invalidated),
             authenticateWebSocketUpgrade: () =>
               Effect.succeed({
                 sessionId: AuthSessionId.make("test"),
@@ -85,5 +88,10 @@ it.effect("preserves binary input and admission frames through the real socket p
     });
     yield* Effect.promise(() => received.promise);
     expect(frames).toEqual([[0x83], [0x03, 1], [0x03, 2]]);
+    const closed = Promise.withResolvers<void>();
+    client.addEventListener("close", () => closed.resolve(), { once: true });
+    yield* Deferred.succeed(invalidated, undefined);
+    yield* Effect.promise(() => closed.promise);
+    expect(client.readyState).toBe(WebSocket.CLOSED);
   }),
 );
