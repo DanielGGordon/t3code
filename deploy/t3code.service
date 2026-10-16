@@ -25,7 +25,7 @@ WorkingDirectory=%h
 # + claude import/resume port on upstream main are served, instead of the npm pkg.
 # Node 24 runs the TS entrypoint directly via type-stripping; serves apps/web/dist.
 # Loopback-only since the 2026-07 VPS reprovision (no tailscale on this box for
-# now); front with Caddy on 15.204.108.12 if remote/phone access is needed.
+# now); front with Caddy on <server-ip> if remote/phone access is needed.
 ExecStart=/home/dgordon/.local/bin/mise exec node@24 -- node /home/dgordon/projects/meta/t3code-v2/apps/server/src/bin.ts serve --host 127.0.0.1 --port 3773 --no-browser
 Restart=on-failure
 RestartSec=3

@@ -12,8 +12,8 @@ function stubBrowserPrimary() {
     configurable: true,
     value: {
       location: {
-        href: "https://15.204.108.12/chat",
-        origin: "https://15.204.108.12",
+        href: "https://203.0.113.10/chat",
+        origin: "https://203.0.113.10",
       },
     },
   });
