@@ -128,7 +128,9 @@ describe("resolveProjectSettings", () => {
       projectId,
       project,
     );
-    expect(folded.settings.defaultModelSelection).toBeNull();
+    expect(folded.settings.defaultModelSelection).toEqual(
+      DEFAULT_SERVER_SETTINGS.defaultModelSelection,
+    );
     expect(folded.sources.defaultModelSelection).toBe("environment");
   });
 
@@ -144,7 +146,9 @@ describe("resolveProjectSettings", () => {
       projectSettingsOverrides: { [projectId]: { defaultModelSelection: disabledSelection } },
     });
     const resolved = resolveProjectSettings(settings, projectId);
-    expect(resolved.settings.defaultModelSelection).toBeNull();
+    expect(resolved.settings.defaultModelSelection).toEqual(
+      DEFAULT_SERVER_SETTINGS.defaultModelSelection,
+    );
     expect(resolved.sources.defaultModelSelection).toBe("environment");
   });
 
@@ -500,4 +504,14 @@ it("inherits branch naming defaults and applies project overrides independently"
     },
   });
   expect(resolveProjectSettings(cleared, projectId).settings.branchNamingMode).toBe("static");
+});
+
+describe("built-in default model", () => {
+  it("starts every project on Claude Sonnet 5.5 until a default is chosen", () => {
+    const resolved = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId);
+    expect(resolved.settings.defaultModelSelection).toEqual({
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-5-5",
+    });
+  });
 });
