@@ -23,6 +23,7 @@ import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./env
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
+  DEFAULT_SESSION_MODEL_SELECTION,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   ProviderOptionSelections,
@@ -1247,7 +1248,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SESSION_MODEL_SELECTION)),
   ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_SESSION_MODEL_SELECTION,
   type ModelSelection,
   type ProviderInstanceId,
   type WorktreeSubmodules,
@@ -156,8 +157,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             : undefined
       }
       resetAction={
-        settings.defaultModelSelection !== null ? (
-          <SettingResetButton label="default model" onClick={() => setModel(null)} />
+        settings.defaultModelSelection === null ||
+        settings.defaultModelSelection.instanceId !== DEFAULT_SESSION_MODEL_SELECTION.instanceId ||
+        settings.defaultModelSelection.model !== DEFAULT_SESSION_MODEL_SELECTION.model ||
+        settings.defaultModelSelection.options !== undefined ? (
+          <SettingResetButton
+            label="default model"
+            onClick={() => setModel(DEFAULT_SESSION_MODEL_SELECTION)}
+          />
         ) : null
       }
       control={
