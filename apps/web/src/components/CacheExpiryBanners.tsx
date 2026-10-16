@@ -1,7 +1,7 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { TimerIcon } from "lucide-react";
+import { BellOffIcon, TimerIcon } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import {
@@ -96,6 +96,18 @@ export function CacheExpiryBanners() {
     [setStore],
   );
 
+  const dismissAll = useCallback(() => {
+    toasts.current.clear();
+    const now = Date.now();
+    setStore((current) => ({
+      open: [],
+      dismissed: [
+        ...current.dismissed.filter((entry) => now - entry.at < KEEP_DISMISSED_MS),
+        ...current.open.map((banner) => ({ key: banner.key, at: now })),
+      ],
+    }));
+  }, [setStore]);
+
   // Turning the setting off drops the open banners rather than parking them.
   useEffect(() => {
     if (!enabled && store.open.length > 0) setStore((current) => ({ ...current, open: [] }));
@@ -127,6 +139,27 @@ export function CacheExpiryBanners() {
       );
     }
   }, [store.open, timestampFormat, navigate, dismiss]);
+
+  // With several banners stacked, one more toast offers to clear them all.
+  const openCount = store.open.length;
+  useEffect(() => {
+    if (openCount < 2) return;
+    const toastId = toastManager.add(
+      stackedThreadToast({
+        type: "warning",
+        title: `${openCount} prompt caches expiring`,
+        timeout: 0,
+        actionProps: { children: "Dismiss all", onClick: dismissAll },
+        actionVariant: "outline",
+        data: {
+          hideCopyButton: true,
+          leadingIcon: <BellOffIcon aria-hidden="true" className="size-4 text-warning" />,
+          onClose: dismissAll,
+        },
+      }),
+    );
+    return () => toastManager.close(toastId);
+  }, [openCount, dismissAll]);
 
   useEffect(
     () => () => {
