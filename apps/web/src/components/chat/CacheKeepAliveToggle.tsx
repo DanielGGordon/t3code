@@ -8,6 +8,7 @@ import {
   CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
   cacheKeepAliveState,
   cacheKeepAliveSupportsDriver,
+  cacheKeptWarmByHeartbeat,
   type CacheKeepAliveState,
   type CacheKeepAliveThread,
 } from "@t3tools/shared/cacheKeepAlive";
@@ -20,6 +21,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { formatShortTimestamp } from "../../timestampFormat";
+import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
 import { ComposerControl, ComposerControlIcon, type ComposerControlSize } from "./ComposerControl";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -47,21 +49,30 @@ function describe(state: CacheKeepAliveState, formatTime: (ms: number) => string
   }
 }
 
+const HEARTBEAT_EXPLANATION =
+  "The agent is babysitting background subagents and checks in on them every 15 minutes. Each check-in refreshes the prompt cache, and they stop on their own once the subagents finish.";
+
 function CacheKeepAliveTooltipText(props: {
   readonly thread: CacheKeepAliveThread;
+  readonly heartbeat: boolean;
   readonly nowMs: number;
 }) {
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const state = cacheKeepAliveState(props);
+  if (props.heartbeat) {
+    const alsoOn = state.kind !== "off" && state.kind !== "paused";
+    return `Kept warm by the subagent heartbeat. ${HEARTBEAT_EXPLANATION}${alsoOn ? " Keep cache warm is also on and takes over after that." : ""}`;
+  }
   return describe(state, (ms) => formatShortTimestamp(new Date(ms).toISOString(), timestampFormat));
 }
 
 /**
  * Fork: the per-thread "Keep cache warm" toggle. The server sends the pings
  * (with the browser closed too); this only flips the persisted toggle and
- * explains where the thread stands. `placement` picks the chrome: a header
- * toggle button, or a composer-footer control that sits next to the access
- * mode.
+ * explains where the thread stands. While the subagent heartbeat is armed the
+ * cache stays warm regardless, so the control reads as on and a click explains
+ * why instead. `placement` picks the chrome: a header toggle button, or a
+ * composer-footer control that sits next to the access mode.
  */
 export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   readonly environmentId: EnvironmentId;
@@ -81,17 +92,31 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   const handleOpenChange = useCallback((open: boolean) => {
     if (open) setOpenedAtMs(Date.now());
   }, []);
+  const heartbeat = shell !== null && cacheKeptWarmByHeartbeat(shell.source);
+  const keepAlive = shell?.source.cacheKeepAlive ?? null;
+  const keepAliveActive = keepAlive !== null && keepAlive.pausedAt === null;
   const handlePressedChange = useCallback(
     (enabled: boolean) => {
+      if (heartbeat && !enabled) {
+        // The heartbeat is the agent's own doing; only the toggle can go off.
+        if (keepAliveActive) {
+          void setCacheKeepAlive({ environmentId, input: { threadId, enabled: false } });
+        }
+        toastManager.add({
+          type: "info",
+          title: "Cache is being kept warm by the subagent heartbeat",
+          description: `${HEARTBEAT_EXPLANATION}${keepAliveActive ? " Keep cache warm is now off, so pings won't continue after that." : ""}`,
+        });
+        return;
+      }
       void setCacheKeepAlive({ environmentId, input: { threadId, enabled } });
     },
-    [setCacheKeepAlive, environmentId, threadId],
+    [heartbeat, keepAliveActive, setCacheKeepAlive, environmentId, threadId],
   );
   if (shell === null || serverConfig?.environment.capabilities.threadCacheKeepAlive !== true) {
     return null;
   }
   const thread = shell.source;
-  const keepAlive = thread.cacheKeepAlive ?? null;
   // Offered while off on threads set to a Claude instance; while on it always
   // shows, so it can be turned off. Where the thread stands comes from the
   // server's cacheKeepAliveContext, the same answer the server pings by.
@@ -104,9 +129,9 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   ) {
     return null;
   }
-  const paused = keepAlive !== null && keepAlive.pausedAt !== null;
+  const paused = keepAlive !== null && keepAlive.pausedAt !== null && !heartbeat;
   // Paused reads as not pressed: pressing it resumes with a fresh budget.
-  const pressed = keepAlive !== null && !paused;
+  const pressed = heartbeat || keepAliveActive;
   const Icon = paused ? CirclePauseIcon : FlameIcon;
   const label = paused ? "Resume keeping the prompt cache warm" : "Keep cache warm";
   return (
@@ -144,7 +169,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
         side={placement === "composer" ? "top" : "bottom"}
         className="max-w-72 whitespace-normal"
       >
-        <CacheKeepAliveTooltipText thread={thread} nowMs={openedAtMs} />
+        <CacheKeepAliveTooltipText thread={thread} heartbeat={heartbeat} nowMs={openedAtMs} />
       </TooltipPopup>
     </Tooltip>
   );
