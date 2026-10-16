@@ -155,6 +155,42 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           expect(restrictedCookies).toHaveLength(1);
           expect(restrictedCookies[0]).toMatch(/^t3_session_/);
           expect(restrictedCookies[0]).not.toContain("t3_dev_session_");
+          const unauthenticatedFactor = await environmentA.handler(
+            postJson("/api/auth/two-factor", { action: "status" }),
+            requestContext,
+          );
+          expect(unauthenticatedFactor.status).toBe(401);
+          const deniedSetup = await environmentA.handler(
+            postJson(
+              "/api/auth/two-factor",
+              { action: "begin" },
+              { cookie: restrictedCookies[0]!.split(";", 1)[0]! },
+            ),
+            requestContext,
+          );
+          expect(deniedSetup.status).toBe(403);
+          const setup = await environmentA.handler(
+            postJson("/api/auth/two-factor", { action: "begin" }, { cookie: devCookieHeader }),
+            requestContext,
+          );
+          expect(setup.status).toBe(200);
+          expect(setup.headers.get("cache-control")).toBe("no-store");
+          expect(await setup.json()).toMatchObject({
+            status: { enabled: false, required: false },
+            uri: expect.stringContaining("otpauth://totp/"),
+          });
+          const invalidCode = await environmentA.handler(
+            postJson(
+              "/api/auth/two-factor",
+              { action: "confirm", code: "invalid" },
+              { cookie: devCookieHeader },
+            ),
+            requestContext,
+          );
+          expect(await invalidCode.json()).toMatchObject({
+            error: "Invalid authenticator code.",
+            status: { enabled: false },
+          });
         }),
       ([environmentA, environmentB]) =>
         Effect.promise(() => Promise.all([environmentA.dispose(), environmentB.dispose()])),

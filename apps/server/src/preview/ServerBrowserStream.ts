@@ -20,6 +20,7 @@ import {
 } from "effect/http";
 import * as Socket from "effect/socket/Socket";
 
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import { authenticateMediaRequest } from "../auth/http.ts";
 import { assetResponseHeaders } from "../http.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
@@ -70,6 +71,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
     const session = yield* authenticateMediaRequest(AuthOrchestrationReadScope);
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
     const params = url.value.searchParams;
     // Watching needs read access; driving the page is a preview mutation.
     const canOperate =
@@ -186,7 +188,12 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         const receiveInput = reader.pull.pipe(
           Effect.flatMap((chunks) => Effect.forEach(chunks, receive, { discard: true })),
         );
-        return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));
+        return yield* Effect.raceFirst(
+          Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput)),
+          auth
+            .awaitSessionInvalidation(session.sessionId)
+            .pipe(Effect.as(HttpServerResponse.empty())),
+        );
       }),
     ).pipe(
       Effect.catchTags({

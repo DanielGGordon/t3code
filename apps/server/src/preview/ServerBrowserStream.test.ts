@@ -12,6 +12,7 @@ import {
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -30,9 +31,11 @@ const platformLayer = NodeHttpPlatform.layer.pipe(Layer.provideMerge(NodeService
 const makeAuth = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
   error?: EnvironmentAuth.ServerAuthCredentialError,
+  invalidated: Effect.Effect<void> = Effect.never,
 ) => {
   const requests: string[] = [];
   const layer = Layer.mock(EnvironmentAuth.EnvironmentAuth, {
+    awaitSessionInvalidation: () => invalidated,
     authenticateWebSocketUpgrade: (request) => {
       requests.push(request.originalUrl);
       return error
@@ -74,7 +77,8 @@ it.effect.each([
     const scopes = hasOperateScope
       ? [AuthOrchestrationReadScope, AuthPreviewOperateScope]
       : [AuthOrchestrationReadScope];
-    const auth = makeAuth(scopes);
+    const invalidated = yield* Deferred.make<void>();
+    const auth = makeAuth(scopes, undefined, Deferred.await(invalidated));
     const inputs: unknown[] = [];
     const attachments: Parameters<ServerBrowser.ServerBrowser["Service"]["attachViewer"]>[0][] = [];
     const acked = Promise.withResolvers<void>();
@@ -152,6 +156,11 @@ it.effect.each([
     // In particular, a one-use ticket must never be authenticated a second
     // time to discover whether this read session also has operate scope.
     expect(auth.requests).toEqual([resource]);
+    const closed = Promise.withResolvers<void>();
+    socket.addEventListener("close", () => closed.resolve(), { once: true });
+    yield* Deferred.succeed(invalidated, undefined);
+    yield* Effect.promise(() => closed.promise);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
   }).pipe(Effect.scoped),
 );
 

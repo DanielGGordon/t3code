@@ -998,6 +998,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "two-factor-authentication",
+    title: "Two-factor authentication",
+    to: "/settings/connections",
+    localEnvironmentOnly: true,
+    searchTerms: ["2fa totp authenticator security recovery codes session 48 hours"],
+  },
+  {
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",

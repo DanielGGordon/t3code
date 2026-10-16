@@ -3,6 +3,29 @@
 Connect a phone, browser, or another desktop app to T3 Code running on a different
 machine. That machine must stay running and reachable while you work.
 
+## Two-factor authentication
+
+In **Settings → Connections → Two-factor authentication**, choose **Set up
+authenticator**, scan the QR code (or enter the setup key), and confirm a code.
+Save the recovery codes shown after confirmation; each works once.
+
+Once enabled, each session must verify before accessing the environment and again
+48 hours after its last verification. Existing sessions are prompted too. Activity,
+refreshing the page, and restarting the server do not renew verification. An expired
+session loses its live connections until it verifies; work already running on the
+server continues. Verification on one device does not unlock another.
+
+To disable 2FA, use the same settings section and provide a fresh authenticator or
+recovery code. Setup and disabling require permission to manage access. The
+authenticator is shared for this environment, so only share it with people who
+should have access to all its sessions.
+
+The verification screen is available in the server-hosted web app and its desktop
+shell. Bearer and MCP sessions are also enforced: clients without a verification UI
+must submit their code to `POST /api/auth/two-factor` with their session authorization
+and `{ "action": "verify", "code": "123456" }`. This verifies that token's session
+only. Native mobile verification UI is not maintained on this fork.
+
 ## T3 Connect
 
 T3 Connect makes an environment available to your other devices without setting

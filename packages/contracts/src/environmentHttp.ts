@@ -35,6 +35,7 @@ import {
   AuthEnvironmentScope,
   AuthTokenExchangeRequest,
   AuthSessionState,
+  AuthTwoFactorStatus,
   AuthWebSocketTicketResult,
   ServerAuthSessionMethod,
 } from "./auth.ts";
@@ -96,6 +97,7 @@ export const EnvironmentRequestInvalidReason = Schema.Literals([
 export type EnvironmentRequestInvalidReason = typeof EnvironmentRequestInvalidReason.Type;
 
 export const EnvironmentAuthInvalidReason = Schema.Literals([
+  "two_factor_required",
   "missing_credential",
   "invalid_credential",
 ]);
@@ -453,6 +455,23 @@ class EnvironmentMetadataHttpApi extends HttpApiGroup.make("metadata").add(
 ) {}
 
 class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
+  .add(
+    HttpApiEndpoint.post("twoFactor", "/api/auth/two-factor", {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Struct({
+        action: Schema.Literals(["status", "begin", "confirm", "verify", "disable"]),
+        code: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(128))),
+      }),
+      success: Schema.Struct({
+        status: AuthTwoFactorStatus,
+        secret: Schema.optionalKey(Schema.String),
+        uri: Schema.optionalKey(Schema.String),
+        recoveryCodes: Schema.optionalKey(Schema.Array(Schema.String)),
+        error: Schema.optionalKey(Schema.String),
+      }),
+      error: [EnvironmentAuthInvalidError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }),
+  )
   .add(
     HttpApiEndpoint.get("session", "/api/auth/session", {
       headers: OptionalBearerHeaders,
