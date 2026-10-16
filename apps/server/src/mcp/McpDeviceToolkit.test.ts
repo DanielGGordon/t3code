@@ -109,6 +109,22 @@ const layerDeviceServiceMock = Layer.mock(DeviceService.DeviceService)({
           ]
         : [],
     ),
+  // UDID-3 was open in the test thread until its simulator stopped running.
+  stoppedSessionsForThread: (id) =>
+    Effect.succeed(
+      id === threadId
+        ? [
+            {
+              threadId,
+              hostId: "local",
+              deviceId: DeviceId.make("UDID-3"),
+              platform: "ios" as const,
+              openedAt: "2026-09-08T00:00:00.000Z",
+              name: "iPhone Air",
+            },
+          ]
+        : [],
+    ),
   screenshot: () => Effect.succeed({ device, png }),
   close: () => Effect.void,
   agentCli: Effect.succeed("/cli"),
@@ -155,6 +171,21 @@ it.effect("registers the device tools and returns the screenshot as image conten
         .pipe(callWith(["device"]), Effect.provideService(McpSchema.McpServerClient, client));
       expect(foreign.isError).toBe(true);
       expect(foreign.content.map((entry) => entry.type)).toEqual(["text"]);
+
+      const stopped = yield* server
+        .callTool({ name: "device_screenshot", arguments: { deviceId: "UDID-3" } })
+        .pipe(callWith(["device"]), Effect.provideService(McpSchema.McpServerClient, client));
+      expect(stopped.isError).toBe(true);
+      expect(stopped.content).toEqual([
+        expect.objectContaining({
+          text: expect.stringContaining("iPhone Air (UDID-3) is no longer running"),
+        }),
+      ]);
+
+      const nothingToShutDown = yield* server
+        .callTool({ name: "device_close", arguments: { hostId: "other", shutdown: true } })
+        .pipe(callWith(["device"]), Effect.provideService(McpSchema.McpServerClient, client));
+      expect(nothingToShutDown.isError).toBe(true);
 
       const denied = yield* server
         .callTool({ name: "device_list", arguments: {} })

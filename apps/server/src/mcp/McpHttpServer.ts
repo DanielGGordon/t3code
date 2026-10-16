@@ -13,7 +13,11 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, type Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contracts";
+import {
+  DeviceToolError,
+  OrchestratorMcpFailure,
+  PreviewAutomationError,
+} from "@t3tools/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -714,6 +718,9 @@ const registerImageTool = <T extends Tool.Any, E, R>(
     });
   });
 
+const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
+const isDeviceToolError = Schema.is(DeviceToolError);
+
 const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreenshot")(function* () {
   const devices = yield* DeviceService.DeviceService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -730,11 +737,13 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
         Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
       ),
     "screenshot",
-    "Device screenshot failed.",
+    // Device errors build their messages from server-side state, such as an emulator that died.
+    (error) =>
+      isDeviceToolError(error) || isOrchestratorMcpFailure(error)
+        ? error.message
+        : "Device screenshot failed.",
   );
 });
-
-const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;

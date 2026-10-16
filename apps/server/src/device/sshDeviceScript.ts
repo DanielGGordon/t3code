@@ -41,6 +41,14 @@ const state = path.join(root, 'hosts', owner);
 const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 30000, ...options });
 const read = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const write = (file, value) => { const tmp = file + '.' + process.pid; fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 }); fs.renameSync(tmp, file); };
+// Mirrors emulatorExtraArgs in LocalDeviceHost: without a GPU render node, emulators get ANGLE on SwiftShader instead of -gpu auto.
+const emulatorGpuEnvironment = () => {
+  const extraArgs = process.env.EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS || '';
+  if (process.platform !== 'linux' || /(?:^|\s)-gpu(?:\s|$)/.test(extraArgs)) return {};
+  let nodes = [];
+  try { nodes = fs.readdirSync('/dev/dri'); } catch {}
+  return nodes.some(name => name.startsWith('renderD')) ? {} : { EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS: (extraArgs + ' -gpu swangle_indirect').trim() };
+};
 const toolVersions = (name, requiredVersion, entry, record) => {
   const directory = path.join(root, 'tools');
   const prefix = name + '@';
@@ -172,7 +180,7 @@ async function install(name, version, entry) {
       const hubPort = await port();
       const log = fs.openSync(path.join(state, 'hub.log'), 'a');
       const child = spawn(process.execPath, [hubEntry, '--port', String(hubPort), '--host', '127.0.0.1', '--hide-sidebar', '--hide-boot-device'], {
-        cwd: state, detached: true, stdio: ['ignore', log, log], env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        cwd: state, detached: true, stdio: ['ignore', log, log], env: { ...process.env, ...emulatorGpuEnvironment(), FORCE_COLOR: '0', NO_COLOR: '1' },
       });
       try { await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); }
       finally { fs.closeSync(log); }

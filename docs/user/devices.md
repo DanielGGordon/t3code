@@ -33,6 +33,12 @@ Studio's Device Manager. T3 Code detects standard SDK locations; set
 `ANDROID_HOME` for a custom location. The panel explains missing dependencies.
 After installing them, restart the environment server and refresh devices.
 
+On a Linux server without a GPU, emulators render with ANGLE on SwiftShader
+(`-gpu swangle_indirect`), which runs WebGL in Chrome and WebViews. To choose
+another mode, start the environment server with
+`EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS="-gpu <mode>"`; it applies to every
+emulator on that host.
+
 The screen is interactive: click and drag to touch, type while the screen is
 focused, and use the toolbar for Home, Back, and Recents on Android, rotate on
 iOS, and power off. Close the tab to stop watching; the device keeps running
