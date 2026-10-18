@@ -275,6 +275,53 @@ export const layer = HttpApiBuilder.group(
 
     return handlers
       .handle(
+        "twoFactor",
+        Effect.fn("environment.auth.twoFactor")(function* ({ payload }) {
+          yield* appendCredentialResponseHeaders;
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const session = yield* serverAuth.authenticateFactorRequest(request).pipe(
+            Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+              failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+            ),
+            Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+              failEnvironmentInternal("internal_error", error),
+            ),
+          );
+          if (
+            ["begin", "confirm", "disable"].includes(payload.action) &&
+            !session.scopes.includes(AuthAccessWriteScope)
+          ) {
+            return yield* failEnvironmentScopeRequired(AuthAccessWriteScope);
+          }
+          const factor = sessions.twoFactor;
+          const operation = Effect.gen(function* () {
+            switch (payload.action) {
+              case "begin":
+                return yield* factor.begin(session.sessionId);
+              case "confirm":
+                return yield* factor.confirm(session.sessionId, payload.code ?? "");
+              case "verify":
+                return yield* factor.verifyCode(session.sessionId, payload.code ?? "", false);
+              case "disable":
+                return yield* factor.verifyCode(session.sessionId, payload.code ?? "", true);
+              case "status":
+                return {};
+            }
+          }).pipe(
+            Effect.catchTags({
+              TwoFactorError: (error) => Effect.succeed({ error: error.message }),
+            }),
+          );
+          const result = yield* operation.pipe(
+            Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
+          );
+          const status = yield* factor
+            .status(session.sessionId)
+            .pipe(Effect.catch((error) => failEnvironmentInternal("internal_error", error)));
+          return { ...result, status };
+        }),
+      )
+      .handle(
         "session",
         Effect.fn("environment.auth.session")(
           function* (args) {

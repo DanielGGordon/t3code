@@ -24,6 +24,7 @@ import {
 import * as Socket from "effect/socket/Socket";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import { authenticateMediaRequest } from "../auth/http.ts";
 import * as DeviceService from "./DeviceService.ts";
 
@@ -168,7 +169,7 @@ const handler = Effect.gen(function* () {
   const controlsDevice =
     (upgrade && hubPath !== "/api/devices/ws") ||
     (!readOnly && /\/api\/(stream-(mode|settings)|fold)$/.test(hubPath));
-  yield* authenticateMediaRequest(
+  const session = yield* authenticateMediaRequest(
     controlsDevice ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope,
   );
   const devices = yield* DeviceService.DeviceService;
@@ -186,9 +187,10 @@ const handler = Effect.gen(function* () {
   const search = upstreamSearch.size > 0 ? `?${upstreamSearch.toString()}` : "";
   const upstreamPath = `${hubPath}${search}`;
   if (upgrade) {
-    return yield* proxyWebSocket(
-      request,
-      `${ready.hub.origin.replace(/^http/, "ws")}${upstreamPath}`,
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    return yield* Effect.raceFirst(
+      proxyWebSocket(request, `${ready.hub.origin.replace(/^http/, "ws")}${upstreamPath}`),
+      auth.awaitSessionInvalidation(session.sessionId).pipe(Effect.as(HttpServerResponse.empty())),
     );
   }
   return yield* proxyHttp(request, `${ready.hub.origin}${upstreamPath}`, ready.hub.origin);

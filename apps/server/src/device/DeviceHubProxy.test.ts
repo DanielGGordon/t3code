@@ -39,6 +39,7 @@ const fixture = (
     DeviceHubProxy.layer.pipe(
       Layer.provideMerge(
         Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
+          awaitSessionInvalidation: () => Effect.never,
           authenticateWebSocketUpgrade: () =>
             authError
               ? Effect.fail(authError)

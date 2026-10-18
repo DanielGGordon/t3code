@@ -278,11 +278,16 @@ const requiredScopesForRpcCall = (
 };
 
 /** Authorizes every RPC on one connection against that connection's session scopes. */
-export const layer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
+export const layer = (
+  scopes: ReadonlyArray<AuthEnvironmentScope>,
+  verifySession: Effect.Effect<void, EnvironmentAuthorizationError> = Effect.void,
+) =>
   Layer.succeed(RpcScopeAuthorization)((effect, { rpc, payload }) => {
     const requiredScopes = requiredScopesForRpcCall(rpc._tag, payload);
     const requiredScope = requiredScopes.find((scope) => !scopes.includes(scope));
-    return requiredScope === undefined ? effect : Effect.fail(rpcAuthorizationError(requiredScope));
+    return requiredScope === undefined
+      ? Effect.andThen(verifySession, effect)
+      : Effect.fail(rpcAuthorizationError(requiredScope));
   });
 
 /** Retrying can install or restart tools even though ordinary listing is readable. */

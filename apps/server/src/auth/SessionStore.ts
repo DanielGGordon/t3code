@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 
+import * as TwoFactor from "./TwoFactor.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as AuthSessions from "../persistence/AuthSessions.ts";
@@ -369,6 +370,7 @@ export type SessionCredentialError = typeof SessionCredentialError.Type;
 export class SessionStore extends Context.Service<
   SessionStore,
   {
+    readonly twoFactor: Effect.Success<typeof TwoFactor.make>;
     readonly cookieName: string;
     readonly legacyCookieName: string | undefined;
     readonly issue: (input?: {
@@ -502,6 +504,7 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
 }
 
 export const make = Effect.gen(function* () {
+  const twoFactor = yield* TwoFactor.make;
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
@@ -1128,13 +1131,23 @@ export const make = Effect.gen(function* () {
             ),
             Stream.runHead,
           ),
-          Effect.sleep(Duration.millis(remaining)),
+          Effect.raceFirst(
+            Effect.sleep(Duration.millis(remaining)),
+            twoFactor
+              .awaitRequired(sessionId)
+              .pipe(
+                Effect.mapError(
+                  (cause) => new SessionCredentialVerificationError({ sessionId, cause }),
+                ),
+              ),
+          ),
         );
       }),
     );
   });
 
   return SessionStore.of({
+    twoFactor,
     cookieName,
     legacyCookieName,
     issue,

@@ -1,3 +1,4 @@
+import { TwoFactorSettings } from "../auth/TwoFactor";
 import { SessionPermissions } from "./SessionPermissions";
 import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
 import {
@@ -4064,6 +4065,7 @@ export function ConnectionsSettings() {
   return (
     <SettingsPageContainer>
       {primarySettings}
+      {!isLocalEnvironmentDisabled() && <TwoFactorSettings />}
       <SettingsSection
         {...searchableSetting("remote-environments")}
         title="Environments"
