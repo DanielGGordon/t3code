@@ -85,7 +85,7 @@ describe("resolveTouchSnoozePresets", () => {
         "tomorrow",
         "next-week",
       ]);
-      expect(new Date(presets[0]!.snoozedUntil).getTime() - now.getTime()).toBe(3_600_000);
+      expect(new Date(presets[0]!.snoozedUntil).getTime() - now.getTime()).toBe(55 * 60_000);
       expect(new Date(presets[1]!.snoozedUntil).getTime() - now.getTime()).toBe(3 * 3_600_000);
     }
   });

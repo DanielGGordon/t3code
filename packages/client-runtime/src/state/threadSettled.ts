@@ -211,6 +211,8 @@ export function threadWokeAt(
 }
 
 const HOUR_MS = 60 * 60 * 1_000;
+/** The "In 1 hour" preset is labelled 1h but wakes 5 minutes early on purpose. */
+const HOUR_PRESET_MS = 55 * 60 * 1_000;
 const EVENING_HOUR = 18;
 const MORNING_HOUR = 9;
 
@@ -253,7 +255,7 @@ function addSnoozeDays(base: Date, days: number): Date {
  * morning, so only "Tomorrow" is offered.
  */
 export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
-  const inAnHour = DateTime.toDate(DateTime.makeUnsafe(now.getTime() + HOUR_MS));
+  const inAnHour = DateTime.toDate(DateTime.makeUnsafe(now.getTime() + HOUR_PRESET_MS));
   const inThreeHours = DateTime.toDate(DateTime.makeUnsafe(now.getTime() + 3 * HOUR_MS));
   const presets: SnoozePreset[] = [
     {
