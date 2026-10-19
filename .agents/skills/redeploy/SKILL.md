@@ -79,7 +79,9 @@ restart either.
 gates) before it aborts with nothing changed. (`--when-idle` is still accepted but does nothing
 extra; waiting is no longer optional.)
 
-- **What counts as busy:** a thread with a `pending` (queued) or `running` run, read straight
+- **What counts as busy:** a thread with a `pending` (queued) or `running` run, or with a
+  `running` subagent (a background agent keeps working after the parent's turn has completed,
+  and a restart kills it), read straight
   from `statev2.sqlite` by `scripts/deploy-idle-check.ts`. A run `waiting` on a person's
   approval or answer is not busy, since it survives a restart. Any busy poll restarts the
   quiet clock; the server must stay quiet for `T3_IDLE_SECS` (default 120) in a row.

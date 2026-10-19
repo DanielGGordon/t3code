@@ -10,7 +10,10 @@
 // Read-only SQL over statev2.sqlite (safe while the server runs), so it works
 // against any server version, including one that predates this script. A run
 // that is `waiting` is parked on a person (approval or question) and survives a
-// restart, so it does not count; `pending` (queued) and `running` do.
+// restart, so it does not count; `pending` (queued) and `running` do. So does a
+// `running` subagent: the parent's run completes as soon as its turn ends, but a
+// background subagent keeps working and a restart kills it (the thread then looks
+// idle while real work is in flight).
 
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -38,6 +41,14 @@ const ACTIVE_RUNS_SQL = `
   WHERE r.status IN ('pending', 'running')
   ORDER BY r.requested_at`;
 
+const RUNNING_SUBAGENTS_SQL = `
+  SELECT s.thread_id AS threadId, 'subagent' AS status,
+         COALESCE(t.title, '') AS title, t.payload_json AS payload
+  FROM orchestration_v2_projection_subagents s
+  LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = s.thread_id
+  WHERE s.status = 'running'
+  ORDER BY s.started_at`;
+
 function worktreePathOf(payload: unknown): string | null {
   if (typeof payload !== "string") return null;
   try {
@@ -49,12 +60,13 @@ function worktreePathOf(payload: unknown): string | null {
   }
 }
 
-/** Distinct threads with a queued or running run, minus the ignored ones. */
+/** Distinct threads with a queued or running run or a running subagent, minus the ignored ones. */
 export function findActiveRuns(db: NodeSqlite.DatabaseSync, filter: IdleFilter = {}): ActiveRun[] {
   const ignoreThreads = new Set(filter.ignoreThreads ?? []);
   const ignoreWorktrees = new Set(filter.ignoreWorktrees ?? []);
   const active = new Map<string, ActiveRun>();
-  for (const row of db.prepare(ACTIVE_RUNS_SQL).all()) {
+  const rows = [...db.prepare(ACTIVE_RUNS_SQL).all(), ...db.prepare(RUNNING_SUBAGENTS_SQL).all()];
+  for (const row of rows) {
     const threadId = String(row.threadId);
     const worktree = worktreePathOf(row.payload);
     if (ignoreThreads.has(threadId)) continue;
