@@ -33,6 +33,13 @@ export interface HeaderCodexUsage {
   readonly secondary: HeaderCodexWindow | null;
 }
 
+export interface HeaderGeminiUsage {
+  /** The five-hour (session) window. */
+  readonly session: HeaderCodexWindow | null;
+  /** The weekly window. */
+  readonly weekly: HeaderCodexWindow | null;
+}
+
 const SCOPED_LABEL_PREFIX = /^weekly\s*[·:-]\s*/i;
 
 function findUsageWindows(
@@ -89,4 +96,29 @@ export function selectCodexUsage(
   const primary = toWindow(windows.find((window) => window.kind === "session"));
   const secondary = toWindow(windows.find((window) => window.kind === "weekly"));
   return primary || secondary ? { primary, secondary } : null;
+}
+
+/**
+ * Gemini session/weekly windows from the first enabled Antigravity provider
+ * that reports any. Antigravity also reports a shared Claude & GPT allowance;
+ * only the Gemini buckets count here. When several Gemini buckets share a
+ * kind (Pro and Flash, say) the fullest one wins — it is the one that blocks
+ * work first.
+ */
+export function selectGeminiUsage(
+  providers: ReadonlyArray<ServerProvider>,
+): HeaderGeminiUsage | null {
+  const windows = findUsageWindows(providers, "antigravity");
+  if (windows === null) return null;
+  const fullest = (kind: ServerProviderUsageWindow["kind"]): HeaderCodexWindow | null => {
+    let best: ServerProviderUsageWindow | undefined;
+    for (const window of windows) {
+      if (window.kind !== kind || !window.label.startsWith("Gemini")) continue;
+      if (!best || window.usedPercent > best.usedPercent) best = window;
+    }
+    return best ? { usedPercent: best.usedPercent, ...resetsAtField(best) } : null;
+  };
+  const session = fullest("session");
+  const weekly = fullest("weekly");
+  return session || weekly ? { session, weekly } : null;
 }

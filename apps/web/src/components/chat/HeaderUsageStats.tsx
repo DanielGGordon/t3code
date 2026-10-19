@@ -17,6 +17,7 @@ import { cn } from "~/lib/utils";
 import type {
   HeaderClaudeUsage,
   HeaderCodexUsage,
+  HeaderGeminiUsage,
   HeaderUsageLimit,
 } from "~/lib/headerUsageLimits";
 import {
@@ -27,6 +28,8 @@ import {
 
 export type HeaderUsageStatId =
   | "codex"
+  | "geminiSession"
+  | "geminiWeekly"
   | "stock"
   | "context"
   | "spend"
@@ -56,6 +59,18 @@ export const HEADER_USAGE_STAT_DEFINITIONS: ReadonlyArray<HeaderUsageStatDefinit
     menuLabel: () => "Codex usage",
     colorClass: "text-accent-orange",
     patch: (visible) => ({ headerUsageCodexVisible: visible }),
+  },
+  {
+    id: "geminiSession",
+    menuLabel: () => "Gemini session",
+    colorClass: "text-accent-yellow",
+    patch: (visible) => ({ headerUsageGeminiSessionVisible: visible }),
+  },
+  {
+    id: "geminiWeekly",
+    menuLabel: () => "Gemini weekly",
+    colorClass: "text-accent-green",
+    patch: (visible) => ({ headerUsageGeminiWeeklyVisible: visible }),
   },
   {
     id: "stock",
@@ -102,6 +117,8 @@ export function selectHeaderUsageStatsVisibility(
 ): HeaderUsageStatsVisibility {
   return {
     codex: settings.headerUsageCodexVisible,
+    geminiSession: settings.headerUsageGeminiSessionVisible,
+    geminiWeekly: settings.headerUsageGeminiWeeklyVisible,
     stock: settings.headerUsageStockVisible,
     context: settings.headerUsageContextVisible,
     spend: settings.headerUsageSpendVisible,
@@ -252,11 +269,13 @@ export function selectHeaderUsageStats(input: {
   readonly contextWindow: ContextWindowSnapshot | null;
   readonly claudeUsage: HeaderClaudeUsage | null;
   readonly codexUsage?: HeaderCodexUsage | null;
+  readonly geminiUsage?: HeaderGeminiUsage | null;
   readonly stockQuote?: StockQuoteResult;
   readonly stockSymbol?: string;
 }): HeaderUsageStatItem[] {
   const { visibility, contextWindow, claudeUsage } = input;
   const codexUsage = input.codexUsage ?? null;
+  const geminiUsage = input.geminiUsage ?? null;
   const stockQuote = input.stockQuote ?? null;
   const stats: HeaderUsageStatItem[] = [];
   for (const definition of HEADER_USAGE_STAT_DEFINITIONS) {
@@ -273,6 +292,34 @@ export function selectHeaderUsageStats(input: {
             value: `${Math.round(primary.usedPercent)}%`,
             colorClass: definition.colorClass,
             tooltip: formatCodexUsageTooltip(codexUsage),
+          });
+        }
+        break;
+      }
+      case "geminiSession": {
+        const window = geminiUsage?.session ?? null;
+        if (window) {
+          stats.push({
+            id: definition.id,
+            label: "Gemini 5h",
+            shortLabel: "G5h",
+            value: `${Math.round(window.usedPercent)}%`,
+            colorClass: definition.colorClass,
+            ...(window.resetsAt ? { resetsAt: window.resetsAt } : {}),
+          });
+        }
+        break;
+      }
+      case "geminiWeekly": {
+        const window = geminiUsage?.weekly ?? null;
+        if (window) {
+          stats.push({
+            id: definition.id,
+            label: "Gemini Weekly",
+            shortLabel: "GWk",
+            value: `${Math.round(window.usedPercent)}%`,
+            colorClass: definition.colorClass,
+            ...(window.resetsAt ? { resetsAt: window.resetsAt } : {}),
           });
         }
         break;
