@@ -3,7 +3,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as VoiceTranscription from "./VoiceTranscription.ts";
@@ -25,11 +25,12 @@ const expectVoiceError = (error: { readonly _tag: string }) => {
 const makeHarness = (options: {
   readonly storedKey?: string;
   readonly env?: Record<string, string>;
-  readonly respond?: () => Response;
+  /** `"unreachable"` fails the request at the transport layer, like a refused connection. */
+  readonly respond?: (url: string) => Response | "unreachable";
 }) => {
   const captured: Array<CapturedRequest> = [];
   const httpClient = HttpClient.make((request: HttpClientRequest.HttpClientRequest) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const form = request.body._tag === "FormData" ? request.body.formData : undefined;
       const file = form?.get("file");
       captured.push({
@@ -39,10 +40,15 @@ const makeHarness = (options: {
         fileName: file instanceof File ? file.name : undefined,
         fileType: file instanceof File ? file.type : undefined,
       });
-      return HttpClientResponse.fromWeb(
-        request,
-        options.respond?.() ?? Response.json({ text: "  hello world  " }, { status: 200 }),
-      );
+      const response =
+        options.respond?.(request.url) ??
+        Response.json({ text: "  hello world  " }, { status: 200 });
+      if (response === "unreachable") {
+        return yield* new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause: "connection refused" }),
+        });
+      }
+      return HttpClientResponse.fromWeb(request, response);
     }),
   );
 
@@ -147,6 +153,119 @@ describe("VoiceTranscription", () => {
       const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
       assert.equal(error.reason, "upstream_error");
       assert.include(error.message, "401");
+    }),
+  );
+
+  it.effect("names an exhausted OpenAI quota instead of a bare 429", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        storedKey: "sk-stored",
+        respond: () =>
+          Response.json(
+            {
+              error: {
+                message: "Your organization has reached its configured enforced spend limit.",
+                type: "insufficient_quota",
+                code: "organization_spend_limit_exceeded",
+              },
+            },
+            { status: 429 },
+          ),
+      });
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
+      assert.equal(error.reason, "upstream_error");
+      assert.include(error.message, "quota or spend limit");
+    }),
+  );
+});
+
+describe("VoiceTranscription with a local Whisper server", () => {
+  const LOCAL_URL = "http://127.0.0.1:8650/v1/audio/transcriptions";
+
+  it.effect("uses the local server without an OpenAI key and sends no auth", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        env: { T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650/" },
+      });
+      const text = yield* harness.transcribe();
+      assert.equal(text, "hello world");
+      assert.deepEqual(harness.captured, [
+        {
+          url: LOCAL_URL,
+          authorization: undefined,
+          model: VoiceTranscription.DEFAULT_LOCAL_VOICE_TRANSCRIPTION_MODEL,
+          fileName: "speech.webm",
+          fileType: "audio/webm;codecs=opus",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("prefers the local server over OpenAI when both are configured", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        storedKey: "sk-stored",
+        env: {
+          T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650",
+          T3CODE_VOICE_TRANSCRIPTION_LOCAL_MODEL: "Systran/faster-whisper-small.en",
+        },
+      });
+      yield* harness.transcribe();
+      assert.deepEqual(
+        harness.captured.map((request) => [request.url, request.model]),
+        [[LOCAL_URL, "Systran/faster-whisper-small.en"]],
+      );
+    }),
+  );
+
+  it.effect("falls back to OpenAI when the local server is unreachable or errors", () =>
+    Effect.gen(function* () {
+      for (const localResponse of ["unreachable", new Response("boom", { status: 500 })] as const) {
+        const harness = makeHarness({
+          storedKey: "sk-stored",
+          env: { T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650" },
+          respond: (url) =>
+            url === LOCAL_URL ? localResponse : Response.json({ text: "from openai" }),
+        });
+        const text = yield* harness.transcribe();
+        assert.equal(text, "from openai");
+        assert.deepEqual(
+          harness.captured.map((request) => [request.url, request.authorization]),
+          [
+            [LOCAL_URL, undefined],
+            ["https://api.openai.com/v1/audio/transcriptions", "Bearer sk-stored"],
+          ],
+        );
+      }
+    }),
+  );
+
+  it.effect("reports the local failure when there is no OpenAI fallback", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        env: { T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650" },
+        respond: () => "unreachable",
+      });
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
+      assert.equal(error.reason, "upstream_error");
+      assert.include(error.message, "Local transcription failed");
+      assert.equal(harness.captured.length, 1);
+    }),
+  );
+
+  it.effect("reports both failures when the OpenAI fallback also fails", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        storedKey: "sk-stored",
+        env: { T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650" },
+        respond: (url) =>
+          url === LOCAL_URL
+            ? "unreachable"
+            : Response.json({ error: { type: "insufficient_quota" } }, { status: 429 }),
+      });
+      const error = expectVoiceError(yield* Effect.flip(harness.transcribe()));
+      assert.include(error.message, "Local transcription failed");
+      assert.include(error.message, "quota or spend limit");
     }),
   );
 });

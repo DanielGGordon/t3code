@@ -193,6 +193,11 @@ function startUnit(claim: Claim, seedMode: SeedMode): void {
     // process on systemd 255), which breaks any tool (e.g. mise) that
     // resolves paths under $HOME. Interpolate the real path instead.
     `--setenv=HOME=${homedir()}`,
+    // Forward voice-transcription settings (e.g. a local Whisper URL) so a
+    // slot can exercise the same transcription backend as the caller.
+    ...Object.entries(process.env)
+      .filter(([name]) => name.startsWith("T3CODE_VOICE_TRANSCRIPTION_"))
+      .map(([name, value]) => `--setenv=${name}=${value}`),
     "--",
     MISE_BIN,
     "exec",
