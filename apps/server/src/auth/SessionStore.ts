@@ -63,6 +63,8 @@ export interface VerifiedSession {
   readonly proofKeyThumbprint?: string;
   /** The most an MCP client approved through OAuth may hand to the threads it drives. */
   readonly runtimeModeCeiling?: RuntimeMode;
+  /** Signed at issuance by the local `t3` CLI; see `TwoFactor.TwoFactorSession`. */
+  readonly issuedLocally?: true;
 }
 
 export type SessionCredentialChange =
@@ -382,6 +384,11 @@ export class SessionStore extends Context.Service<
       readonly proofKeyThumbprint?: string;
       readonly runtimeModeCeiling?: RuntimeMode;
       /**
+       * Only for sessions minted in-process by the local `t3` CLI. Exempts the
+       * session from two-factor verification; never set from a request.
+       */
+      readonly issuedLocally?: true;
+      /**
        * Atomically revoke active sessions with the same subject and method
        * before storing this session.
        */
@@ -394,6 +401,8 @@ export class SessionStore extends Context.Service<
       sessionId: AuthSessionId,
       input?: {
         readonly ttl?: Duration.Duration;
+        /** Carries the parent session's `issuedLocally`. */
+        readonly issuedLocally?: true;
       },
     ) => Effect.Effect<
       {
@@ -411,7 +420,7 @@ export class SessionStore extends Context.Service<
     >;
     readonly streamChanges: Stream.Stream<SessionCredentialChange>;
     readonly awaitInvalidation: (
-      sessionId: AuthSessionId,
+      session: TwoFactor.TwoFactorSession,
     ) => Effect.Effect<void, SessionCredentialVerificationError>;
     readonly revoke: (
       sessionId: AuthSessionId,
@@ -445,6 +454,8 @@ const SessionClaims = Schema.Struct({
   method: Schema.Literals(["browser-session-cookie", "bearer-access-token", "dpop-access-token"]),
   jkt: Schema.optionalKey(Schema.String),
   rtc: Schema.optionalKey(RuntimeMode),
+  /** Issued in-process by the local `t3` CLI. */
+  local: Schema.optionalKey(Schema.Literal(true)),
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -454,6 +465,7 @@ const WebSocketClaims = Schema.Struct({
   v: Schema.Literal(1),
   kind: Schema.Literal("websocket"),
   sid: AuthSessionId,
+  local: Schema.optionalKey(Schema.Literal(true)),
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -722,6 +734,7 @@ export const make = Effect.gen(function* () {
         method: input?.method ?? "browser-session-cookie",
         ...(input?.proofKeyThumbprint ? { jkt: input.proofKeyThumbprint } : {}),
         ...(input?.runtimeModeCeiling ? { rtc: input.runtimeModeCeiling } : {}),
+        ...(input?.issuedLocally ? { local: true } : {}),
         iat: issuedAt.epochMilliseconds,
         exp: expiresAt.epochMilliseconds,
       };
@@ -916,6 +929,7 @@ export const make = Effect.gen(function* () {
         scopes: claims.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
         ...(claims.rtc ? { runtimeModeCeiling: claims.rtc } : {}),
+        ...(claims.local ? { issuedLocally: true } : {}),
       } satisfies VerifiedSession;
     },
   );
@@ -932,6 +946,7 @@ export const make = Effect.gen(function* () {
       v: 1,
       kind: "websocket",
       sid: sessionId,
+      ...(input?.issuedLocally ? { local: true } : {}),
       iat: issuedAt.epochMilliseconds,
       exp: expiresAt.epochMilliseconds,
     };
@@ -1024,6 +1039,7 @@ export const make = Effect.gen(function* () {
       expiresAt: row.value.expiresAt,
       subject: row.value.subject,
       scopes: row.value.scopes,
+      ...(claims.local ? { issuedLocally: true } : {}),
     } satisfies VerifiedSession;
   });
 
@@ -1108,7 +1124,8 @@ export const make = Effect.gen(function* () {
     return revokedSessionIds.length;
   });
 
-  const awaitInvalidation = Effect.fn(function* (sessionId: AuthSessionId) {
+  const awaitInvalidation = Effect.fn(function* (session: TwoFactor.TwoFactorSession) {
+    const sessionId = session.sessionId;
     return yield* Effect.scoped(
       Effect.gen(function* () {
         // Subscribe before reading: revocation can race with the WebSocket upgrade.
@@ -1134,7 +1151,7 @@ export const make = Effect.gen(function* () {
           Effect.raceFirst(
             Effect.sleep(Duration.millis(remaining)),
             twoFactor
-              .awaitRequired(sessionId)
+              .awaitRequired(session)
               .pipe(
                 Effect.mapError(
                   (cause) => new SessionCredentialVerificationError({ sessionId, cause }),

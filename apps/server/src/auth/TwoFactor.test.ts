@@ -51,18 +51,26 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const { factor, recoveryCodes } = yield* enroll;
-      expect((yield* factor.status(a)).required).toBe(false);
-      expect((yield* factor.status(b)).required).toBe(true);
+      expect((yield* factor.status({ sessionId: a })).required).toBe(false);
+      expect((yield* factor.status({ sessionId: b })).required).toBe(true);
+      // A CLI-issued session never needs the factor, verified or not.
+      const local = { sessionId: b, issuedLocally: true };
+      expect((yield* factor.status(local)).required).toBe(false);
+      yield* factor.requireVerified(local);
       yield* TestClock.adjust("24 hours");
       yield* factor.verifyCode(b, recoveryCodes[0]!, false);
       yield* TestClock.adjust("24 hours");
-      expect((yield* factor.status(a)).required).toBe(true);
-      expect((yield* factor.status(b)).required).toBe(false);
+      expect((yield* factor.status({ sessionId: a })).required).toBe(true);
+      expect((yield* factor.status({ sessionId: b })).required).toBe(false);
       const restarted = yield* TwoFactor.make;
-      expect(yield* restarted.status(a)).toEqual(yield* factor.status(a));
-      expect(yield* restarted.status(b)).toEqual(yield* factor.status(b));
+      expect(yield* restarted.status({ sessionId: a })).toEqual(
+        yield* factor.status({ sessionId: a }),
+      );
+      expect(yield* restarted.status({ sessionId: b })).toEqual(
+        yield* factor.status({ sessionId: b }),
+      );
       yield* restarted.verifyCode(a, recoveryCodes[1]!, false);
-      expect((yield* restarted.status(a)).expiresAt).toBe(
+      expect((yield* restarted.status({ sessionId: a })).expiresAt).toBe(
         (yield* Clock.currentTimeMillis) + TwoFactor.VERIFICATION_TTL_MS,
       );
     }).pipe(Effect.provide(layer)),
@@ -74,9 +82,13 @@ it.effect("rejects reused TOTP and recovery codes; disable requires a fresh code
     yield* Effect.flip(factor.verifyCode(b, totp(secret, Math.floor(now / 30_000)), false));
     yield* factor.verifyCode(b, recoveryCodes[0]!, false);
     yield* Effect.flip(factor.verifyCode(a, recoveryCodes[0]!, true));
-    expect((yield* factor.status(a)).enabled).toBe(true);
+    expect((yield* factor.status({ sessionId: a })).enabled).toBe(true);
     yield* factor.verifyCode(a, recoveryCodes[1]!, true);
-    expect(yield* factor.status(b)).toEqual({ enabled: false, required: false, expiresAt: null });
+    expect(yield* factor.status({ sessionId: b })).toEqual({
+      enabled: false,
+      required: false,
+      expiresAt: null,
+    });
     const sql = yield* SqlClient.SqlClient;
     expect(yield* sql`SELECT * FROM auth_two_factor_recovery`).toHaveLength(0);
   }).pipe(Effect.provide(layer)),
@@ -97,7 +109,7 @@ it.effect("requires confirmed setup owned by the session, with ten-minute expiry
   Effect.gen(function* () {
     const factor = yield* TwoFactor.make;
     const setup = yield* factor.begin(a);
-    expect((yield* factor.status(a)).enabled).toBe(false);
+    expect((yield* factor.status({ sessionId: a })).enabled).toBe(false);
     const code = totp(
       decodeBase32(setup.secret),
       Math.floor((yield* Clock.currentTimeMillis) / 30_000),
@@ -105,15 +117,15 @@ it.effect("requires confirmed setup owned by the session, with ten-minute expiry
     yield* Effect.flip(factor.confirm(b, code));
     yield* TestClock.adjust("10 minutes");
     yield* Effect.flip(factor.confirm(a, code));
-    expect((yield* factor.status(a)).enabled).toBe(false);
+    expect((yield* factor.status({ sessionId: a })).enabled).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
 it.effect("invalidates open connections at the deadline without a new request", () =>
   Effect.gen(function* () {
     const { factor } = yield* enroll;
-    const waiter = yield* Effect.forkChild(factor.awaitRequired(a));
+    const waiter = yield* Effect.forkChild(factor.awaitRequired({ sessionId: a }));
     yield* TestClock.adjust("48 hours");
     yield* Fiber.join(waiter);
-    expect((yield* factor.status(a)).required).toBe(true);
+    expect((yield* factor.status({ sessionId: a })).required).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
