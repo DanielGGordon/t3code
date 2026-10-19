@@ -45,6 +45,7 @@ import {
   HeaderUsageStats,
   HeaderUsageStatsMenu,
   resolveScopedWeeklyLabel,
+  selectHeaderUsageBadges,
   selectHeaderUsageStats,
   selectHeaderUsageStatsVisibility,
 } from "./HeaderUsageStats";
@@ -146,6 +147,11 @@ export const ChatHeader = memo(function ChatHeader({
     // thread (no primary-environment gate like the credential-backed stats).
     stockQuote,
     stockSymbol,
+  });
+  const usageBadges = selectHeaderUsageBadges({
+    stats: usageStats,
+    contextWindow,
+    claudeUsage: claudeAccountUsage,
   });
   const canOperateThread = useEnvironmentScope(
     activeThreadEnvironmentId,
@@ -526,10 +532,14 @@ export const ChatHeader = memo(function ChatHeader({
         data-chat-header-actions
         className="flex shrink-0 items-center justify-end gap-2 touch:gap-3 max-md:ml-auto max-md:touch:gap-1.5 max-md:pb-1.5 drive:hidden"
       >
-        {/* The small badges duplicate the big readouts; condensed headers drop
-            them to make room for the readouts themselves. */}
-        {!condensed && contextWindow && <TokenUsageBadge usage={contextWindow} />}
-        {!condensed && claudeAccountUsage && <ClaudeAccountUsageBadge usage={claudeAccountUsage} />}
+        {/* The small badges stand in for big readouts that are hidden; condensed
+            headers drop them to make room for the readouts themselves. */}
+        {!condensed && contextWindow && usageBadges.tokens && (
+          <TokenUsageBadge usage={contextWindow} />
+        )}
+        {!condensed && claudeAccountUsage && usageBadges.claudeLimit && (
+          <ClaudeAccountUsageBadge usage={claudeAccountUsage} headline={usageBadges.claudeLimit} />
+        )}
         <HeaderUsageStatsMenu
           condensed={condensed}
           visibility={usageStatsVisibility}

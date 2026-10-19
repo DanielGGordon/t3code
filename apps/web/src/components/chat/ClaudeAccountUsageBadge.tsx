@@ -1,6 +1,7 @@
 import { GaugeIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { HeaderClaudeUsage, HeaderUsageLimit } from "~/lib/headerUsageLimits";
+import { claudeLimitName } from "./HeaderUsageStats";
 import { HeaderStatBadge } from "./HeaderStatBadge";
 
 function limitLabel(limit: HeaderUsageLimit): string {
@@ -48,20 +49,12 @@ function percentToneClass(percent: number): string {
   return "";
 }
 
-function headlineLimit(usage: HeaderClaudeUsage): HeaderUsageLimit | null {
-  const limits = usage.limits;
-  if (limits.length === 0) {
-    return null;
-  }
-  return limits.reduce((max, limit) => (limit.percent > max.percent ? limit : max));
-}
-
-export function ClaudeAccountUsageBadge(props: { usage: HeaderClaudeUsage }) {
-  const { usage } = props;
-  const headline = headlineLimit(usage);
-  if (!headline) {
-    return null;
-  }
+/** Badge for `headline`, the limit whose big readout is hidden; the popover lists every limit. */
+export function ClaudeAccountUsageBadge(props: {
+  usage: HeaderClaudeUsage;
+  headline: HeaderUsageLimit;
+}) {
+  const { usage, headline } = props;
 
   return (
     <HeaderStatBadge
@@ -70,7 +63,9 @@ export function ClaudeAccountUsageBadge(props: { usage: HeaderClaudeUsage }) {
       trigger={
         <>
           <GaugeIcon className="size-3" />
-          <span>Claude {Math.round(headline.percent)}%</span>
+          <span>
+            {claudeLimitName(headline)} {Math.round(headline.percent)}%
+          </span>
         </>
       }
     >
