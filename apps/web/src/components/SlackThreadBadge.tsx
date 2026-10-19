@@ -7,16 +7,19 @@ import { cn } from "~/lib/utils";
 
 /**
  * Sidebar row title for a thread, with channel awareness. Threads bridged in
- * from Slack (`Slack: …` titles) render the Slack mark in place of the
- * literal prefix — the channel is read where the eye already starts, and the
- * row gets those characters back for the actual sentence. Rename still edits
- * the full stored title.
+ * from Slack render the Slack mark in place of any literal `Slack:` or
+ * `#channel:` prefix — the channel is read where the eye already starts, and
+ * the row gets those characters back for the actual sentence. Rename still
+ * edits the full stored title.
  */
-export function useThreadDisplayTitle(title: string): { isSlack: boolean; displayTitle: string } {
+export function useThreadDisplayTitle(
+  title: string,
+  threadId: string,
+): { isSlack: boolean; displayTitle: string } {
   return useMemo(() => {
-    const isSlack = getThreadChannel(title) === "slack";
+    const isSlack = getThreadChannel(title, threadId) === "slack";
     return { isSlack, displayTitle: isSlack ? stripThreadChannelPrefix(title) : title };
-  }, [title]);
+  }, [title, threadId]);
 }
 
 export type SlackThreadBadgeDensity = "card" | "slim" | "v1";

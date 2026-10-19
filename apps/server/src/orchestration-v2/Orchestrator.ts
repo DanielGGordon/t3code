@@ -116,6 +116,7 @@ import {
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { cleanThreadTitleSeed } from "@t3tools/provider-core/server/textGenerationUtils";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
@@ -537,6 +538,37 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.merge_back":
       return command.targetThreadId;
   }
+}
+
+/**
+ * User messages after which a thread is re-titled from its history. The
+ * first-message title often guesses: the subject tends to become clear after
+ * the first reply, and topics mostly drift by the fourth message. Two passes,
+ * then the title stays put; "Regenerate title" covers later drift.
+ */
+const TITLE_REFINEMENT_USER_MESSAGE_COUNTS: ReadonlySet<number> = new Set([2, 4]);
+
+/** Whether this user message is one of the points where the title is refined. */
+function shouldRefineThreadTitle(
+  projection: Pick<OrchestrationV2ThreadProjection, "thread" | "messages">,
+  command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+): boolean {
+  const thread = projection.thread;
+  if (
+    command.createdBy !== "user" ||
+    thread.createdBy !== "user" ||
+    thread.titleSource === "manual" ||
+    thread.titleRegeneration != null
+  ) {
+    return false;
+  }
+  const previousUserMessages = projection.messages.filter(
+    (message) =>
+      message.role === "user" &&
+      message.createdBy === "user" &&
+      !isNativeMaintenanceCommand(message),
+  ).length;
+  return TITLE_REFINEMENT_USER_MESSAGE_COUNTS.has(previousUserMessages + 1);
 }
 
 function pendingThreadTitleGenerationEffect(
@@ -3083,6 +3115,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             ...(command.title === undefined ? {} : { title: command.title }),
+            // A rename locks the title against automatic re-titling; asking for
+            // "Regenerate title" hands it back.
+            ...(command.regenerateTitle === true
+              ? { titleSource: "generated" as const }
+              : command.title !== undefined
+                ? { titleSource: "manual" as const }
+                : {}),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
             limitRecovery?.snooze === true &&
@@ -4932,7 +4971,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
           ...projection.thread,
-          title: command.titleSeed ?? projection.thread.title,
+          title:
+            command.titleSeed === undefined
+              ? projection.thread.title
+              : cleanThreadTitleSeed(command.titleSeed),
           titleRegeneration: { requestId: command.commandId, startedAt: now },
           updatedAt: now,
         };
@@ -4951,6 +4993,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           pendingThreadTitleGenerationEffect(command.commandId, command.threadId, {
             type: "initial",
             messageId: command.messageId,
+          }),
+        ]);
+        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      } else if (
+        shouldRefineThreadTitle(projection, command) &&
+        !isNativeMaintenanceCommand(command) &&
+        !isCacheKeepAlive
+      ) {
+        const now = yield* DateTime.now;
+        const thread: OrchestrationV2AppThread = {
+          ...projection.thread,
+          titleRegeneration: { requestId: command.commandId, startedAt: now },
+          updatedAt: now,
+        };
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: thread,
+        });
+        yield* Ref.update(effects, (existing) => [
+          ...existing,
+          pendingThreadTitleGenerationEffect(command.commandId, command.threadId, {
+            type: "regenerate",
           }),
         ]);
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);

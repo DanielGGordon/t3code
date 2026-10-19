@@ -1,6 +1,8 @@
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isUsableThreadTitle } from "@t3tools/provider-core/server/textGenerationUtils";
 import {
   CommandId,
+  TextGenerationError,
   type ChatAttachment,
   type MessageId,
   type ServerSettingsError,
@@ -117,16 +119,25 @@ const make = Effect.gen(function* () {
         message: context.message,
         attachments: context.attachments,
         ...(input.kind.type === "regenerate" ? { previousTitle: projection.thread.title } : {}),
+        projectName: project.value.title,
         modelSelection: settings.textGenerationModelSelection,
       });
       const generatedTitle = result.title.trim();
-      return generatedTitle === "New thread" ||
-        (input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim())
+      // Garbage copied out of the message (a slash command, a Slack mention)
+      // fails the attempt so the retry below asks again; the old title stays
+      // if every attempt is garbage.
+      if (!isUsableThreadTitle(generatedTitle)) {
+        return yield* new TextGenerationError({
+          operation: "generateThreadTitle",
+          detail: `Rejected unusable title "${generatedTitle}"`,
+        });
+      }
+      return input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim()
         ? { type: "complete" as const }
-        : { type: "complete" as const, title: result.title };
+        : { type: "complete" as const, title: generatedTitle };
     }).pipe(
       Effect.retry({
-        times: input.kind.type === "initial" ? 2 : 0,
+        times: input.kind.type === "initial" ? 2 : 1,
         schedule: Schedule.exponential("2 seconds"),
       }),
       Effect.catchCause((cause) =>

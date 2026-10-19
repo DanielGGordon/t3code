@@ -467,6 +467,11 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * "manual" once someone renames the thread; automatic re-titling then leaves
+   * it alone until they ask for "Regenerate title". Absent means generated.
+   */
+  titleSource: Schema.optional(Schema.Literals(["generated", "manual"])),
   /** In-flight title regeneration marker; cleared when a new title lands. */
   titleRegeneration: Schema.optional(
     Schema.NullOr(

@@ -1769,8 +1769,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     isActive: props.isActive,
   });
 
-  // Threads bridged from Slack (`Slack: ...` titles) show the Slack mark in place of the prefix.
-  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
+  // Threads bridged from Slack show the Slack mark in place of any channel prefix.
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title, thread.id);
 
   const title =
     isRenaming && canOperateThread ? (
@@ -2572,7 +2572,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const { thread } = props;
-  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title);
+  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title, thread.id);
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel: null,

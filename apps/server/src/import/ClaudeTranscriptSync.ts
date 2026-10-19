@@ -56,6 +56,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
+import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
@@ -556,6 +557,13 @@ export const make = Effect.gen(function* () {
 
   const writeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
     eventSink.write({ events }).pipe(mapFailure("Failed to write import events"), Effect.asVoid);
+  const writeEventsWithEffects = (
+    effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>,
+    events: ReadonlyArray<OrchestrationV2DomainEvent>,
+  ) =>
+    eventSink
+      .writeWithEffects({ events, effects })
+      .pipe(mapFailure("Failed to write import events"), Effect.asVoid);
 
   const resolveProject = Effect.fn("ClaudeTranscriptSync.resolveProject")(function* (
     state: SyncState,
@@ -793,6 +801,11 @@ export const make = Effect.gen(function* () {
         })
       : undefined;
     const title = session.title?.trim();
+    // The transcript's title is its first prompt (or Claude Code's own title),
+    // often a cut-off sentence. A title generation queued with the last message
+    // batch replaces it once the server's effect worker runs.
+    const titleRequestId = CommandId.make(`${IMPORT_EVENT_PREFIX}:title:${threadId}`);
+    const titleStartedAt = yield* DateTime.now;
     const appThread: OrchestrationV2AppThread = {
       createdBy: "system",
       creationSource: "server",
@@ -823,14 +836,23 @@ export const make = Effect.gen(function* () {
       pinOrderKey: null,
       activeOrderKey: null,
       lastVisitedAt: null,
+      titleRegeneration: { requestId: titleRequestId, startedAt: titleStartedAt },
       deletedAt: null,
     };
+    const titleEffects = [
+      {
+        id: `effect:${titleRequestId}:thread-title.generate`,
+        commandId: titleRequestId,
+        threadId,
+        request: { type: "thread-title.generate" as const, kind: { type: "regenerate" as const } },
+      },
+    ];
 
     const [firstBatch = [], ...restBatches] = chunks(toImport, MESSAGE_BATCH_SIZE);
     // `thread.created` already points at the provider thread, so both go in
     // the same (atomic) write: a failure later in the import must not leave
     // `activeProviderThreadId` dangling.
-    yield* writeEvents([
+    yield* writeEventsWithEffects(restBatches.length === 0 ? titleEffects : [], [
       {
         id: EventId.make(`${IMPORT_EVENT_PREFIX}:thread:${threadId}:created`),
         type: "thread.created",
@@ -864,9 +886,12 @@ export const make = Effect.gen(function* () {
     state.tombstones.add(threadId);
     if (providerThread !== undefined) state.threadsWithProviderThreads.add(threadId);
     for (const message of firstBatch) state.messageOwnerIndex.set(message.uuid, threadId);
-    for (const batch of restBatches) {
+    for (const [index, batch] of restBatches.entries()) {
       yield* Effect.yieldNow;
-      yield* writeEvents(messageEventsFor(batch));
+      yield* writeEventsWithEffects(
+        index === restBatches.length - 1 ? titleEffects : [],
+        messageEventsFor(batch),
+      );
       for (const message of batch) state.messageOwnerIndex.set(message.uuid, threadId);
     }
 

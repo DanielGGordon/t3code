@@ -957,8 +957,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         steered.messages.find((message) => message.id === steerMessageId)?.runId,
         run.id,
       );
+      // The second user message also queues the title refinement.
       assert.deepEqual(
-        (yield* outbox.listByCommandId(steerCommandId)).map((effect) => effect.request),
+        (yield* outbox.listByCommandId(steerCommandId))
+          .map((effect) => effect.request)
+          .filter((request) => request.type !== "thread-title.generate"),
         [
           {
             type: "provider-turn.steer",
