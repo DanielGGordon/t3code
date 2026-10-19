@@ -73,8 +73,10 @@ import {
 } from "@t3tools/shared/orchestrationV2Timeline";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
+  CACHE_KEEP_ALIVE_DRIVER_KINDS,
   CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX,
   CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES,
+  cacheKeepAliveSupportsDriver,
   isCacheKeepAliveMessageId,
 } from "@t3tools/shared/cacheKeepAlive";
 import * as Context from "effect/Context";
@@ -1572,8 +1574,7 @@ export function threadShellFromProjection(
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
     restartRequest: projection.thread.restartRequest ?? null,
     cacheKeepAlive: projection.thread.cacheKeepAlive ?? null,
-    cacheKeepAliveContext:
-      projection.thread.cacheKeepAlive == null ? null : cacheKeepAliveContextForShell(projection),
+    cacheKeepAliveContext: cacheKeepAliveContextForShell(projection),
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -1619,16 +1620,23 @@ function activeProviderGoalForShell(
 const PROVIDER_ITEM_TYPES: ReadonlySet<string> = new Set(CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES);
 
 /**
- * Fork: keep-alive's view of a thread. Mirrors the SQL in
- * `selectShellThreadRows` (cache_keep_alive_context_json); keep them in step.
+ * Fork: keep-alive's view of a thread, for threads with the toggle on and for
+ * threads on a driver with an hour-long cache (the header counts those down to
+ * expiry even with the toggle off). Mirrors the SQL in `selectShellThreadRows`
+ * (cache_keep_alive_context_json); keep them in step.
  */
 function cacheKeepAliveContextForShell(
   projection: OrchestrationV2ThreadProjection,
-): OrchestrationV2ThreadCacheKeepAliveContext {
+): OrchestrationV2ThreadCacheKeepAliveContext | null {
   const { thread } = projection;
   const active = projection.providerThreads.find(
     (candidate) => candidate.id === thread.activeProviderThreadId,
   );
+  const driver =
+    active !== undefined && active.providerInstanceId === thread.providerInstanceId
+      ? active.driver
+      : null;
+  if (thread.cacheKeepAlive == null && !cacheKeepAliveSupportsDriver(driver)) return null;
   const run = latestExecutedRun(projection.runs);
   let lastProviderActivityAt: DateTime.Utc | null = null;
   for (const item of projection.turnItems) {
@@ -1649,10 +1657,7 @@ function cacheKeepAliveContextForShell(
     }
   }
   return {
-    driver:
-      active !== undefined && active.providerInstanceId === thread.providerInstanceId
-        ? active.driver
-        : null,
+    driver,
     run:
       run === null
         ? null
@@ -5415,12 +5420,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
               ) AS has_actionable_proposed_plan,
-              -- Fork: keep-alive's view of the thread, only while it is on.
+              -- Fork: keep-alive's view of the thread, while it is on or the
+              -- thread is on a driver with an hour-long cache.
               -- Mirrors cacheKeepAliveContextForShell; keep them in step. The
               -- run is latestExecutedRun: never queued or cancelled before it
               -- started, unfinished first, then the one that ended last.
               CASE
-                WHEN json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL THEN json_object(
+                WHEN json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
+                  OR EXISTS (
+                    SELECT 1
+                    FROM orchestration_v2_projection_provider_threads cpt
+                    WHERE cpt.provider_thread_id = t.active_provider_thread_id
+                      AND cpt.provider_instance_id = t.provider_instance_id
+                      AND cpt.driver IN ${sql.in(CACHE_KEEP_ALIVE_DRIVER_KINDS)}
+                  ) THEN json_object(
                   'driver', (
                     SELECT pt.driver
                     FROM orchestration_v2_projection_provider_threads pt

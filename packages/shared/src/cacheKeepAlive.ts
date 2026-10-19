@@ -66,7 +66,9 @@ export const CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES: ReadonlyArray<string> = [
   "subagent",
 ];
 
-const CACHE_KEEP_ALIVE_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent"]);
+/** Drivers with an hour-long prompt cache. Their threads carry a cache context even with the toggle off. */
+export const CACHE_KEEP_ALIVE_DRIVER_KINDS: ReadonlyArray<string> = ["claudeAgent"];
+const CACHE_KEEP_ALIVE_DRIVERS: ReadonlySet<string> = new Set(CACHE_KEEP_ALIVE_DRIVER_KINDS);
 const BUSY_RUN_STATUSES: ReadonlySet<string> = new Set([
   "preparing",
   "queued",
@@ -134,6 +136,31 @@ function cacheKeepAliveAnchorMs(
 /** Whether a provider driver keeps an hour-long prompt cache worth pinging. */
 export function cacheKeepAliveSupportsDriver(driver: string | null | undefined): boolean {
   return driver != null && CACHE_KEEP_ALIVE_DRIVERS.has(driver);
+}
+
+/**
+ * When the thread's prompt cache lapses, whether or not keep-alive is on; null
+ * when there is no live cache to count down (no finished turn on a Claude
+ * session, or it already lapsed). While a turn runs the cache is being
+ * refreshed and the run has no anchor yet, so this is null then too.
+ */
+export function promptCacheExpiresAtMs(input: {
+  readonly thread: Pick<CacheKeepAliveThread, "cacheKeepAliveContext">;
+  readonly nowMs: number;
+}): number | null {
+  const context = input.thread.cacheKeepAliveContext ?? null;
+  if (context === null || context.run === null) return null;
+  if (!cacheKeepAliveSupportsDriver(context.driver)) return null;
+  const anchorMs = cacheKeepAliveAnchorMs(context.run);
+  if (anchorMs === null) return null;
+  const expiresAtMs = anchorMs + PROMPT_CACHE_TTL_MS;
+  return input.nowMs >= expiresAtMs ? null : expiresAtMs;
+}
+
+/** "55m" for the time left on the cache; whole minutes rounded down, so it never overpromises. */
+export function formatCacheExpiry(remainingMs: number): string {
+  const minutes = Math.floor(remainingMs / 60_000);
+  return minutes < 1 ? "<1m" : `${minutes}m`;
 }
 
 /** Where a thread stands for keep-alive at `nowMs`. */

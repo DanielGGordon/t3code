@@ -12,7 +12,9 @@ import {
   PROMPT_CACHE_TTL_MS,
   cacheKeepAliveState,
   cacheKeptWarmByHeartbeat,
+  formatCacheExpiry,
   isCacheKeepAliveMessageId,
+  promptCacheExpiresAtMs,
   type CacheKeepAliveThread,
 } from "./cacheKeepAlive.ts";
 
@@ -197,5 +199,36 @@ describe("cacheKeptWarmByHeartbeat", () => {
     expect(
       withTasks([{ taskId: "a1", kind: "subagent", description: "Subagent heartbeat review" }]),
     ).toBe(false);
+  });
+});
+
+describe("promptCacheExpiresAtMs", () => {
+  const expiry = (thread: Partial<CacheKeepAliveThread>, nowMs = lastRequestMs + 5 * MINUTE) =>
+    promptCacheExpiresAtMs({ thread: { ...idle, ...thread }, nowMs });
+
+  it("counts down whether or not the toggle is on", () => {
+    expect(expiry({})).toBe(expiresAtMs);
+    expect(expiry({ cacheKeepAlive: null })).toBe(expiresAtMs);
+  });
+
+  it("has no expiry without a live Claude cache", () => {
+    expect(expiry({}, expiresAtMs)).toBeNull();
+    expect(expiry({ cacheKeepAliveContext: null })).toBeNull();
+    expect(expiry({ cacheKeepAliveContext: { ...context, run: null } })).toBeNull();
+    expect(expiry({ cacheKeepAliveContext: { ...context, driver: null } })).toBeNull();
+    expect(expiry(withRun({ status: "running" }))).toBeNull();
+  });
+});
+
+describe("formatCacheExpiry", () => {
+  it("rounds down to whole minutes", () => {
+    expect(formatCacheExpiry(55 * MINUTE)).toBe("55m");
+    expect(formatCacheExpiry(54 * MINUTE + 59_000)).toBe("54m");
+    expect(formatCacheExpiry(MINUTE)).toBe("1m");
+  });
+
+  it("says under a minute when less than one is left", () => {
+    expect(formatCacheExpiry(59_000)).toBe("<1m");
+    expect(formatCacheExpiry(0)).toBe("<1m");
   });
 });
