@@ -30,6 +30,29 @@ has lost real work to this. So:
   "kill everything and redeploy now, I don't care about the other chats") changes this, and
   even then, name the threads that will be cut off and confirm first.
 
+## Only one redeploy at a time — a second call joins the first
+
+Several threads often finish around the same time and each calls `/redeploy`. The script
+coordinates them through a lock and a small state dir (`/tmp/t3-redeploy`), so the deploy
+happens once:
+
+- **A deploy is already waiting or building** → this call _joins_ it: it prints who is running it
+  and exits 0 immediately, without waiting. The running deploy re-fetches `origin/main` right
+  before the restart (after the pre-restart idle gate) and, if it moved, syncs and rebuilds
+  first (up to `T3_REDEPLOY_MAX_SYNC_ROUNDS`, default 3), so it carries whatever the joiner
+  merged. The joiner's thread is idle again at once, so it does not hold up the idle gate.
+- **`origin/main` is already what is deployed and serving** → nothing to do, exits 0
+  (`--force` redeploys anyway).
+- **The restart is already in flight** → exits 0 if it is for the current `origin/main`;
+  otherwise exits 3 asking you to re-run once it finished.
+
+Tell the user it joined a pending deploy rather than starting one. The joiner is informed
+afterwards the same way everyone is: the "T3 was updated and restarted" notice every connected
+client receives, plus `bash "$(git rev-parse --show-toplevel)/.claude/skills/redeploy/redeploy.sh" --status`
+(in progress or not, last deployed vs `origin/main`, and the status log). If the deploy it joined
+aborts (idle timeout, build failure) nothing is restarted and `--status` shows `ended`; re-run
+`/redeploy`.
+
 ## What the script does
 
 1. **Pauses the Claude transcript import.** Stops `t3-claude-import.timer` (if it was active)
