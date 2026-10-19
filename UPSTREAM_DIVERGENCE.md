@@ -23,6 +23,15 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-10-19 — Fork migrations 64 and 65 (no upstream sync)
+
+The fork now owns **64 `TwoFactor`** (session two-factor verification, added without an entry
+here) and **65 `Notifications`** (external notifications, `CREATE TABLE IF NOT EXISTS`, so
+`reconcileMigrationLedger` can run it as a gap). Fork-only ids are now 33 and 63–65. At the next
+sync, upstream's **062 and later run at +4** (upstream `062_ThreadFailureLookupIndex` → 66).
+Never renumber 63–65 upward once prod has recorded them. The fork-id ledger tests
+(`reconcileMigrationLedger.test.ts`, `034_035_ForkMigrationOffset.test.ts`) list them.
+
 ## 2026-10-15 — Fork migration 63 (no upstream sync)
 
 The fork adds its second own migration, **63 `AuthSessionClientIps`** (security session

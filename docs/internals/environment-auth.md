@@ -74,6 +74,13 @@ authorization. Permission errors likewise retain a legacy `requiredScope` and
 add the exact `requiredPermission`, so a denied RPC stays decodable by old clients.
 Unknown response permissions are ignored; grant inputs stay strict.
 
+`notifications:write` (fork) is a service permission, not a client one: it
+authorizes only the inbound [notification
+routes](../../apps/server/src/notifications/http.ts) and is in neither the
+standard nor the administrative set, so pairing and browser sessions never hold
+it. Services get it from `t3 auth session issue --scope notifications:write`.
+Its legacy `requiredScope` is `orchestration:operate`.
+
 Desktop restarts forget the previous local bearer token, so its reusable
 bootstrap grant replaces earlier sessions for the same subject and method.
 Revocation and insertion share a [database

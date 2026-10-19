@@ -107,6 +107,14 @@ running server when there is one) so its next send starts a fresh Claude session
 T3 history handed over as context (`apps/server/src/cli/session.ts`,
 `apps/server/src/import/ClaudeResumeBindings.ts`).
 
+## External notifications
+
+Outside services push plain-text notification cards (optionally with buttons) into T3 over
+`PUT /api/notifications/:source/:sourceId` and `POST .../resolve`, using a token with the
+`notifications:write` scope; button clicks go back as HMAC-signed callbacks. Sources connect
+through the Alfred hub, not directly. Contract, env vars and examples:
+[`docs/user/notifications-api.md`](docs/user/notifications-api.md); code in `apps/server/src/notifications/`.
+
 ## Upstream sync PRs: NEVER squash-merge
 
 Sync PRs (`merge: upstream through <sha>`) must land as a **merge commit** or a
