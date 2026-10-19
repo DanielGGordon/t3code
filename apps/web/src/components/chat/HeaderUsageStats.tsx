@@ -409,6 +409,52 @@ export function selectHeaderUsageStats(input: {
   return stats;
 }
 
+const LIMIT_STAT_IDS: Readonly<Record<HeaderUsageLimit["kind"], HeaderUsageStatId>> = {
+  session: "session",
+  weekly_all: "weekly",
+  weekly_scoped: "scopedWeekly",
+};
+
+/** Short name of a Claude limit, matching its big readout's label. */
+export function claudeLimitName(limit: HeaderUsageLimit): string {
+  switch (limit.kind) {
+    case "session":
+      return "Session";
+    case "weekly_all":
+      return "Weekly";
+    case "weekly_scoped":
+      return limit.scopeLabel ?? FALLBACK_SCOPED_WEEKLY_LABEL;
+  }
+}
+
+/**
+ * Which of the small header badges still earn their place. A badge mirrors a
+ * big readout, so it only shows when that readout is not on screen:
+ * - `tokens`: the thread-total badge, unless the context readout already
+ *   shows the same figure (they differ on providers that report cumulative
+ *   processed tokens).
+ * - `claudeLimit`: the fullest Claude limit whose own readout is hidden, or
+ *   null when every limit is already read out (or none are known).
+ */
+export function selectHeaderUsageBadges(input: {
+  readonly stats: ReadonlyArray<HeaderUsageStatItem>;
+  readonly contextWindow: ContextWindowSnapshot | null;
+  readonly claudeUsage: HeaderClaudeUsage | null;
+}): { readonly tokens: boolean; readonly claudeLimit: HeaderUsageLimit | null } {
+  const { stats, contextWindow, claudeUsage } = input;
+  const shown = new Set(stats.map((stat) => stat.id));
+  const contextStat = stats.find((stat) => stat.id === "context");
+  const tokens =
+    contextWindow !== null &&
+    contextStat?.value !== formatContextWindowTokens(contextWindow.threadTotalTokens);
+  let claudeLimit: HeaderUsageLimit | null = null;
+  for (const limit of claudeUsage?.limits ?? []) {
+    if (shown.has(LIMIT_STAT_IDS[limit.kind])) continue;
+    if (claudeLimit === null || limit.percent > claudeLimit.percent) claudeLimit = limit;
+  }
+  return { tokens, claudeLimit };
+}
+
 /**
  * Big usage readouts filling the chat header's otherwise-blank middle area.
  *

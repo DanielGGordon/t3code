@@ -7,6 +7,7 @@ import {
   formatResetCountdown,
   type HeaderUsageStatsVisibility,
   resolveScopedWeeklyLabel,
+  selectHeaderUsageBadges,
   selectHeaderUsageStats,
   selectHeaderUsageStatsVisibility,
   SPEND_STAT_PARTIAL_TOOLTIP,
@@ -418,5 +419,44 @@ describe("resolveScopedWeeklyLabel", () => {
         limits: [{ kind: "session", percent: 1 }],
       }),
     ).toBe("Scoped");
+  });
+});
+
+describe("selectHeaderUsageBadges", () => {
+  const badgesFor = (visibility: HeaderUsageStatsVisibility) =>
+    selectHeaderUsageBadges({
+      stats: selectHeaderUsageStats({ visibility, contextWindow, claudeUsage }),
+      contextWindow,
+      claudeUsage,
+    });
+
+  it("shows no badge while every matching readout is on screen", () => {
+    expect(badgesFor(allVisible)).toEqual({ tokens: false, claudeLimit: null });
+  });
+
+  it("falls back to the context badge when the context readout is hidden", () => {
+    expect(badgesFor({ ...allVisible, context: false }).tokens).toBe(true);
+  });
+
+  it("falls back to a badge for the hidden scoped weekly limit", () => {
+    const badges = badgesFor({ ...allVisible, scopedWeekly: false });
+    expect(badges.claudeLimit).toEqual({ kind: "weekly_scoped", percent: 18, scopeLabel: "Fable" });
+  });
+
+  it("badges the fullest limit among those with a hidden readout", () => {
+    const badges = badgesFor({ ...allVisible, session: false, scopedWeekly: false });
+    expect(badges.claudeLimit?.kind).toBe("session");
+  });
+
+  it("keeps the thread-total badge when it differs from the context readout", () => {
+    const cumulative = { ...contextWindow!, threadTotalTokens: 900_000 };
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: cumulative,
+      claudeUsage: null,
+    });
+    expect(
+      selectHeaderUsageBadges({ stats, contextWindow: cumulative, claudeUsage: null }).tokens,
+    ).toBe(true);
   });
 });
