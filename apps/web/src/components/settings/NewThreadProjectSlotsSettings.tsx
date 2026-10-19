@@ -46,8 +46,7 @@ export function NewThreadProjectSlotsSettings({
         const command: KeybindingCommand = `chat.newInProject.${slot}`;
         const shortcut = shortcutLabelForCommand(keybindings, command);
         const projectId = slots[slot] ?? null;
-        const missing =
-          projectId !== null && !projects.some((project) => project.id === projectId);
+        const missing = projectId !== null && !projects.some((project) => project.id === projectId);
         return (
           <SettingsRow
             key={slot}

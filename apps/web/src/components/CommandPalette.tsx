@@ -59,6 +59,7 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  KeyboardIcon,
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -78,6 +79,7 @@ import {
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
+import { toggleMyShortcuts } from "./MyShortcutsDialog";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
   useCallback,
@@ -2249,6 +2251,18 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:my-shortcuts",
+    searchTerms: ["shortcuts", "keybindings", "keys", "hotkeys", "cheat sheet", "mine"],
+    title: "Show my shortcuts",
+    icon: <KeyboardIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "shortcuts.showMine",
+    run: async () => {
+      toggleMyShortcuts();
     },
   });
 

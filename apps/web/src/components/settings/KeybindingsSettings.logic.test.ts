@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  DEFAULT_RESOLVED_KEYBINDINGS,
+  compileResolvedKeybindingsConfig,
+} from "@t3tools/shared/keybindings";
 
 import {
   buildKeybindingRows,
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
+  collectMyShortcuts,
   commandLabel,
   groupKeybindingRows,
   keybindingConflictLabels,
@@ -432,5 +436,24 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+
+  it("lists only rebinds and additions as the user's own shortcuts", () => {
+    const keybindings = [
+      ...compileResolvedKeybindingsConfig([
+        { key: "mod+shift+u", command: "modelPicker.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+m", command: "chat.newInProject.1", when: "!terminalFocus" },
+        { key: "mod+shift+h", command: "thread.snoozeHour" },
+        { key: "f9", command: "thread.snoozeHour" },
+      ]),
+      ...DEFAULT_RESOLVED_KEYBINDINGS.filter((rule) => rule.command !== "modelPicker.toggle"),
+    ];
+    expect(collectMyShortcuts(keybindings).map(({ command, keys }) => ({ command, keys }))).toEqual(
+      [
+        { command: "chat.newInProject.1", keys: ["mod+shift+m"] },
+        { command: "modelPicker.toggle", keys: ["mod+shift+u"] },
+        { command: "thread.snoozeHour", keys: ["f9", "mod+shift+h"] },
+      ],
+    );
   });
 });

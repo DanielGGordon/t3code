@@ -41,6 +41,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { MyShortcutsDialogHost, toggleMyShortcuts } from "~/components/MyShortcutsDialog";
 
 const NEW_THREAD_IN_PROJECT_SLOT_BY_COMMAND = new Map<string, NewThreadProjectSlot>(
   NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS.map((command) => [
@@ -151,6 +152,13 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         void startScratchThread(environmentId);
+        return;
+      }
+
+      if (command === "shortcuts.showMine") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleMyShortcuts();
         return;
       }
 
@@ -271,7 +279,7 @@ function ChatRouteGlobalShortcuts() {
     terminalOpen,
   ]);
 
-  return null;
+  return <MyShortcutsDialogHost />;
 }
 
 function ChatRouteLayout() {
