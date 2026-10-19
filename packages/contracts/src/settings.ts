@@ -20,7 +20,7 @@ import {
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
-import { KeybindingShortcut } from "./keybindings.ts";
+import { KeybindingShortcut, type NewThreadProjectSlot } from "./keybindings.ts";
 import {
   CustomModelSetting,
   DEFAULT_SESSION_MODEL_SELECTION,
@@ -1204,6 +1204,14 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+/** A null slot is unassigned; null also clears the slot in a patch. */
+export const NewThreadProjectSlots = Schema.Struct({
+  "1": Schema.optionalKey(Schema.NullOr(ProjectId)),
+  "2": Schema.optionalKey(Schema.NullOr(ProjectId)),
+  "3": Schema.optionalKey(Schema.NullOr(ProjectId)),
+} satisfies Record<NewThreadProjectSlot, unknown>);
+export type NewThreadProjectSlots = typeof NewThreadProjectSlots.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
@@ -1252,6 +1260,8 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Project each `chat.newInProject.<slot>` shortcut opens a new thread in. */
+  newThreadProjectSlots: NewThreadProjectSlots.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -1674,6 +1684,7 @@ export const ServerSettingsPatch = Schema.Struct({
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
+  newThreadProjectSlots: Schema.optionalKey(NewThreadProjectSlots),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),

@@ -358,6 +358,36 @@ export function buildKeybindingCommandOptions(
   return [...commands].toSorted((left, right) => compareCommands(left, right, commandLabel));
 }
 
+export interface MyShortcut {
+  readonly command: KeybindingCommand;
+  /** Binding inputs such as `mod+shift+m`, parallel to `shortcuts`. */
+  readonly keys: ReadonlyArray<string>;
+  readonly shortcuts: ReadonlyArray<KeybindingShortcut>;
+}
+
+/**
+ * The user's own shortcuts for the "Show My Shortcuts" popup: every rule that
+ * is not a stock default (rebinds and additions) plus project action
+ * shortcuts, one entry per command.
+ */
+export function collectMyShortcuts(
+  keybindings: ResolvedKeybindingsConfig,
+): ReadonlyArray<MyShortcut> {
+  const byCommand = new Map<
+    KeybindingCommand,
+    { keys: string[]; shortcuts: KeybindingShortcut[] }
+  >();
+  for (const row of buildKeybindingRows(keybindings, "")) {
+    if (row.source === "Default") continue;
+    const entry = byCommand.get(row.command) ?? { keys: [], shortcuts: [] };
+    byCommand.set(row.command, entry);
+    if (entry.keys.includes(row.key)) continue;
+    entry.keys.push(row.key);
+    entry.shortcuts.push(row.binding.shortcut);
+  }
+  return [...byCommand].map(([command, entry]) => ({ command, ...entry }));
+}
+
 export function commandLabel(command: KeybindingCommand): string {
   if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";
   if (command === "composer.sendBackground") return "Composer: Start in Background";
@@ -369,9 +399,14 @@ export function commandLabel(command: KeybindingCommand): string {
   if (usageMetric) return `Usage: ${usageMetric.label}`;
   const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
   if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
+  if (command === "shortcuts.showMine") return "Show My Shortcuts";
+  if (command === "thread.snoozeHour") return "Thread: Snooze for 1 Hour";
+  const raw = String(command);
+  if (raw.startsWith("chat.newInProject.")) {
+    return `Chat: New Thread in Project Slot ${raw.slice("chat.newInProject.".length)}`;
+  }
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
-  const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
   }

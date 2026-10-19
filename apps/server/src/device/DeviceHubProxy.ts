@@ -190,7 +190,7 @@ const handler = Effect.gen(function* () {
     const auth = yield* EnvironmentAuth.EnvironmentAuth;
     return yield* Effect.raceFirst(
       proxyWebSocket(request, `${ready.hub.origin.replace(/^http/, "ws")}${upstreamPath}`),
-      auth.awaitSessionInvalidation(session.sessionId).pipe(Effect.as(HttpServerResponse.empty())),
+      auth.awaitSessionInvalidation(session).pipe(Effect.as(HttpServerResponse.empty())),
     );
   }
   return yield* proxyHttp(request, `${ready.hub.origin}${upstreamPath}`, ready.hub.origin);

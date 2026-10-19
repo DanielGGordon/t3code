@@ -1,4 +1,9 @@
-import { AuthPreviewOperateScope } from "@t3tools/contracts";
+import {
+  AuthPreviewOperateScope,
+  NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS,
+  type NewThreadProjectSlot,
+} from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo } from "react";
@@ -7,7 +12,11 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useLegacySidebarEnabled,
+  usePrimarySettings,
+} from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
@@ -32,6 +41,14 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { MyShortcutsDialogHost, toggleMyShortcuts } from "~/components/MyShortcutsDialog";
+
+const NEW_THREAD_IN_PROJECT_SLOT_BY_COMMAND = new Map<string, NewThreadProjectSlot>(
+  NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS.map((command) => [
+    command,
+    command.slice("chat.newInProject.".length) as NewThreadProjectSlot,
+  ]),
+);
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -47,6 +64,7 @@ function ChatRouteGlobalShortcuts() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const newThreadProjectSlots = usePrimarySettings((settings) => settings.newThreadProjectSlots);
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const projectGroupCount = useMemo(
     () =>
@@ -137,6 +155,41 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (command === "shortcuts.showMine") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleMyShortcuts();
+        return;
+      }
+
+      const projectSlot = command ? NEW_THREAD_IN_PROJECT_SLOT_BY_COMMAND.get(command) : undefined;
+      if (projectSlot !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        // Slots hold primary-environment project ids, like the keybindings.
+        const projectId = newThreadProjectSlots[projectSlot] ?? null;
+        const project =
+          projectId === null || primaryEnvironmentId === null
+            ? undefined
+            : projects.find(
+                (candidate) =>
+                  candidate.environmentId === primaryEnvironmentId && candidate.id === projectId,
+              );
+        if (!project) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `Project slot ${projectSlot} is empty`,
+              description: "Pick its project in Settings → Keybindings.",
+            }),
+          );
+          return;
+        }
+        void handleNewThread(scopeProjectRef(project.environmentId, project.id));
+        return;
+      }
+
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
@@ -221,10 +274,12 @@ function ChatRouteGlobalShortcuts() {
     selectedThreadKeysSize,
     startScratchThread,
     legacySidebarEnabled,
+    newThreadProjectSlots,
+    projects,
     terminalOpen,
   ]);
 
-  return null;
+  return <MyShortcutsDialogHost />;
 }
 
 function ChatRouteLayout() {

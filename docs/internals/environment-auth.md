@@ -88,6 +88,11 @@ transaction](../../apps/server/src/persistence/AuthSessions.ts); a failed
 replacement must leave the old credential usable. Pairing and browser sessions
 do not follow this replacement rule.
 
+Two-factor gates every session except those `EnvironmentAuth.issueSession` mints for
+the local `t3` CLI: running it needs shell access to the T3 home, which outranks a
+second factor. The exemption is a `local` claim in the server-signed token (copied into
+its WebSocket tickets), so no HTTP, WebSocket or MCP handler may call `issueSession`.
+
 ### Reusable dev credential
 
 Web development environments can accept one `T3CODE_DEV_AUTH_TOKEN` across

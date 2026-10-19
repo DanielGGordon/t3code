@@ -87,6 +87,33 @@ const requestMetadata = {
   ipAddress: "192.168.1.23",
 };
 
+/** A device paired remotely: a pairing code exchanged for a bearer token. */
+const pairBearer = (auth: EnvironmentAuth.EnvironmentAuth["Service"]) =>
+  Effect.gen(function* () {
+    const pairing = yield* auth.issuePairingCredential({ scopes: AuthAdministrativeScopes });
+    const exchanged = yield* auth.exchangeBootstrapCredentialForAccessToken(
+      pairing.credential,
+      undefined,
+      requestMetadata,
+    );
+    return { token: exchanged.access_token };
+  });
+
+/** Enrolls the environment's authenticator from `sessionId`; returns the recovery codes. */
+const enrollTwoFactor = (
+  sessions: SessionStore.SessionStore["Service"],
+  sessionId: Parameters<SessionStore.SessionStore["Service"]["twoFactor"]["begin"]>[0],
+) =>
+  Effect.gen(function* () {
+    const setup = yield* sessions.twoFactor.begin(sessionId);
+    const bits = [...setup.secret]
+      .map((c) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0"))
+      .join("");
+    const secret = Buffer.from(bits.match(/.{8}/g)!.map((byte) => Number.parseInt(byte, 2)));
+    const code = totp(secret, Math.floor((yield* Clock.currentTimeMillis) / 30_000));
+    return (yield* sessions.twoFactor.confirm(sessionId, code)).recoveryCodes;
+  });
+
 it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
   it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
     Effect.gen(function* () {
@@ -856,16 +883,15 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     Effect.gen(function* () {
       const auth = yield* EnvironmentAuth.EnvironmentAuth;
       const sessions = yield* SessionStore.SessionStore;
-      const first = yield* auth.issueSession();
-      const second = yield* auth.issueSession();
-      const ticket = yield* auth.issueWebSocketTicket(second);
-      const setup = yield* sessions.twoFactor.begin(first.sessionId);
-      const bits = [...setup.secret]
-        .map((c) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0"))
-        .join("");
-      const secret = Buffer.from(bits.match(/.{8}/g)!.map((byte) => Number.parseInt(byte, 2)));
-      const code = totp(secret, Math.floor((yield* Clock.currentTimeMillis) / 30_000));
-      const { recoveryCodes } = yield* sessions.twoFactor.confirm(first.sessionId, code);
+      const first = yield* pairBearer(auth);
+      const second = yield* pairBearer(auth);
+      const ticket = yield* auth.issueWebSocketTicket(
+        yield* auth.authenticateHttpRequest(makeBearerRequest(second.token)),
+      );
+      const recoveryCodes = yield* enrollTwoFactor(
+        sessions,
+        (yield* auth.authenticateHttpRequest(makeBearerRequest(first.token))).sessionId,
+      );
       yield* auth.authenticateHttpRequest(makeBearerRequest(first.token));
       const mcp = yield* auth.issueMcpClientSession({
         label: "External agent",
@@ -886,14 +912,14 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       const state = yield* auth.getSessionState(makeBearerRequest(second.token));
       expect(state.authenticated).toBe(true);
       expect(state.twoFactor?.required).toBe(true);
-      yield* auth.authenticateFactorRequest(makeBearerRequest(second.token));
+      const secondSession = yield* auth.authenticateFactorRequest(makeBearerRequest(second.token));
       const socketRequest = {
         url: `/ws?wsTicket=${ticket.ticket}`,
         cookies: {},
         headers: { host: "localhost" },
       } as never;
       yield* Effect.flip(auth.authenticateWebSocketUpgrade(socketRequest));
-      yield* sessions.twoFactor.verifyCode(second.sessionId, recoveryCodes[0]!, false);
+      yield* sessions.twoFactor.verifyCode(secondSession.sessionId, recoveryCodes[0]!, false);
       yield* auth.authenticateHttpRequest(makeBearerRequest(second.token));
       yield* auth.authenticateWebSocketUpgrade(socketRequest);
       yield* TestClock.adjust("48 hours");
@@ -901,6 +927,84 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         auth.authenticateHttpRequest(makeBearerRequest(second.token)),
       );
       expect(expired).toMatchObject({ twoFactorRequired: true });
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect("keeps CLI-issued service sessions usable after two-factor enrollment", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const owner = yield* pairBearer(auth);
+      // What `t3 auth session issue --subject alfred-brain-actions` mints.
+      const service = yield* auth.issueSession({
+        subject: "alfred-brain-actions",
+        label: "alfred-brain-actions",
+      });
+      yield* enrollTwoFactor(
+        sessions,
+        (yield* auth.authenticateHttpRequest(makeBearerRequest(owner.token))).sessionId,
+      );
+
+      const authenticated = yield* auth.authenticateHttpRequest(makeBearerRequest(service.token));
+      expect(authenticated.sessionId).toBe(service.sessionId);
+      const state = yield* auth.getSessionState(makeBearerRequest(service.token));
+      expect(state.twoFactor).toMatchObject({ enabled: true, required: false });
+      const ticket = yield* auth.issueWebSocketTicket(authenticated);
+      const socket = yield* auth.authenticateWebSocketUpgrade({
+        url: `/ws?wsTicket=${ticket.ticket}`,
+        cookies: {},
+        headers: { host: "localhost" },
+      } as never);
+      // The WebSocket RPC middleware re-checks every call against this session.
+      yield* sessions.twoFactor.requireVerified(socket);
+      yield* TestClock.adjust("72 hours");
+      yield* auth.authenticateHttpRequest(makeBearerRequest(service.token));
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect("never extends the CLI exemption to remotely issued or forged sessions", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const owner = yield* pairBearer(auth);
+      const paired = yield* pairBearer(auth);
+      const browser = yield* auth.createBrowserSession(
+        (yield* auth.issuePairingCredential()).credential,
+        requestMetadata,
+      );
+      yield* enrollTwoFactor(
+        sessions,
+        (yield* auth.authenticateHttpRequest(makeBearerRequest(owner.token))).sessionId,
+      );
+
+      // A verified session can still pair new devices, but they start gated.
+      const pairedAfter = yield* pairBearer(auth);
+      for (const token of [paired.token, pairedAfter.token]) {
+        expect(
+          yield* Effect.flip(auth.authenticateHttpRequest(makeBearerRequest(token))),
+        ).toMatchObject({ twoFactorRequired: true });
+      }
+      expect(
+        yield* Effect.flip(
+          auth.authenticateHttpRequest(
+            makeCookieRequest(sessions.cookieName, browser.sessionToken),
+          ),
+        ),
+      ).toMatchObject({ twoFactorRequired: true });
+
+      // The marker lives in the signed token: adding it to a paired token breaks the signature.
+      const [payload] = paired.token.split(".");
+      const claims = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8"));
+      const forgedPayload = Buffer.from(
+        JSON.stringify({ ...claims, local: true, sub: "cli-issued-session" }),
+      ).toString("base64url");
+      const forged = yield* Effect.flip(
+        auth.authenticateHttpRequest(
+          makeBearerRequest(`${forgedPayload}.${paired.token.split(".")[1]}`),
+        ),
+      );
+      expect(forged).toMatchObject({ _tag: "ServerAuthInvalidCredentialError" });
+      expect(forged).not.toMatchObject({ twoFactorRequired: true });
     }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 });

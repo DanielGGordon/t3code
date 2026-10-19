@@ -190,9 +190,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         );
         return yield* Effect.raceFirst(
           Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput)),
-          auth
-            .awaitSessionInvalidation(session.sessionId)
-            .pipe(Effect.as(HttpServerResponse.empty())),
+          auth.awaitSessionInvalidation(session).pipe(Effect.as(HttpServerResponse.empty())),
         );
       }),
     ).pipe(

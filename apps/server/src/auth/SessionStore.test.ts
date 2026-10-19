@@ -137,16 +137,16 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
         const client = yield* sessions.issue(relaySessionInput);
         const ownerInvalidated = yield* Deferred.make<void>();
         yield* sessions
-          .awaitInvalidation(owner.sessionId)
+          .awaitInvalidation(owner)
           .pipe(
             Effect.andThen(Deferred.succeed(ownerInvalidated, undefined)),
             Effect.forkScoped({ startImmediately: true }),
           );
         const first = yield* sessions
-          .awaitInvalidation(client.sessionId)
+          .awaitInvalidation(client)
           .pipe(Effect.forkScoped({ startImmediately: true }));
         const second = yield* sessions
-          .awaitInvalidation(client.sessionId)
+          .awaitInvalidation(client)
           .pipe(Effect.forkScoped({ startImmediately: true }));
         if (operation === "revoke") yield* sessions.revoke(client.sessionId);
         else if (operation === "revokeAllExcept") yield* sessions.revokeAllExcept(owner.sessionId);
@@ -155,7 +155,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
         yield* Fiber.join(second);
         expect(yield* Deferred.isDone(ownerInvalidated)).toBe(false);
         // A connection whose upgrade authenticated just before revocation must also stop.
-        yield* sessions.awaitInvalidation(client.sessionId);
+        yield* sessions.awaitInvalidation(client);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerSessionStore(), TestClock.layer()))),
   );
 
@@ -166,7 +166,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       yield* sessions.markConnected(client.sessionId);
       const invalidated = yield* Deferred.make<void>();
       const watcher = yield* sessions
-        .awaitInvalidation(client.sessionId)
+        .awaitInvalidation(client)
         .pipe(
           Effect.andThen(Deferred.succeed(invalidated, undefined)),
           Effect.forkScoped({ startImmediately: true }),
@@ -175,7 +175,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       expect(yield* Deferred.isDone(invalidated)).toBe(false);
       yield* TestClock.adjust(Duration.minutes(1));
       yield* Fiber.join(watcher);
-      yield* sessions.awaitInvalidation(client.sessionId);
+      yield* sessions.awaitInvalidation(client);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerSessionStore(), TestClock.layer()))),
   );
 

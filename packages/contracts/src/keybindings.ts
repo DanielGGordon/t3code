@@ -20,6 +20,15 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 
+// New thread in the project assigned to that slot (`newThreadProjectSlots`).
+export const NEW_THREAD_PROJECT_SLOTS = ["1", "2", "3"] as const;
+export type NewThreadProjectSlot = (typeof NEW_THREAD_PROJECT_SLOTS)[number];
+export const NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS = [
+  "chat.newInProject.1",
+  "chat.newInProject.2",
+  "chat.newInProject.3",
+] as const satisfies ReadonlyArray<`chat.newInProject.${NewThreadProjectSlot}`>;
+
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
   "modelPicker.jump.1",
   "modelPicker.jump.2",
@@ -42,6 +51,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.next",
   "thread.copyReference",
   "thread.settle",
+  "thread.snoozeHour",
   "thread.pin",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -80,6 +90,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "preview.zoomOut",
   "preview.resetZoom",
   "commandPalette.toggle",
+  "shortcuts.showMine",
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",
@@ -100,6 +111,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",
+  ...NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS,
   "chat.find",
   "editor.openFavorite",
   "usage.cost",

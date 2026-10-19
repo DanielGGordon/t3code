@@ -116,6 +116,8 @@ export interface AuthenticatedSession {
   readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
   readonly proofKeyThumbprint?: string;
   readonly expiresAt?: DateTime.DateTime;
+  /** Minted by the local `t3` CLI; exempt from two-factor (`TwoFactor.TwoFactorSession`). */
+  readonly issuedLocally?: true;
 }
 
 const serverAuthInternalErrorContext = {
@@ -529,6 +531,12 @@ export class EnvironmentAuth extends Context.Service<
       readonly excludeSubjects?: ReadonlyArray<string>;
     }) => Effect.Effect<ReadonlyArray<AuthPairingLink>, ServerAuthInternalError>;
     readonly revokePairingLink: (id: string) => Effect.Effect<boolean, ServerAuthInternalError>;
+    /**
+     * Mints a bearer session for the local `t3` CLI (`t3 auth session issue`,
+     * and the short-lived tokens `t3 project`/`t3 import`/`t3 connect` use to
+     * reach a running server). These sessions skip two-factor verification,
+     * so this must never be reachable from an HTTP, WebSocket, or MCP handler.
+     */
     readonly issueSession: (input?: {
       readonly ttl?: Duration.Duration;
       readonly subject?: string;
@@ -556,7 +564,7 @@ export class EnvironmentAuth extends Context.Service<
       currentSessionId: AuthSessionId,
     ) => Effect.Effect<number, ServerAuthInternalError>;
     readonly awaitSessionInvalidation: (
-      sessionId: AuthSessionId,
+      session: Pick<AuthenticatedSession, "sessionId" | "issuedLocally">,
     ) => Effect.Effect<void, ServerAuthInternalError>;
     readonly authenticateFactorRequest: (
       request: HttpServerRequest.HttpServerRequest,
@@ -568,7 +576,7 @@ export class EnvironmentAuth extends Context.Service<
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
     readonly issueWebSocketTicket: (
-      session: Pick<AuthenticatedSession, "sessionId">,
+      session: Pick<AuthenticatedSession, "sessionId" | "issuedLocally">,
     ) => Effect.Effect<AuthWebSocketTicketResult, ServerAuthInternalError>;
     readonly issueStartupPairingUrl: (
       baseUrl: string,
@@ -828,6 +836,7 @@ export const make = Effect.gen(function* () {
         scopes: session.scopes,
         ...(session.proofKeyThumbprint ? { proofKeyThumbprint: session.proofKeyThumbprint } : {}),
         ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+        ...(session.issuedLocally ? { issuedLocally: true } : {}),
       })),
     );
 
@@ -912,7 +921,7 @@ export const make = Effect.gen(function* () {
   const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = (request) =>
     authenticateRequest(request).pipe(
       Effect.flatMap((session) =>
-        sessions.twoFactor.status(session.sessionId).pipe(
+        sessions.twoFactor.status(session).pipe(
           Effect.mapError((cause) => new ServerAuthSessionCredentialValidationError({ cause })),
           Effect.map(
             (twoFactor) =>
@@ -1182,6 +1191,7 @@ export const make = Effect.gen(function* () {
         subject: input?.subject ?? DEFAULT_SESSION_SUBJECT,
         method: "bearer-access-token",
         scopes: input?.scopes ?? AuthAdministrativeScopes,
+        issuedLocally: true,
         client: {
           ...(input?.label ? { label: input.label } : {}),
           deviceType: "bot",
@@ -1303,20 +1313,25 @@ export const make = Effect.gen(function* () {
     );
 
   const issueWebSocketTicket: EnvironmentAuth["Service"]["issueWebSocketTicket"] = (session) =>
-    sessions.issueWebSocketToken(session.sessionId).pipe(
-      Effect.mapError((cause) => new ServerAuthWebSocketTokenIssueError({ cause })),
-      Effect.map(
-        (issued) =>
-          ({
-            ticket: issued.token,
-            expiresAt: DateTime.toUtc(issued.expiresAt),
-          }) satisfies AuthWebSocketTicketResult,
-      ),
-      Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
-    );
+    sessions
+      .issueWebSocketToken(
+        session.sessionId,
+        session.issuedLocally ? { issuedLocally: true } : undefined,
+      )
+      .pipe(
+        Effect.mapError((cause) => new ServerAuthWebSocketTokenIssueError({ cause })),
+        Effect.map(
+          (issued) =>
+            ({
+              ticket: issued.token,
+              expiresAt: DateTime.toUtc(issued.expiresAt),
+            }) satisfies AuthWebSocketTicketResult,
+        ),
+        Effect.withSpan("EnvironmentAuth.issueWebSocketTicket"),
+      );
 
   const requireSecondFactor = (session: AuthenticatedSession) =>
-    sessions.twoFactor.requireVerified(session.sessionId).pipe(
+    sessions.twoFactor.requireVerified(session).pipe(
       Effect.catchTags({
         TwoFactorError: () =>
           Effect.fail(new ServerAuthInvalidCredentialError({ twoFactorRequired: true })),
@@ -1352,6 +1367,7 @@ export const make = Effect.gen(function* () {
               method: session.method,
               scopes: session.scopes,
               ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+              ...(session.issuedLocally ? { issuedLocally: true as const } : {}),
             })),
           );
         }
@@ -1458,9 +1474,9 @@ export const make = Effect.gen(function* () {
     listClientSessions,
     revokeClientSession,
     revokeOtherClientSessions,
-    awaitSessionInvalidation: (sessionId) =>
+    awaitSessionInvalidation: (session) =>
       sessions
-        .awaitInvalidation(sessionId)
+        .awaitInvalidation(session)
         .pipe(
           Effect.mapError((cause) => new ServerAuthSessionCredentialValidationError({ cause })),
         ),

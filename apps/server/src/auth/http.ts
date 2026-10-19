@@ -316,7 +316,7 @@ export const layer = HttpApiBuilder.group(
             Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
           );
           const status = yield* factor
-            .status(session.sessionId)
+            .status(session)
             .pipe(Effect.catch((error) => failEnvironmentInternal("internal_error", error)));
           return { ...result, status };
         }),
