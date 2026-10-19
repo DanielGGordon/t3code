@@ -31,14 +31,15 @@ OpenAI-compatible `/v1/audio/transcriptions` endpoint, such as
 docker run -d --restart unless-stopped -p 127.0.0.1:8650:8000 \
   -e WHISPER__TTL=-1 -e WHISPER__CPU_THREADS=16 -e WHISPER__COMPUTE_TYPE=int8 \
   ghcr.io/speaches-ai/speaches:latest-cpu
-curl -X POST http://127.0.0.1:8650/v1/models/Systran/faster-distil-whisper-medium.en
+curl -X POST http://127.0.0.1:8650/v1/models/Systran/faster-whisper-medium.en
 export T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL=http://127.0.0.1:8650
 ```
 
 `T3CODE_VOICE_TRANSCRIPTION_LOCAL_MODEL` picks the model (default
-`Systran/faster-distil-whisper-medium.en`, which handles a 10-second clip in
-about two seconds on a modern CPU). On CPU, the distilled and `small` models
-are several times faster than `large-v3` for similar English accuracy.
+`Systran/faster-whisper-medium.en`, which handles a 10-second clip in about
+three seconds and a minute in about twelve on a modern CPU). Avoid the
+`distil` models for dictation: they are faster but silently drop the end of
+recordings longer than about 30 seconds.
 
 **OpenAI.** Without a local server, or when it fails, the server uses OpenAI.
 It looks for the API key in, in order:

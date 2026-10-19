@@ -29,7 +29,8 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 export const VOICE_TRANSCRIPTION_API_KEY_SECRET = "voice-transcription-openai-api-key";
 export const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "gpt-transcribe";
-export const DEFAULT_LOCAL_VOICE_TRANSCRIPTION_MODEL = "Systran/faster-distil-whisper-medium.en";
+// Not a distil-whisper model: those drop the tail of recordings longer than ~30s.
+export const DEFAULT_LOCAL_VOICE_TRANSCRIPTION_MODEL = "Systran/faster-whisper-medium.en";
 const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 const TRANSCRIPTION_TIMEOUT = Duration.seconds(90);
 // Bounded tighter than OpenAI so a wedged local server still leaves time for the fallback.
