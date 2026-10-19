@@ -28,6 +28,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const MAX = CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES;
 
+// On reads as orange so it is obvious at a glance, not just a subtle highlight.
+const ON_COMPOSER_CLASS_NAME =
+  "aria-pressed:border-accent-orange/60 aria-pressed:bg-accent-orange/20 aria-pressed:text-accent-orange aria-pressed:hover:bg-accent-orange/30";
+
 function describe(state: CacheKeepAliveState, formatTime: (ms: number) => string): string {
   switch (state.kind) {
     case "off":
@@ -141,6 +145,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
           placement === "composer" ? (
             <ComposerControl
               size={props.composerSize ?? "sm"}
+              className={ON_COMPOSER_CLASS_NAME}
               aria-pressed={pressed}
               aria-label={label}
               disabled={!canOperateThread}
@@ -153,14 +158,18 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
               onPressedChange={handlePressedChange}
               disabled={!canOperateThread}
               aria-label={label}
-              variant="outline"
+              variant="outline-warm"
               size="xs"
             />
           )
         }
       >
         {placement === "composer" ? (
-          <ComposerControlIcon icon={Icon} size={props.composerSize ?? "sm"} />
+          <ComposerControlIcon
+            icon={Icon}
+            size={props.composerSize ?? "sm"}
+            className={pressed ? "text-accent-orange" : undefined}
+          />
         ) : (
           <Icon className="size-3 touch:size-5" />
         )}
