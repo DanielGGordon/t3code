@@ -415,8 +415,9 @@ export function selectHeaderUsageStats(input: {
  * On a regular desktop header they are hidden below the `xl` breakpoint. A
  * `condensed` header (phone viewport or touch / car layout) always shows them,
  * in a smaller type that grows back to full size at `xl`, inside a strip that
- * scrolls horizontally rather than overflowing. On a phone the strip is capped
- * at half the header so the thread title keeps some room.
+ * scrolls horizontally rather than overflowing. On a phone the strip drops to
+ * its own full-width row under the title (the header wraps, see ChatHeader) beside the header actions,
+ * spread edge to edge, so nothing gets squeezed or clipped.
  *
  * `compact` (drive density: the touch layout in a car-sized viewport) trades
  * the big readouts for "LABEL value" pairs that wrap into a right-aligned
@@ -441,7 +442,7 @@ export function HeaderUsageStats(props: {
         compact
           ? "flex max-h-[var(--workspace-topbar-height)] max-w-32 shrink-0 flex-wrap items-center justify-end gap-x-2.5 overflow-hidden"
           : condensed
-            ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:max-w-1/2 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
+            ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:-ml-[calc(var(--workspace-titlebar-content-left)-var(--workspace-gutter-start))] max-md:flex-[1_1_8rem] max-md:justify-between max-md:gap-2.5 max-md:pb-1.5 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
             : "hidden shrink-0 items-center gap-8 xl:flex"
       }
     >
@@ -537,7 +538,7 @@ export function HeaderUsageStatsMenu(props: {
                   aria-label="Configure header usage stats"
                   className={cn(
                     condensed ? "inline-flex" : "hidden xl:inline-flex",
-                    "touch:size-12",
+                    "touch:size-12 max-md:touch:size-10",
                   )}
                 />
               }

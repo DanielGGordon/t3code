@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { DRIVE_MODE_MAX_VIEWPORT_WIDTH, resolveDriveMode } from "./driveMode";
+import {
+  DRIVE_MODE_MAX_VIEWPORT_WIDTH,
+  DRIVE_MODE_MIN_VIEWPORT_WIDTH,
+  resolveDriveMode,
+} from "./driveMode";
 
 describe("resolveDriveMode", () => {
   it("is on for the touch layout in a car-sized (drive) browser", () => {
@@ -19,6 +23,13 @@ describe("resolveDriveMode", () => {
     ).toBe(true);
     expect(
       resolveDriveMode({ touchLayout: true, viewportWidth: DRIVE_MODE_MAX_VIEWPORT_WIDTH }),
+    ).toBe(false);
+  });
+
+  it("leaves phone-sized viewports to the phone layout", () => {
+    expect(resolveDriveMode({ touchLayout: true, viewportWidth: 390 })).toBe(false);
+    expect(
+      resolveDriveMode({ touchLayout: true, viewportWidth: DRIVE_MODE_MIN_VIEWPORT_WIDTH - 1 }),
     ).toBe(false);
   });
 

@@ -51,3 +51,32 @@ export function composePointerHandlers<E>(
     onPointerCancel: compose("onPointerCancel"),
   };
 }
+
+/** Travel (px) both fingers must share, vertically, before a swipe counts. */
+export const TWO_FINGER_SWIPE_MIN_TRAVEL_PX = 80;
+/** Sideways drift allowed per pixel of vertical travel. */
+const TWO_FINGER_SWIPE_MAX_DRIFT_RATIO = 0.6;
+
+export interface TouchPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Classifies a two-finger drag from each finger's start and end point.
+ * Both fingers must travel the same vertical way (opposite ways is a pinch)
+ * and mostly straight, so scrolling, zooming and diagonal flicks stay inert.
+ */
+export function classifyTwoFingerSwipe(
+  start: readonly [TouchPoint, TouchPoint],
+  end: readonly [TouchPoint, TouchPoint],
+): "up" | "down" | null {
+  const dy0 = end[0].y - start[0].y;
+  const dy1 = end[1].y - start[1].y;
+  if (Math.sign(dy0) !== Math.sign(dy1)) return null;
+  const dy = (dy0 + dy1) / 2;
+  const dx = (end[0].x - start[0].x + end[1].x - start[1].x) / 2;
+  if (Math.min(Math.abs(dy0), Math.abs(dy1)) < TWO_FINGER_SWIPE_MIN_TRAVEL_PX) return null;
+  if (Math.abs(dx) > Math.abs(dy) * TWO_FINGER_SWIPE_MAX_DRIFT_RATIO) return null;
+  return dy < 0 ? "up" : "down";
+}

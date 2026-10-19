@@ -160,6 +160,7 @@ import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { MermaidDiagram } from "./chat/MermaidDiagram";
 import { useTheme } from "../hooks/useTheme";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import { readTouchLayout } from "../hooks/useTouchLayout";
 import {
   chatMarkdownClipboardPayload,
   serializeTableElementToCsv,
@@ -562,7 +563,7 @@ const MARKDOWN_CHROME_ACTION_CLASS_NAME = "touch:size-14 touch:[&_svg]:size-5";
 // block or table fights the timeline's vertical scroll.
 function readInitialWordWrapSetting(): boolean {
   const settings = getClientSettings();
-  return settings.wordWrap || settings.touchLayout;
+  return settings.wordWrap || readTouchLayout(settings);
 }
 
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {

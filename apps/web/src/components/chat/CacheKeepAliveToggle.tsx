@@ -153,7 +153,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             />
           ) : (
             <Toggle
-              className="shrink-0 touch:size-12 touch:min-w-12"
+              className="shrink-0 touch:size-12 touch:min-w-12 max-md:touch:size-10 max-md:touch:min-w-10"
               pressed={pressed}
               onPressedChange={handlePressedChange}
               disabled={!canOperateThread}

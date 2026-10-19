@@ -1,7 +1,7 @@
 import { AuthPreviewOperateScope } from "@t3tools/contracts";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
@@ -16,6 +16,8 @@ import { useEnvironmentScope } from "../state/session";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
+import { useTouchLayout } from "../hooks/useTouchLayout";
+import { useTwoFingerSwipe } from "../hooks/useTwoFingerSwipe";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -69,6 +71,16 @@ function ChatRouteGlobalShortcuts() {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
+  // Touch layout (phones by default): two fingers up opens the "new thread in"
+  // project picker, two fingers down opens the palette's recent chats.
+  const touchLayout = useTouchLayout();
+  const onSwipeUp = useCallback(() => {
+    if (!isCommandPaletteOpen()) openCommandPalette({ open: "new-thread-in" });
+  }, []);
+  const onSwipeDown = useCallback(() => {
+    if (!isCommandPaletteOpen()) openCommandPalette({ open: "recent-threads" });
+  }, []);
+  useTwoFingerSwipe(touchLayout, { onSwipeUp, onSwipeDown });
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;

@@ -6944,7 +6944,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-footer-compact="true"
       data-chat-composer-footer-touch="true"
       className={cn(
-        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3",
+        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:flex-wrap",
         pendingUserInputs.length > 0 && "pt-2",
         showMobilePendingAnswerActions && "hidden sm:flex",
       )}
@@ -6953,13 +6953,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         composerVoiceInput
       ) : (
         <>
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+          {/* On a phone the model and controls pill takes its own row above
+              Speak, so neither is squeezed to a sliver beside the big buttons. */}
+          <div className="flex min-w-0 flex-1 items-center gap-3 max-md:contents">
             {composerVoiceInput}
             {composerKeyboardToggle}
             {showProviderUnavailable ? (
               composerControls
             ) : (
-              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30">
+              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:order-first max-md:basis-full">
                 {composerModelPicker}
                 <ComposerControlSeparator className="mx-0 block h-8" />
                 <CompactComposerControlsMenu
@@ -6981,7 +6983,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <div
             data-chat-composer-actions="right"
             data-chat-composer-primary-actions-compact="false"
-            className="flex shrink-0 flex-nowrap items-center justify-end gap-3"
+            className="flex shrink-0 flex-nowrap items-center justify-end gap-3 max-md:ml-auto"
           >
             {composerFooterPrimaryActions}
           </div>

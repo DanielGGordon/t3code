@@ -1,15 +1,46 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import { resolveDriveMode } from "~/lib/driveMode";
-import { useIsMobile } from "./useMediaQuery";
+import { useIsMobile, useMediaQuery } from "./useMediaQuery";
 import { useClientSettings } from "./useSettings";
 
+/** A finger-driven phone viewport: narrow and touch-primary. */
+export const PHONE_MEDIA_QUERY = "(max-width: 767px) and (pointer: coarse)";
+
 /**
- * Whether this device is in the touch / car layout (Settings → Features).
- * Use for structural changes; for sizing prefer the `touch:` CSS variant.
+ * The touch / car layout is on when the device opted in (Settings → Features)
+ * or is a phone that has not opted out. Phones get the same bigger targets
+ * and gestures as a car display without touching a setting.
+ */
+export function resolveTouchLayout(input: {
+  readonly explicit: boolean;
+  readonly phoneDefault: boolean;
+  readonly isPhone: boolean;
+}): boolean {
+  return input.explicit || (input.phoneDefault && input.isPhone);
+}
+
+/** Non-hook read for one-shot initializers; prefer `useTouchLayout`. */
+export function readTouchLayout(settings: {
+  readonly touchLayout: boolean;
+  readonly touchLayoutOnPhones: boolean;
+}): boolean {
+  return resolveTouchLayout({
+    explicit: settings.touchLayout,
+    phoneDefault: settings.touchLayoutOnPhones,
+    isPhone: typeof window !== "undefined" && window.matchMedia(PHONE_MEDIA_QUERY).matches,
+  });
+}
+
+/**
+ * Whether this device is in the touch / car layout. Use for structural
+ * changes; for sizing prefer the `touch:` CSS variant.
  */
 export function useTouchLayout(): boolean {
-  return useClientSettings((settings) => settings.touchLayout);
+  const explicit = useClientSettings((settings) => settings.touchLayout);
+  const phoneDefault = useClientSettings((settings) => settings.touchLayoutOnPhones);
+  const isPhone = useMediaQuery(PHONE_MEDIA_QUERY);
+  return resolveTouchLayout({ explicit, phoneDefault, isPhone });
 }
 
 function subscribeToViewportResize(callback: () => void): () => void {
@@ -26,7 +57,9 @@ function subscribeToViewportResize(callback: () => void): () => void {
  * only re-renders subscribers when the mode actually flips.
  */
 export function useDriveMode(): boolean {
-  const touchLayout = useTouchLayout();
+  // Explicit opt-in only: a phone's default touch layout never turns into
+  // the car's compact density.
+  const touchLayout = useClientSettings((settings) => settings.touchLayout);
   const getSnapshot = useCallback(
     () =>
       typeof window === "undefined"
@@ -37,7 +70,10 @@ export function useDriveMode(): boolean {
   return useSyncExternalStore(subscribeToViewportResize, getSnapshot, () => false);
 }
 
-/** Keyboard-on-demand is on explicitly or implied by the touch layout. */
+/**
+ * Keyboard-on-demand is on explicitly or implied by the explicit touch / car
+ * layout. A phone's default touch layout does not imply it: phones type.
+ */
 export function useComposerKeyboardOnDemand(): boolean {
   return useClientSettings((settings) => settings.composerKeyboardOnDemand || settings.touchLayout);
 }
