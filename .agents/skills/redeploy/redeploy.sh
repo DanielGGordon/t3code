@@ -6,26 +6,27 @@
 # session WILL drop when the service restarts. The restart is fired as a detached
 # systemd unit so it completes regardless; results land in $STATUS_LOG.
 #
-#   redeploy.sh [--when-idle] [--ignore-thread <id>]...
+#   redeploy.sh [--ignore-thread <id>]...
 #
-# --when-idle waits until no T3 conversation has had a queued or running turn for
+# ALWAYS waits until no T3 conversation has had a queued or running turn for
 # T3_IDLE_SECS (default 120) before touching the checkout, and again before the restart
-# (the build takes minutes). The chat running this script is excluded automatically
-# when it lives in a git worktree; otherwise pass its id with --ignore-thread.
-# Either way, once the new server answers, every connected client gets a notice.
+# (the build takes minutes). There is deliberately no way to skip this: a restart kills
+# every running agent turn, and "/redeploy" never means "interrupt my other threads".
+# The chat running this script is excluded automatically when it lives in a git
+# worktree; otherwise pass its id with --ignore-thread (also releases a known zombie).
+# Once the new server answers, every connected client gets a notice.
 set -euo pipefail
 
-WHEN_IDLE=0
 IGNORE_THREADS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --when-idle) WHEN_IDLE=1 ;;
+    --when-idle) ;; # accepted for old callers; waiting for idle is no longer optional
     --ignore-thread)
       [ $# -ge 2 ] || { echo "redeploy: --ignore-thread needs a thread id" >&2; exit 2; }
       IGNORE_THREADS+=("$2")
       shift
       ;;
-    *) echo "redeploy: unknown argument '$1' (usage: redeploy.sh [--when-idle] [--ignore-thread <id>]...)" >&2; exit 2 ;;
+    *) echo "redeploy: unknown argument '$1' (usage: redeploy.sh [--ignore-thread <id>]...)" >&2; exit 2 ;;
   esac
   shift
 done
@@ -43,7 +44,7 @@ STATUS_LOG="${T3_REDEPLOY_LOG:-/tmp/t3-redeploy-status.log}"
 IMPORT_TIMER="${T3_IMPORT_TIMER:-t3-claude-import.timer}"
 IMPORT_SERVICE="${T3_IMPORT_SERVICE:-t3-claude-import.service}"
 IMPORT_WAIT_SECS="${T3_IMPORT_WAIT_SECS:-900}"
-# --when-idle: how long the server must be quiet, how long to wait for that in each
+# Idle gate (always on): how long the server must be quiet, how long to wait for that in each
 # of the two gates (before the checkout, and again right before the restart), and
 # where the state lives. T3_BASE_DIR must match the deployed server's --base-dir.
 IDLE_SECS="${T3_IDLE_SECS:-120}"
@@ -137,7 +138,7 @@ wait_until_idle() {
   done
 }
 
-[ "$WHEN_IDLE" = 1 ] && wait_until_idle "before checkout"
+wait_until_idle "before checkout"
 
 PREV_HEAD="$(git -C "$DEPLOY_DIR" rev-parse HEAD)"
 if systemctl --user cat "$IMPORT_TIMER" >/dev/null 2>&1 &&
@@ -185,7 +186,7 @@ echo "==> Building web bundle"
 ( cd "$DEPLOY_DIR" && pnpm --filter @t3tools/web build )
 
 # The build takes minutes, so conversations may have started since the first gate.
-[ "$WHEN_IDLE" = 1 ] && wait_until_idle "before restart"
+wait_until_idle "before restart"
 
 echo "==> Build OK. Firing detached restart of $SERVICE"
 echo "    (this chat's session will drop when the server restarts)"

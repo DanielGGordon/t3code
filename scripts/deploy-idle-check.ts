@@ -1,5 +1,5 @@
 // Is any T3 conversation doing work right now? Used by the redeploy skill's
-// `--when-idle` mode to hold a restart until the server is quiet.
+// idle gate (always on) to hold a restart until the server is quiet.
 //
 //   node scripts/deploy-idle-check.ts [--base-dir ~/.t3] \
 //     [--ignore-thread <id>]... [--ignore-worktree <path>]...
