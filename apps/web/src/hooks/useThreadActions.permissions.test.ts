@@ -156,6 +156,7 @@ vi.mock("../components/ui/toast", () => ({
   },
 }));
 vi.mock("./useHandleNewThread", () => ({ useNewThreadHandler: () => async () => {} }));
+vi.mock("./useTouchLayout", () => ({ useTouchLayout: () => false }));
 vi.mock("./useSettings", () => ({
   useClientSettings: (select: (settings: unknown) => unknown) =>
     select({

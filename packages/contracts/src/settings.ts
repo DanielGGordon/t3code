@@ -458,6 +458,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // bigger targets, a driver-side mic, gestures instead of hover buttons.
   // Implies composerKeyboardOnDemand. Per device; toggled from Features.
   touchLayout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Phones (a narrow, finger-driven viewport) get the touch layout without
+  // opting in; this turns that default off. It never enables car density,
+  // which stays tied to the explicit `touchLayout` switch.
+  touchLayoutOnPhones: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   fileExplorerShowDotfiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffLayout: DiffLayout.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_LAYOUT))),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
@@ -1811,6 +1815,7 @@ export const ClientSettingsPatch = Schema.Struct({
   composerRuntimeModeVisible: Schema.optionalKey(Schema.Boolean),
   composerKeyboardOnDemand: Schema.optionalKey(Schema.Boolean),
   touchLayout: Schema.optionalKey(Schema.Boolean),
+  touchLayoutOnPhones: Schema.optionalKey(Schema.Boolean),
   fileExplorerShowDotfiles: Schema.optionalKey(Schema.Boolean),
   diffLayout: Schema.optionalKey(DiffLayout),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),

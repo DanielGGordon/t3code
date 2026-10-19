@@ -60,7 +60,7 @@ import { cn } from "../lib/utils";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
-import { useDriveMode } from "../hooks/useTouchLayout";
+import { useDriveMode, useTouchLayout } from "../hooks/useTouchLayout";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -376,7 +376,7 @@ function FontAppearanceSync() {
 // the automatic drive density (touch layout in a car-sized viewport) the same
 // way for the `drive:` variant.
 function TouchLayoutSync() {
-  const touchLayout = useClientSettings((settings) => settings.touchLayout);
+  const touchLayout = useTouchLayout();
   const driveMode = useDriveMode();
 
   useEffect(() => {

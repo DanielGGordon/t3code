@@ -8,12 +8,24 @@
 export const DRIVE_MODE_MAX_VIEWPORT_WIDTH = 1024;
 
 /**
+ * Viewport width below which the browser is a phone, not a car: phones keep
+ * their own phone presentation even with the touch layout switched on, so
+ * the car's compact header never squeezes a phone-sized one. A drive-sized
+ * Tesla browser (about 650px and up) stays above it.
+ */
+export const DRIVE_MODE_MIN_VIEWPORT_WIDTH = 640;
+
+/**
  * Drive density is automatic: it needs the touch layout to be on (Settings →
- * Features) and a car-sized viewport. Phones never enter it on their own.
+ * Features) and a car-sized viewport. Phones never enter it.
  */
 export function resolveDriveMode(input: {
   readonly touchLayout: boolean;
   readonly viewportWidth: number;
 }): boolean {
-  return input.touchLayout && input.viewportWidth < DRIVE_MODE_MAX_VIEWPORT_WIDTH;
+  return (
+    input.touchLayout &&
+    input.viewportWidth >= DRIVE_MODE_MIN_VIEWPORT_WIDTH &&
+    input.viewportWidth < DRIVE_MODE_MAX_VIEWPORT_WIDTH
+  );
 }

@@ -353,6 +353,11 @@ export const ChatHeader = memo(function ChatHeader({
       ref={breadcrumbContainerRef}
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
+        // Phones give the project and title the whole first row; the usage
+        // readouts and the header actions share a second one below it.
+        // The reserved right inset moves onto the title row, since the fixed
+        // panel toggles only sit beside that row.
+        condensed && "max-md:flex-wrap max-md:content-start max-md:gap-y-0 max-md:pr-0!",
         // Room for the fixed panel toggles. The touch layout keeps only the
         // 48px thread-details toggle (ChatView hides the other two).
         rightPanelOpen ? "pr-10" : "pr-24",
@@ -362,7 +367,11 @@ export const ChatHeader = memo(function ChatHeader({
     >
       <WorkspaceBreadcrumb
         ariaLabel="Thread breadcrumb"
-        className="flex-1 overflow-clip [overflow-clip-margin:2px]"
+        className={cn(
+          "flex-1 overflow-clip [overflow-clip-margin:2px]",
+          condensed &&
+            "max-md:h-[var(--workspace-topbar-height)] max-md:basis-full max-md:pr-24 max-md:touch:pr-16",
+        )}
       >
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
@@ -515,7 +524,7 @@ export const ChatHeader = memo(function ChatHeader({
           are parked-time actions, and the width goes to the readouts. */}
       <div
         data-chat-header-actions
-        className="flex shrink-0 items-center justify-end gap-2 touch:gap-3 drive:hidden"
+        className="flex shrink-0 items-center justify-end gap-2 touch:gap-3 max-md:ml-auto max-md:touch:gap-1.5 max-md:pb-1.5 drive:hidden"
       >
         {/* The small badges duplicate the big readouts; condensed headers drop
             them to make room for the readouts themselves. */}
@@ -540,7 +549,7 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipTrigger
             render={
               <Toggle
-                className="shrink-0 touch:size-12 touch:min-w-12"
+                className="shrink-0 touch:size-12 touch:min-w-12 max-md:touch:size-10 max-md:touch:min-w-10"
                 pressed={restartRequested}
                 onPressedChange={onToggleRestartRequest}
                 disabled={!canOperateThread}

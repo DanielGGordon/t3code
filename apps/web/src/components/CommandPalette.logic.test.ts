@@ -254,6 +254,11 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "new-thread-in" },
     });
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenRecentThreads" })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "recent-threads" },
+    });
   });
 
   it("preserves the mode on close and resets it on open", () => {

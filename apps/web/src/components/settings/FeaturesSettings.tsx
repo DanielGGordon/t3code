@@ -3,6 +3,7 @@ import {
   FileKeyIcon,
   GitBranchIcon,
   KeyboardIcon,
+  SmartphoneIcon,
   TabletSmartphoneIcon,
   PlayIcon,
   ShieldIcon,
@@ -83,6 +84,7 @@ export function FeaturesSettingsPanel() {
     composerRuntimeModeVisible: s.composerRuntimeModeVisible,
     composerKeyboardOnDemand: s.composerKeyboardOnDemand,
     touchLayout: s.touchLayout,
+    touchLayoutOnPhones: s.touchLayoutOnPhones,
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
@@ -162,6 +164,22 @@ export function FeaturesSettingsPanel() {
               checked={settings.touchLayout}
               onCheckedChange={(checked) => updateSettings({ touchLayout: checked })}
               aria-label="Use the touch / car layout on this device"
+            />
+          }
+        />
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <SmartphoneIcon className="size-3.5" />
+              Touch layout on phones
+            </span>
+          }
+          description="Phones get the touch layout automatically: bigger buttons, a tidier top bar, and two-finger swipes (up for a new chat, down for recent chats). Turn this off to keep the regular layout on this phone. Stored on this device only."
+          control={
+            <Switch
+              checked={settings.touchLayoutOnPhones}
+              onCheckedChange={(checked) => updateSettings({ touchLayoutOnPhones: checked })}
+              aria-label="Use the touch layout automatically on phones"
             />
           }
         />

@@ -56,6 +56,7 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
+import { useTouchLayout } from "./useTouchLayout";
 import * as ThreadUndo from "./threadUndo";
 import { showThreadUndoNotice } from "./showThreadUndoNotice";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -318,9 +319,9 @@ export function useThreadActions() {
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   // The touch / car layout always confirms: a fat-fingered delete is final.
-  const confirmThreadDelete = useClientSettings(
-    (settings) => settings.confirmThreadDelete || settings.touchLayout,
-  );
+  const touchLayout = useTouchLayout();
+  const confirmThreadDeleteSetting = useClientSettings((settings) => settings.confirmThreadDelete);
+  const confirmThreadDelete = confirmThreadDeleteSetting || touchLayout;
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
