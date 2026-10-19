@@ -63,7 +63,7 @@ its two gates) before it aborts with nothing changed.
 - **What counts as busy:** a thread with a `pending` (queued) or `running` run, read straight
   from `statev2.sqlite` by `scripts/deploy-idle-check.ts`. A run `waiting` on a person's
   approval or answer is not busy, since it survives a restart. Any busy poll restarts the
-  quiet clock; the server must stay quiet for `T3_IDLE_SECS` (default 60) in a row.
+  quiet clock; the server must stay quiet for `T3_IDLE_SECS` (default 120) in a row.
 - **Two gates:** one before the checkout, so the live server's files are not swapped under a
   conversation that is still working, and another after the build, right before the restart,
   since the install and build take minutes. The import timer is only paused between them.
