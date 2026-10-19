@@ -109,6 +109,8 @@ describe("reconcileMigrationLedger", () => {
         [61, "ThreadSnapshotWindowIndexes"],
         [62, "PullRequestReviewGuides"],
         [63, "AuthSessionClientIps"],
+        [64, "TwoFactor"],
+        [65, "Notifications"],
       ]);
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
 
@@ -165,7 +167,7 @@ describe("reconcileMigrationLedger", () => {
       assert.deepStrictEqual(executed[0], [33, "ProjectionThreadRestartRequest"]);
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [33, 56, 57, 58, 59, 60, 61, 62, 63],
+        [33, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65],
       );
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
       const threadColumns = yield* columnsOf("projection_threads");

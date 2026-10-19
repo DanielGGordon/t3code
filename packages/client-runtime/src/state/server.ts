@@ -1105,6 +1105,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    /** Fork: open external notifications, re-sent in full after every change on any client. */
+    notificationsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:notifications:live",
+      tag: WS_METHODS.notificationsSubscribe,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan.
     // Slow sources answer from cache first: that summary stays on screen, with
@@ -1337,6 +1342,16 @@ export function createServerEnvironmentAtoms<R, E>(
     // Deliberately not on the config lane: run-now blocks until the run is
     // dispatched, and a slow run must not stall settings/keybinding/provider
     // mutations (or other scheduled-task edits) queued behind it.
+    // Fork: external notifications. Acting waits on the source's callback (up to 5 s), so
+    // neither command shares the config lane.
+    actOnNotification: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:notifications:act",
+      tag: WS_METHODS.notificationsAct,
+    }),
+    dismissNotification: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:notifications:dismiss",
+      tag: WS_METHODS.notificationsDismiss,
+    }),
     runScheduledTaskNow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:run-now",
       tag: WS_METHODS.scheduledTasksRunNow,

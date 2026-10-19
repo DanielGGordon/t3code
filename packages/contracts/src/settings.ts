@@ -513,6 +513,10 @@ export const ClientSettingsSchema = Schema.Struct({
   headerProjectScriptsVisibility: HeaderControlVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
   ),
+  // "auto" shows the bell only while a notification is open; "show" keeps it always.
+  headerNotificationsVisibility: HeaderControlVisibility.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HEADER_CONTROL_VISIBILITY)),
+  ),
   // Large usage readouts rendered in the chat header's middle area on wide
   // viewports. All default off; toggled per device from the header menu.
   headerUsageCodexVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1847,6 +1851,7 @@ export const ClientSettingsPatch = Schema.Struct({
   headerGitActionsVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerOpenInEditorVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerProjectScriptsVisibility: Schema.optionalKey(HeaderControlVisibility),
+  headerNotificationsVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerUsageCodexVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageContextVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageGeminiSessionVisible: Schema.optionalKey(Schema.Boolean),

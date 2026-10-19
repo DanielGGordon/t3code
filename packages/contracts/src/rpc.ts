@@ -349,6 +349,13 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  NotificationActInput,
+  NotificationDismissInput,
+  NotificationError,
+  NotificationListResult,
+  NotificationMutationResult,
+} from "./notification.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -526,6 +533,11 @@ export const WS_METHODS = {
   secretsAnswerRequest: "secrets.answerRequest",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  // Fork: external notifications (docs/user/notifications-api.md)
+  notificationsSubscribe: "notifications.subscribe",
+  notificationsAct: "notifications.act",
+  notificationsDismiss: "notifications.dismiss",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -1855,6 +1867,28 @@ const WsScheduledTasksGetWebhookDeliveryRpc = Rpc.make(
   },
 );
 
+/** Streams every open notification: one snapshot on subscribe, then a fresh list after every change. */
+const WsNotificationsSubscribeRpc = Rpc.make(WS_METHODS.notificationsSubscribe, {
+  payload: Schema.Struct({}),
+  success: NotificationListResult,
+  error: Schema.Union([NotificationError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+/** Delivers the action to the source's callback; resolves the notification only if the source accepts. */
+const WsNotificationsActRpc = Rpc.make(WS_METHODS.notificationsAct, {
+  payload: NotificationActInput,
+  success: NotificationMutationResult,
+  error: Schema.Union([NotificationError, EnvironmentAuthorizationError]),
+});
+
+/** Closes a notification for every client without telling the source. */
+const WsNotificationsDismissRpc = Rpc.make(WS_METHODS.notificationsDismiss, {
+  payload: NotificationDismissInput,
+  success: NotificationMutationResult,
+  error: Schema.Union([NotificationError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -1948,6 +1982,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
+  WsNotificationsSubscribeRpc,
+  WsNotificationsActRpc,
+  WsNotificationsDismissRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,

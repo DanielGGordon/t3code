@@ -49,6 +49,7 @@ import {
   selectHeaderUsageStats,
   selectHeaderUsageStatsVisibility,
 } from "./HeaderUsageStats";
+import { NotificationBell } from "../notifications/NotificationBell";
 import { CacheKeepAliveToggle } from "./CacheKeepAliveToggle";
 import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
 import { TokenUsageBadge } from "./TokenUsageBadge";
@@ -540,6 +541,7 @@ export const ChatHeader = memo(function ChatHeader({
         {!condensed && claudeAccountUsage && usageBadges.claudeLimit && (
           <ClaudeAccountUsageBadge usage={claudeAccountUsage} headline={usageBadges.claudeLimit} />
         )}
+        <NotificationBell />
         <HeaderUsageStatsMenu
           condensed={condensed}
           visibility={usageStatsVisibility}

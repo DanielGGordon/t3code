@@ -107,6 +107,11 @@ running server when there is one) so its next send starts a fresh Claude session
 T3 history handed over as context (`apps/server/src/cli/session.ts`,
 `apps/server/src/import/ClaudeResumeBindings.ts`).
 
+## External notifications
+
+Outside services push notification cards over `/api/notifications` with a `notifications:write`
+token. Contract and setup: [`docs/user/notifications-api.md`](docs/user/notifications-api.md).
+
 ## Upstream sync PRs: NEVER squash-merge
 
 Sync PRs (`merge: upstream through <sha>`) must land as a **merge commit** or a

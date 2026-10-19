@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset, useSidebar, useSidebarVisibility } from "./ui/sidebar";
 import { isElectron } from "../env";
+import { NotificationBell } from "./notifications/NotificationBell";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
 export function NoActiveThreadState() {
@@ -42,6 +43,9 @@ export function NoActiveThreadState() {
               </span>
             </div>
           )}
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </WorkspacePageHeader>
 
         <Empty className="flex-1">

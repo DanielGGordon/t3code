@@ -33,6 +33,7 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { NightlyMobileBetaNotice } from "../components/NightlyMobileBeta";
 import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
+import { NotificationCoordinator } from "../components/notifications/NotificationCoordinator";
 import { ServerNoticeToast } from "../components/ServerNoticeToast";
 import { CacheExpiryBanners } from "../components/CacheExpiryBanners";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
@@ -274,6 +275,7 @@ function RootRouteView() {
           <PermissionUpdateNotice />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
           {primaryEnvironmentAuthenticated ? <ServerNoticeToast /> : null}
+          {primaryEnvironmentAuthenticated ? <NotificationCoordinator /> : null}
           <ProjectCloneToastCoordinator />
           <PullRequestGuideRunCoordinator />
           <HostedStaticEnvironmentBootstrap />

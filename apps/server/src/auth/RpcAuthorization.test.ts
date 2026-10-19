@@ -1,4 +1,8 @@
 import {
+  AuthAdministrativeScopes,
+  AuthNotificationsWriteScope,
+  AuthStandardClientScopes,
+  clientRpcRequiredScopes,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -65,6 +69,21 @@ describe("RPC authorization scopes", () => {
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
     }
+  });
+
+  it("lets readers watch notifications but requires operate access to act on or dismiss them", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.notificationsSubscribe)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    for (const method of [WS_METHODS.notificationsAct, WS_METHODS.notificationsDismiss]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, { id: "pps:h1" })).toEqual([
+        AuthOrchestrationOperateScope,
+      ]);
+    }
+    // The inbound HTTP scope is never part of a browser or pairing grant.
+    expect(AuthStandardClientScopes).not.toContain(AuthNotificationsWriteScope);
+    expect(AuthAdministrativeScopes).not.toContain(AuthNotificationsWriteScope);
   });
 
   it("allows relay status reads without granting relay installation access", () => {

@@ -54,6 +54,7 @@ const clientSettings: ClientSettings = {
   fontSmoothing: true,
   glassOpacity: 80,
   headerGitActionsVisibility: "auto",
+  headerNotificationsVisibility: "auto",
   headerOpenInEditorVisibility: "auto",
   headerProjectScriptsVisibility: "auto",
   headerUsageCodexVisible: true,
