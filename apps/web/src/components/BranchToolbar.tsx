@@ -760,6 +760,8 @@ export const BranchToolbar = memo(function BranchToolbar({
       data-compact={labelsOverflow ? "" : undefined}
       className={cn(
         "gap-1 text-xs font-normal text-muted-foreground/70",
+        // Finger-sized tap targets for the workspace and branch pickers.
+        "touch:text-sm touch:[&_button]:min-h-10 touch:[&_button]:text-sm",
         // A non-Git strip with no visible composer controls should occupy no
         // space, but its host must retain a prospective width so controls can
         // become visible again when the chat view grows.
