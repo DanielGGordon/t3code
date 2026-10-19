@@ -9,12 +9,15 @@ import {
   cacheKeepAliveState,
   cacheKeepAliveSupportsDriver,
   cacheKeptWarmByHeartbeat,
+  formatCacheExpiry,
+  promptCacheExpiresAtMs,
   type CacheKeepAliveState,
   type CacheKeepAliveThread,
 } from "@t3tools/shared/cacheKeepAlive";
 import { CirclePauseIcon, FlameIcon } from "lucide-react";
 import { memo, useState } from "react";
 
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
 import { useEnvironmentProviders } from "../../state/environments";
@@ -57,6 +60,15 @@ function describe(state: CacheKeepAliveState, formatTime: (ms: number) => string
 const HEARTBEAT_EXPLANATION =
   "The agent is babysitting background subagents and checks in on them every 15 minutes. Each check-in refreshes the prompt cache, and they stop on their own once the subagents finish.";
 
+/** "55m" until the thread's prompt cache lapses, or null with no live cache. Ticks each minute. */
+function useCacheExpiryLabel(thread: CacheKeepAliveThread | null): string | null {
+  const nowMinute = useNowMinute();
+  if (thread === null) return null;
+  const nowMs = Date.parse(`${nowMinute}:00Z`);
+  const expiresAtMs = promptCacheExpiresAtMs({ thread, nowMs });
+  return expiresAtMs === null ? null : formatCacheExpiry(expiresAtMs - nowMs);
+}
+
 function CacheKeepAliveTooltipText(props: {
   readonly thread: CacheKeepAliveThread;
   readonly heartbeat: boolean;
@@ -68,7 +80,13 @@ function CacheKeepAliveTooltipText(props: {
     const alsoOn = state.kind !== "off" && state.kind !== "paused";
     return `Kept warm by the subagent heartbeat. ${HEARTBEAT_EXPLANATION}${alsoOn ? " Keep cache warm is also on and takes over after that." : ""}`;
   }
-  return describe(state, (ms) => formatShortTimestamp(new Date(ms).toISOString(), timestampFormat));
+  const text = describe(state, (ms) =>
+    formatShortTimestamp(new Date(ms).toISOString(), timestampFormat),
+  );
+  const expiresAtMs = promptCacheExpiresAtMs(props);
+  return expiresAtMs === null
+    ? text
+    : `Prompt cache expires around ${formatShortTimestamp(new Date(expiresAtMs).toISOString(), timestampFormat)}. ${text}`;
 }
 
 /**
@@ -96,6 +114,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   const handleOpenChange = (open: boolean) => {
     if (open) setOpenedAtMs(Date.now());
   };
+  const expiryLabel = useCacheExpiryLabel(shell?.source ?? null);
   const heartbeat = shell !== null && cacheKeptWarmByHeartbeat(shell.source);
   const keepAlive = shell?.source.cacheKeepAlive ?? null;
   const keepAliveActive = keepAlive !== null && keepAlive.pausedAt === null;
@@ -133,7 +152,9 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   // Paused reads as not pressed: pressing it resumes with a fresh budget.
   const pressed = heartbeat || keepAliveActive;
   const Icon = paused ? CirclePauseIcon : FlameIcon;
-  const label = paused ? "Resume keeping the prompt cache warm" : "Keep cache warm";
+  const label = `${paused ? "Resume keeping the prompt cache warm" : "Keep cache warm"}${
+    expiryLabel === null ? "" : `, cache expires in ${expiryLabel}`
+  }`;
   return (
     <Tooltip onOpenChange={handleOpenChange}>
       <TooltipTrigger
@@ -161,13 +182,21 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
         }
       >
         {placement === "composer" ? (
-          <ComposerControlIcon
-            icon={Icon}
-            size={props.composerSize ?? "sm"}
-            className={pressed ? "text-accent-orange" : undefined}
-          />
+          <>
+            <ComposerControlIcon
+              icon={Icon}
+              size={props.composerSize ?? "sm"}
+              className={pressed ? "text-accent-orange" : undefined}
+            />
+            {expiryLabel !== null ? <span className="tabular-nums">{expiryLabel}</span> : null}
+          </>
         ) : (
-          <Icon className="size-3 touch:size-5" />
+          <>
+            <Icon className="size-3 touch:size-5" />
+            {expiryLabel !== null ? (
+              <span className="text-xs tabular-nums touch:text-sm">{expiryLabel}</span>
+            ) : null}
+          </>
         )}
       </TooltipTrigger>
       <TooltipPopup
