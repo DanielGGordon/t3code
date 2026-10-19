@@ -94,7 +94,12 @@ import {
 } from "@t3tools/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  canSnooze,
+  effectiveSnoozed,
+  resolveSnoozePresets,
+  threadWokeAt,
+} from "@t3tools/client-runtime/state/thread-settled";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import {
   deriveProviderSubagentStatus,
@@ -1594,7 +1599,7 @@ export default function ChatView(props: ChatViewProps) {
   const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
-  const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
+  const { settleThread, snoozeThread, pinThread, confirmAndUnpinThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -8128,6 +8133,43 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.snoozeHour") {
+        if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || !isServerThread || !activeThreadRef || !supportsSnooze) return;
+        // Pressing it again on a snoozed thread wakes it, like settle.
+        if (activeThreadSnoozed) {
+          void handleUnsnoozeActiveThread();
+          return;
+        }
+        const now = new Date();
+        if (!activeThreadShell || !canSnooze(activeThreadShell, { now: now.toISOString() })) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: "Can't snooze yet",
+              description: "This thread is waiting on you or has queued work.",
+            }),
+          );
+          return;
+        }
+        const preset = resolveSnoozePresets(now).find((candidate) => candidate.id === "hour");
+        if (!preset) return;
+        void snoozeThread(activeThreadRef, preset.snoozedUntil).then((result) => {
+          if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to snooze thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        });
+        return;
+      }
+
       if (command === "thread.pin") {
         if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
         event.preventDefault();
@@ -8402,14 +8444,19 @@ export default function ChatView(props: ChatViewProps) {
     keybindings,
     scriptKeybindings,
     handleUnsettleActiveThread,
+    handleUnsnoozeActiveThread,
+    activeThreadShell,
+    activeThreadSnoozed,
     isServerThread,
     serverConfig?.threadFind,
     onInterrupt,
     onToggleDiff,
     pinThread,
     settleThread,
+    snoozeThread,
     supportsPinning,
     supportsSettlement,
+    supportsSnooze,
     confirmAndUnpinThread,
     copyActiveThreadReference,
     getShortcutContext,

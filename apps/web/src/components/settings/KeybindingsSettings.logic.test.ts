@@ -285,6 +285,8 @@ describe("KeybindingsSettings.logic", () => {
     expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
     expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
     expect(commandLabel("preview.focusUrl")).toBe("Preview: Focus URL");
+    expect(commandLabel("thread.snoozeHour")).toBe("Thread: Snooze for 1 Hour");
+    expect(commandLabel("chat.newInProject.2")).toBe("Chat: New Thread in Project Slot 2");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
   });
 

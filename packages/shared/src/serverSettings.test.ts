@@ -1154,3 +1154,17 @@ describe("synchronized model preferences", () => {
     });
   });
 });
+
+describe("newThreadProjectSlots", () => {
+  it("assigns slots independently and clears one with null", () => {
+    const t3 = ProjectId.make("project-t3");
+    const alfred = ProjectId.make("project-alfred");
+    const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      newThreadProjectSlots: { "1": t3 },
+    });
+    const both = applyServerSettingsPatch(first, { newThreadProjectSlots: { "2": alfred } });
+    expect(both.newThreadProjectSlots).toEqual({ "1": t3, "2": alfred });
+    const cleared = applyServerSettingsPatch(both, { newThreadProjectSlots: { "1": null } });
+    expect(cleared.newThreadProjectSlots).toEqual({ "1": null, "2": alfred });
+  });
+});
