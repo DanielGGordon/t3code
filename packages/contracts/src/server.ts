@@ -951,6 +951,16 @@ export const ServerLifecycleLegacyThreadMigrationPayload = Schema.Struct({
 export type ServerLifecycleLegacyThreadMigrationPayload =
   typeof ServerLifecycleLegacyThreadMigrationPayload.Type;
 
+/**
+ * A message an operator pushes to every connected client (see `t3 notice`),
+ * e.g. "restarting to deploy". `id` lets a client show each notice once.
+ */
+export const ServerLifecycleNoticePayload = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+});
+export type ServerLifecycleNoticePayload = typeof ServerLifecycleNoticePayload.Type;
+
 export const ServerLifecycleStreamWelcomeEvent = Schema.Struct({
   version: Schema.Literal(1),
   sequence: NonNegativeInt,
@@ -976,10 +986,19 @@ export const ServerLifecycleStreamLegacyThreadMigrationEvent = Schema.Struct({
 export type ServerLifecycleStreamLegacyThreadMigrationEvent =
   typeof ServerLifecycleStreamLegacyThreadMigrationEvent.Type;
 
+export const ServerLifecycleStreamNoticeEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  sequence: NonNegativeInt,
+  type: Schema.Literal("notice"),
+  payload: ServerLifecycleNoticePayload,
+});
+export type ServerLifecycleStreamNoticeEvent = typeof ServerLifecycleStreamNoticeEvent.Type;
+
 export const ServerLifecycleStreamEvent = Schema.Union([
   ServerLifecycleStreamWelcomeEvent,
   ServerLifecycleStreamReadyEvent,
   ServerLifecycleStreamLegacyThreadMigrationEvent,
+  ServerLifecycleStreamNoticeEvent,
 ]);
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
 

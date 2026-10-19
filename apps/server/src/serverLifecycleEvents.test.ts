@@ -2,6 +2,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertTrue } from "@effect/vitest/utils";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
 import * as Option from "effect/Option";
 
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -73,4 +74,24 @@ it.effect(
       const migration = snapshot.events.find((event) => event.type === "legacyThreadMigration");
       assert.equal(migration?.payload.status, "complete");
     }).pipe(Effect.provide(ServerLifecycleEvents.layer)),
+);
+
+it.effect("replays an operator notice to late subscribers only for a couple of minutes", () =>
+  Effect.gen(function* () {
+    const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+    yield* lifecycleEvents.publish({
+      version: 1,
+      type: "notice",
+      payload: { id: "1", message: "Restarted to deploy" },
+    });
+    assert.deepEqual(
+      (yield* lifecycleEvents.snapshot).events.map((event) => event.type),
+      ["notice"],
+    );
+
+    yield* TestClock.adjust(ServerLifecycleEvents.NOTICE_REPLAY_WINDOW_MS + 1);
+    const expired = yield* lifecycleEvents.snapshot;
+    assert.deepEqual(expired.events, []);
+    assert.equal(expired.sequence, 1);
+  }).pipe(Effect.provide(ServerLifecycleEvents.layer)),
 );

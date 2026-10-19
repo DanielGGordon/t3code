@@ -5,7 +5,30 @@
 # Run this from a T3 chat. The chat lives INSIDE t3code.service, so the chat's own
 # session WILL drop when the service restarts. The restart is fired as a detached
 # systemd unit so it completes regardless; results land in $STATUS_LOG.
+#
+#   redeploy.sh [--when-idle] [--ignore-thread <id>]...
+#
+# --when-idle waits until no T3 conversation has had a queued or running turn for
+# T3_IDLE_SECS (default 60) before touching the checkout, and again before the restart
+# (the build takes minutes). The chat running this script is excluded automatically
+# when it lives in a git worktree; otherwise pass its id with --ignore-thread.
+# Either way, once the new server answers, every connected client gets a notice.
 set -euo pipefail
+
+WHEN_IDLE=0
+IGNORE_THREADS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --when-idle) WHEN_IDLE=1 ;;
+    --ignore-thread)
+      [ $# -ge 2 ] || { echo "redeploy: --ignore-thread needs a thread id" >&2; exit 2; }
+      IGNORE_THREADS+=("$2")
+      shift
+      ;;
+    *) echo "redeploy: unknown argument '$1' (usage: redeploy.sh [--when-idle] [--ignore-thread <id>]...)" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 DEPLOY_DIR="${T3_DEPLOY_DIR:-/home/dgordon/projects/meta/t3code-v2}"
 SERVICE="${T3_SERVICE:-t3code.service}"
@@ -20,6 +43,18 @@ STATUS_LOG="${T3_REDEPLOY_LOG:-/tmp/t3-redeploy-status.log}"
 IMPORT_TIMER="${T3_IMPORT_TIMER:-t3-claude-import.timer}"
 IMPORT_SERVICE="${T3_IMPORT_SERVICE:-t3-claude-import.service}"
 IMPORT_WAIT_SECS="${T3_IMPORT_WAIT_SECS:-900}"
+# --when-idle: how long the server must be quiet, how long to wait for that in each
+# of the two gates (before the checkout, and again right before the restart), and
+# where the state lives. T3_BASE_DIR must match the deployed server's --base-dir.
+IDLE_SECS="${T3_IDLE_SECS:-60}"
+IDLE_MAX_WAIT_SECS="${T3_IDLE_MAX_WAIT_SECS:-7200}"
+IDLE_POLL_SECS="${T3_IDLE_POLL_SECS:-5}"
+T3_BASE_DIR="${T3_BASE_DIR:-$HOME/.t3}"
+MISE_BIN="${T3_MISE_BIN:-$HOME/.local/bin/mise}"
+# The repo this script runs from (an agent worktree, usually), not the deploy dir:
+# it carries the idle checker and names the chat that is running the deploy.
+SKILL_REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+CALLER_TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 
 # --- guard: only run on the actual deploy host ---
 if [ ! -e "$DEPLOY_DIR/.git" ]; then
@@ -55,6 +90,54 @@ trap resume_import_timer EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Block until no conversation has been working for IDLE_SECS in a row. Any busy poll
+# restarts the clock. Aborts (exit 1) after IDLE_MAX_WAIT_SECS so a stuck run cannot
+# hold a deploy forever; --ignore-thread <id> releases a run you know is a zombie.
+wait_until_idle() {
+  local label="$1" args=() id start now quiet_since="" last_report="" out rc
+  for id in "${IGNORE_THREADS[@]}"; do args+=(--ignore-thread "$id"); done
+  if [ -n "$CALLER_TOPLEVEL" ] && [ "$CALLER_TOPLEVEL" != "$DEPLOY_DIR" ]; then
+    args+=(--ignore-worktree "$CALLER_TOPLEVEL")
+  fi
+  start="$(date +%s)"
+  echo "==> Waiting for T3 to be idle for ${IDLE_SECS}s ($label)"
+  while :; do
+    rc=0
+    out="$("$MISE_BIN" exec node@24 -- node "$SKILL_REPO/scripts/deploy-idle-check.ts" \
+      --base-dir "$T3_BASE_DIR" "${args[@]}")" || rc=$?
+    now="$(date +%s)"
+    case "$rc" in
+      0)
+        [ -n "$quiet_since" ] || { quiet_since="$now"; echo "    idle — confirming for ${IDLE_SECS}s"; }
+        if [ $((now - quiet_since)) -ge "$IDLE_SECS" ]; then
+          echo "    idle for ${IDLE_SECS}s — proceeding"
+          return 0
+        fi
+        ;;
+      1)
+        if [ -n "$quiet_since" ]; then echo "    activity resumed — restarting the ${IDLE_SECS}s clock"; fi
+        quiet_since=""
+        if [ "$out" != "$last_report" ]; then
+          echo "    busy:"
+          printf '      %s\n' "$out"
+          last_report="$out"
+        fi
+        ;;
+      *)
+        echo "redeploy: could not read T3 state to check for activity (idle check exit $rc) — aborting." >&2
+        exit 1
+        ;;
+    esac
+    if [ $((now - start)) -ge "$IDLE_MAX_WAIT_SECS" ]; then
+      echo "redeploy: T3 was not idle for ${IDLE_SECS}s within ${IDLE_MAX_WAIT_SECS}s ($label) — aborting; nothing was restarted." >&2
+      exit 1
+    fi
+    sleep "$IDLE_POLL_SECS"
+  done
+}
+
+[ "$WHEN_IDLE" = 1 ] && wait_until_idle "before checkout"
 
 PREV_HEAD="$(git -C "$DEPLOY_DIR" rev-parse HEAD)"
 if systemctl --user cat "$IMPORT_TIMER" >/dev/null 2>&1 &&
@@ -101,6 +184,9 @@ echo "==> Building web bundle"
 # Electron desktop app, which needs libsecret headers this headless box lacks.
 ( cd "$DEPLOY_DIR" && pnpm --filter @t3tools/web build )
 
+# The build takes minutes, so conversations may have started since the first gate.
+[ "$WHEN_IDLE" = 1 ] && wait_until_idle "before restart"
+
 echo "==> Build OK. Firing detached restart of $SERVICE"
 echo "    (this chat's session will drop when the server restarts)"
 UNIT="t3-redeploy-$(date +%s)"
@@ -118,6 +204,13 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
     [ \"\$code\" = '200' ] && break
     sleep 1
   done
+  # Tell every client that reconnects. Done from the NEW build against the NEW server:
+  # a CLI run from the new checkout before the restart could migrate the database the
+  # old server is still using. Best effort: a failed health wait or notice never blocks.
+  notice=skipped
+  if [ \"\$code\" = '200' ]; then
+    if ( cd '$DEPLOY_DIR/apps/server' && '$MISE_BIN' exec node@24 -- node src/bin.ts notice 'T3 was updated and restarted (now at $TARGET_SHORT).' --base-dir '$T3_BASE_DIR' ) >/dev/null 2>&1; then notice=published; else notice=failed; fi
+  fi
   resume_timer
   {
     echo \"redeploy \$(date -Is)\"
@@ -125,6 +218,7 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
     echo \"service-active=\$(systemctl --user is-active $SERVICE)\"
     echo \"loopback-3773=\$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null)\"
     echo \"public=\$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
+    echo \"notice=\$notice\"
     echo \"served-commit=\$(git -C '$DEPLOY_DIR' rev-parse --short HEAD)\"
     echo \"import-timer=\$(systemctl --user is-active '$IMPORT_TIMER' 2>/dev/null) (paused-by-redeploy=$TIMER_PAUSED)\"
   } > '$STATUS_LOG' 2>&1

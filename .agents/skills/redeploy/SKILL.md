@@ -1,6 +1,6 @@
 ---
 name: redeploy
-description: Redeploy this self-hosted T3 Code prod server (https://t3.gordonlabs.dev) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main. Only runs on the T3 deploy host.
+description: Redeploy this self-hosted T3 Code prod server (https://t3.gordonlabs.dev) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main, or wants it deployed "when idle" / once nothing is running. Only runs on the T3 deploy host.
 ---
 
 # Redeploy T3 Code (prod)
@@ -50,6 +50,36 @@ snapshot would be silently lost once the new server started on the already-exist
 Don't run other `t3` CLI commands from the deploy checkout between the checkout and the
 restart either.
 
+## Deploying only when T3 is idle (`--when-idle`)
+
+```bash
+bash "$(git rev-parse --show-toplevel)/.claude/skills/redeploy/redeploy.sh" --when-idle
+```
+
+Use it when the user says to deploy "when nothing is running". Run it in the background
+(`run_in_background`): it can wait for up to two hours (`T3_IDLE_MAX_WAIT_SECS`, in each of
+its two gates) before it aborts with nothing changed.
+
+- **What counts as busy:** a thread with a `pending` (queued) or `running` run, read straight
+  from `statev2.sqlite` by `scripts/deploy-idle-check.ts`. A run `waiting` on a person's
+  approval or answer is not busy, since it survives a restart. Any busy poll restarts the
+  quiet clock; the server must stay quiet for `T3_IDLE_SECS` (default 60) in a row.
+- **Two gates:** one before the checkout, so the live server's files are not swapped under a
+  conversation that is still working, and another after the build, right before the restart,
+  since the install and build take minutes. The import timer is only paused between them.
+- **Your own chat is excluded** when it runs in a `t3code/*` worktree (the idle check matches
+  the thread by worktree path). From a chat in the main checkout, pass its thread id with
+  `--ignore-thread <id>`; the same flag releases a run you know is a zombie that would
+  otherwise hold the deploy.
+- **While it waits** it prints each busy thread (id, status, title) whenever that list changes.
+- **Notice:** after every redeploy, plain or `--when-idle`, the detached unit publishes
+  "T3 was updated and restarted (now at <sha>)" with `t3 notice` once the new server answers.
+  Every connected client shows it as a warning toast, and clients that reconnect within two
+  minutes still see it. It runs from the new build against the new server on purpose: the
+  new checkout's CLI must not touch the database before the old server has stopped. The
+  status log gains `notice=published|failed|skipped`; a failed notice never fails the deploy.
+  `t3 notice "<message>"` also works on its own, for any announcement.
+
 ## CRITICAL — this session will drop
 
 This chat runs _inside_ `t3code.service`. When the service restarts, **this chat's own
@@ -72,7 +102,7 @@ Then:
   cat /tmp/t3-redeploy-status.log
   ```
   A healthy result shows `service-active=active`, `loopback-3773=200`, `public=200` (https://t3.gordonlabs.dev/),
-  `served-commit` matching the target, and `import-timer=active` (when
+  `notice=published`, `served-commit` matching the target, and `import-timer=active` (when
   `paused-by-redeploy=1`).
 - **If the script aborts**, confirm the timer came back:
   `systemctl --user is-active t3-claude-import.timer` (start it by hand if the trap could not).

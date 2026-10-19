@@ -33,6 +33,7 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { NightlyMobileBetaNotice } from "../components/NightlyMobileBeta";
 import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
+import { ServerNoticeToast } from "../components/ServerNoticeToast";
 import { CacheExpiryBanners } from "../components/CacheExpiryBanners";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
@@ -272,6 +273,7 @@ function RootRouteView() {
           <SlowRpcRequestToastCoordinator />
           <PermissionUpdateNotice />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
+          {primaryEnvironmentAuthenticated ? <ServerNoticeToast /> : null}
           <ProjectCloneToastCoordinator />
           <PullRequestGuideRunCoordinator />
           <HostedStaticEnvironmentBootstrap />
