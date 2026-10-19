@@ -72,6 +72,7 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
+import { NewThreadProjectSlotsSettings } from "./NewThreadProjectSlotsSettings";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -1518,6 +1519,8 @@ export function KeybindingsSettingsPanel() {
             />
           </SettingsGroup>
         ) : null}
+
+        {query.trim() === "" ? <NewThreadProjectSlotsSettings keybindings={keybindings} /> : null}
 
         {groups.length > 0 ? (
           <KeybindingsGroups
