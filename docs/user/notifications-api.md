@@ -6,6 +6,14 @@ live. A card can carry up to four buttons; clicking one sends a signed request b
 which decides what happens. Dismissing a card or the service resolving it closes it for every
 client at once.
 
+## Where you see them
+
+Open cards appear under the bell in the chat header (also on the empty "no active thread" page). The
+bell is hidden while nothing is open; Settings -> Features -> Notifications keeps it always shown or
+always hidden on this device. A new card also raises a toast, and an OS notification when the tab is
+in the background and browser notifications are already allowed in Settings -> Notifications.
+Dismissing a card clears it in every browser, and each button sends your answer back to the service.
+
 This page is the contract for services that push notifications and for the receivers that handle
 button clicks.
 

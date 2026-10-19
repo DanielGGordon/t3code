@@ -1,5 +1,6 @@
 import {
   ActivityIcon,
+  BellIcon,
   FileKeyIcon,
   GitBranchIcon,
   KeyboardIcon,
@@ -34,7 +35,10 @@ import {
 
 type HeaderControlSettingKey = Extract<
   keyof ClientSettings,
-  "headerGitActionsVisibility" | "headerOpenInEditorVisibility" | "headerProjectScriptsVisibility"
+  | "headerGitActionsVisibility"
+  | "headerOpenInEditorVisibility"
+  | "headerProjectScriptsVisibility"
+  | "headerNotificationsVisibility"
 >;
 
 const HEADER_CONTROL_ROWS: ReadonlyArray<{
@@ -42,6 +46,8 @@ const HEADER_CONTROL_ROWS: ReadonlyArray<{
   title: string;
   description: string;
   icon: ReactNode;
+  /** Wording of the "auto" status; defaults to the condensed-chrome rule. */
+  autoStatus?: string;
 }> = [
   {
     key: "headerGitActionsVisibility",
@@ -62,6 +68,14 @@ const HEADER_CONTROL_ROWS: ReadonlyArray<{
     description: "Run and manage project scripts (the “Add Action” control).",
     icon: <PlayIcon className="size-3.5" />,
   },
+  {
+    key: "headerNotificationsVisibility",
+    title: "Notifications",
+    description:
+      "Bell with pending notifications from outside services, such as held messages awaiting approval.",
+    icon: <BellIcon className="size-3.5" />,
+    autoStatus: "Auto — shown only while a notification is open",
+  },
 ];
 
 function visibilityStatusLabel(visibility: HeaderControlVisibility, condensed: boolean): string {
@@ -79,6 +93,7 @@ export function FeaturesSettingsPanel() {
     headerGitActionsVisibility: s.headerGitActionsVisibility,
     headerOpenInEditorVisibility: s.headerOpenInEditorVisibility,
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
+    headerNotificationsVisibility: s.headerNotificationsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
     composerRuntimeModeVisible: s.composerRuntimeModeVisible,
@@ -99,7 +114,9 @@ export function FeaturesSettingsPanel() {
       <SettingsSection title="Header actions">
         {HEADER_CONTROL_ROWS.map((row) => {
           const visibility = settings[row.key];
-          const effective = resolveHeaderControlVisibility(visibility, condensed);
+          const effective = row.autoStatus
+            ? visibility !== "hide"
+            : resolveHeaderControlVisibility(visibility, condensed);
           return (
             <SettingsRow
               key={row.key}
@@ -110,7 +127,11 @@ export function FeaturesSettingsPanel() {
                 </span>
               }
               description={row.description}
-              status={visibilityStatusLabel(visibility, condensed)}
+              status={
+                row.autoStatus && visibility === "auto"
+                  ? row.autoStatus
+                  : visibilityStatusLabel(visibility, condensed)
+              }
               resetAction={
                 visibility !== DEFAULT_HEADER_CONTROL_VISIBILITY ? (
                   <SettingResetButton
