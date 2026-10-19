@@ -153,6 +153,8 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import { voiceTranscriptionRouteLayer } from "./voice/http.ts";
 import { forkRouteLayer } from "./fork/http.ts";
+import * as NotificationService from "./notifications/NotificationService.ts";
+import { notificationRouteLayer } from "./notifications/http.ts";
 import * as ClaudeResumeBindings from "./import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "./import/ClaudeTranscriptSync.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -597,6 +599,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.mergeAll(ClaudeTranscriptSync.layer, ClaudeResumeBindings.layer).pipe(
     Layer.provide(RuntimeLayer.layerEventSink),
   ),
+  // Fork: external notifications. One instance serves the inbound HTTP routes and the
+  // WebSocket RPCs, so a push reaches every subscriber.
+  NotificationService.layer,
   // Catches overrides left behind by a project deleted before this cleanup
   // existed, or by a cleanup write that failed. See ProjectService.delete
   // for the normal (on-delete) path.
@@ -733,6 +738,8 @@ const layerMakeRoutes = Layer.mergeAll(
     voiceTranscriptionRouteLayer,
     // Fork: POST /api/fork/import/claude-sync, /api/fork/session/reset (t3 CLI).
     forkRouteLayer,
+    // Fork: PUT /api/notifications/:source/:sourceId and .../resolve (external notifications).
+    notificationRouteLayer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
