@@ -170,7 +170,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             />
           ) : (
             <Toggle
-              className="shrink-0 touch:size-12 touch:min-w-12 max-md:touch:size-10 max-md:touch:min-w-10"
+              className="shrink-0 touch:h-12 touch:min-w-12 max-md:touch:h-10 max-md:touch:min-w-10"
               pressed={pressed}
               onPressedChange={handlePressedChange}
               disabled={!canOperateThread}
@@ -191,12 +191,14 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             {expiryLabel !== null ? <span className="tabular-nums">{expiryLabel}</span> : null}
           </>
         ) : (
-          <>
+          // The button grows with the countdown instead of clipping it; the
+          // padding lives here because Toggle owns its own.
+          <span className="flex items-center gap-1.5 touch:px-1.5">
             <Icon className="size-3 touch:size-5" />
             {expiryLabel !== null ? (
               <span className="text-xs tabular-nums touch:text-sm">{expiryLabel}</span>
             ) : null}
-          </>
+          </span>
         )}
       </TooltipTrigger>
       <TooltipPopup
