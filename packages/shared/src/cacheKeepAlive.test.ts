@@ -11,6 +11,7 @@ import {
   CACHE_KEEP_ALIVE_LEAD_MS,
   PROMPT_CACHE_TTL_MS,
   cacheKeepAliveState,
+  cacheKeptWarmByHeartbeat,
   isCacheKeepAliveMessageId,
   type CacheKeepAliveThread,
 } from "./cacheKeepAlive.ts";
@@ -160,5 +161,41 @@ describe("isCacheKeepAliveMessageId", () => {
     expect(isCacheKeepAliveMessageId("cache-keep-alive:thread:run")).toBe(true);
     expect(isCacheKeepAliveMessageId("message:1")).toBe(false);
     expect(isCacheKeepAliveMessageId(undefined)).toBe(false);
+  });
+});
+
+describe("cacheKeptWarmByHeartbeat", () => {
+  const withTasks = (
+    pendingBackgroundTasks: Parameters<
+      typeof cacheKeptWarmByHeartbeat
+    >[0]["pendingBackgroundTasks"],
+  ) => cacheKeptWarmByHeartbeat({ pendingBackgroundTasks });
+
+  it("spots the armed heartbeat by its description or its command", () => {
+    expect(withTasks([{ taskId: "b1", kind: "command", description: "Subagent heartbeat" }])).toBe(
+      true,
+    );
+    expect(
+      withTasks([{ taskId: "b1", kind: "command", description: "Arm the subagent heartbeat" }]),
+    ).toBe(true);
+    expect(
+      withTasks([
+        {
+          taskId: "b1",
+          kind: "command",
+          description: "bash ~/dotfiles/claude/bin/subagent-status.sh --wait 900",
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores other background work", () => {
+    expect(withTasks([])).toBe(false);
+    expect(withTasks(undefined)).toBe(false);
+    expect(withTasks([{ taskId: "b1", kind: "command", description: "vp run dev" }])).toBe(false);
+    expect(withTasks([{ taskId: "b1", kind: "command" }])).toBe(false);
+    expect(
+      withTasks([{ taskId: "a1", kind: "subagent", description: "Subagent heartbeat review" }]),
+    ).toBe(false);
   });
 });

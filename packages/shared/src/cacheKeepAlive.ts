@@ -185,6 +185,29 @@ export function cacheKeepAliveState(input: {
   };
 }
 
+/**
+ * Fork: the maintainer's Claude Code setup babysits background subagents with
+ * a heartbeat, a background `subagent-status.sh --wait` command that wakes the
+ * agent every 15 minutes until the work is done (dotfiles
+ * `claude/bin/subagent-status.sh`). Each wake is a request, so it keeps the
+ * prompt cache warm. The roster names a background command by its Bash
+ * description, or by the command itself when it has none; the dotfiles hook
+ * asks for the description "Subagent heartbeat".
+ */
+const SUBAGENT_HEARTBEAT_PATTERN = /subagent[- ]heartbeat|subagent-status\.sh/i;
+
+/** Whether the subagent heartbeat is armed on this thread right now. */
+export function cacheKeptWarmByHeartbeat(
+  thread: Pick<OrchestrationV2ThreadShell, "pendingBackgroundTasks">,
+): boolean {
+  return (thread.pendingBackgroundTasks ?? []).some(
+    (task) =>
+      task.kind === "command" &&
+      task.description !== undefined &&
+      SUBAGENT_HEARTBEAT_PATTERN.test(task.description),
+  );
+}
+
 export function isCacheKeepAliveMessageId(messageId: string | undefined): boolean {
   return messageId?.startsWith(CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX) === true;
 }

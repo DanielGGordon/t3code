@@ -85,6 +85,11 @@ pings in a row with no message from you (about 8 hours), keep-warm pauses; your 
 message, or clicking the button again, resumes it. Each ping is a small turn: it
 reads the whole context from the cache, so it uses some of your limits.
 
+While the agent is babysitting background subagents with the subagent heartbeat (a
+background check-in every 15 minutes), the button shows on even if you never turned it on:
+each check-in refreshes the cache. That stops by itself once the subagents finish, so
+clicking the button then only explains this.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which
