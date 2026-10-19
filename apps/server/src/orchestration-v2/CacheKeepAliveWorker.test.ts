@@ -351,8 +351,9 @@ it.effect("turns keep-alive on and off as UI state, not activity", () =>
     yield* setKeepAlive(threadId, false);
     const off = yield* shellOf(threadId);
     assert.isNull(off.cacheKeepAlive ?? null);
-    // The context is only computed while keep-alive is on.
-    assert.isNull(off.cacheKeepAliveContext ?? null);
+    // A Claude thread keeps its context with the toggle off, so the header can
+    // still count down to expiry.
+    expect(off.cacheKeepAliveContext).toMatchObject({ driver, hasQueuedRun: false });
     assert.deepEqual(off.updatedAt, before.updatedAt);
   }).pipe(Effect.provide(layerTest)),
 );
