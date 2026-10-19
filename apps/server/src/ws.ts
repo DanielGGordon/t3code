@@ -3218,18 +3218,15 @@ export const layer = Layer.unwrap(
               Layer.merge(
                 RpcAuthorization.layer(
                   session.scopes,
-                  sessions.twoFactor
-                    .requireVerified(session.sessionId)
-                    .pipe(
-                      Effect.mapError(
-                        () =>
-                          new EnvironmentAuthorizationError({
-                            message:
-                              "Session verification required. Enter your authenticator code.",
-                            requiredScope: AuthOrchestrationOperateScope,
-                          }),
-                      ),
+                  sessions.twoFactor.requireVerified(session).pipe(
+                    Effect.mapError(
+                      () =>
+                        new EnvironmentAuthorizationError({
+                          message: "Session verification required. Enter your authenticator code.",
+                          requiredScope: AuthOrchestrationOperateScope,
+                        }),
                     ),
+                  ),
                 ),
                 rpcInstrumentationLayer,
               ),
@@ -3287,7 +3284,7 @@ export const layer = Layer.unwrap(
           () =>
             Effect.raceFirst(
               rpcWebSocketHttpEffect,
-              sessions.awaitInvalidation(session.sessionId).pipe(
+              sessions.awaitInvalidation(session).pipe(
                 Effect.as(HttpServerResponse.empty()),
                 Effect.catchTags({
                   SessionCredentialVerificationError: (error) =>

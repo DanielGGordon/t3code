@@ -21,10 +21,14 @@ authenticator is shared for this environment, so only share it with people who
 should have access to all its sessions.
 
 The verification screen is available in the server-hosted web app and its desktop
-shell. Bearer and MCP sessions are also enforced: clients without a verification UI
-must submit their code to `POST /api/auth/two-factor` with their session authorization
-and `{ "action": "verify", "code": "123456" }`. This verifies that token's session
-only. Native mobile verification UI is not maintained on this fork.
+shell. Paired bearer tokens and MCP sign-ins are also enforced: clients without a
+verification UI must submit their code to `POST /api/auth/two-factor` with their
+session authorization and `{ "action": "verify", "code": "123456" }`. This verifies
+that token's session only. Native mobile verification UI is not maintained on this fork.
+
+Tokens issued on the host with `t3 auth session issue` never need a code, so services on
+that machine keep working. Re-issue any such token created before this exemption
+existed; older ones are treated like paired tokens.
 
 ## T3 Connect
 

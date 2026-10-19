@@ -14,6 +14,17 @@ import { base32, matchingTotpStep } from "./totp.ts";
 export const VERIFICATION_TTL_MS = 48 * 60 * 60 * 1000;
 const SETUP_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * The session a check is about. `issuedLocally` comes from the server-signed
+ * credential (see `SessionStore.issue`) and exempts it: only `t3` CLI commands
+ * run on this machine against its T3 home mint such sessions, which already
+ * takes more than a second factor. Pairing and OAuth never set it.
+ */
+export interface TwoFactorSession {
+  readonly sessionId: AuthSessionId;
+  readonly issuedLocally?: boolean;
+}
+
 export class TwoFactorError extends Schema.TaggedError<TwoFactorError>()("TwoFactorError", {
   message: Schema.String,
 }) {}
@@ -66,19 +77,20 @@ export const make = Effect.gen(function* () {
           }),
       });
     });
-  const status = Effect.fn("TwoFactor.status")(function* (sessionId: AuthSessionId) {
+  const status = Effect.fn("TwoFactor.status")(function* (session: TwoFactorSession) {
     const enabled = (yield* read()).length > 0;
+    if (session.issuedLocally) return { enabled, required: false, expiresAt: null };
     const rows = yield* sql<{
       verified_at: number;
-    }>`SELECT verified_at FROM auth_two_factor_sessions WHERE session_id = ${sessionId}`;
+    }>`SELECT verified_at FROM auth_two_factor_sessions WHERE session_id = ${session.sessionId}`;
     const expiresAt = enabled && rows[0] ? rows[0].verified_at + VERIFICATION_TTL_MS : null;
     const now = yield* Clock.currentTimeMillis;
     return { enabled, required: enabled && (expiresAt === null || now >= expiresAt), expiresAt };
   });
   const requireVerified = Effect.fn("TwoFactor.requireVerified")(function* (
-    sessionId: AuthSessionId,
+    session: TwoFactorSession,
   ) {
-    if ((yield* status(sessionId)).required)
+    if ((yield* status(session)).required)
       return yield* new TwoFactorError({ message: "Two-factor verification required." });
   });
   const begin = Effect.fn("TwoFactor.begin")(function* (sessionId: AuthSessionId) {
@@ -186,12 +198,12 @@ export const make = Effect.gen(function* () {
     yield* PubSub.publish(changes, undefined);
     return { verified: true };
   }, lock.withPermits(1));
-  const awaitRequired = (sessionId: AuthSessionId) =>
+  const awaitRequired = (session: TwoFactorSession) =>
     Effect.scoped(
       Effect.gen(function* () {
         const subscription = yield* PubSub.subscribe(changes);
         while (true) {
-          const current = yield* status(sessionId);
+          const current = yield* status(session);
           if (current.required) return;
           const now = yield* Clock.currentTimeMillis;
           yield* Effect.raceFirst(
