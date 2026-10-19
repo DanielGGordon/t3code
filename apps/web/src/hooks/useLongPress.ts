@@ -1,11 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
+import { useStableCallback } from "./useStableCallback";
 import { GestureClickSuppressor, isGesturePointer } from "./touchGestures";
 
 /**
@@ -44,6 +39,13 @@ interface LongPressGesture {
   timer: number | null;
 }
 
+function clearTimer(gesture: LongPressGesture) {
+  if (gesture.timer !== null) {
+    window.clearTimeout(gesture.timer);
+    gesture.timer = null;
+  }
+}
+
 export interface LongPressPointerHandlers {
   onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -66,121 +68,105 @@ export function useLongPress(options: {
   const suppressorRef = useRef(new GestureClickSuppressor());
   const removeGuardRef = useRef<(() => void) | null>(null);
   const guardTimerRef = useRef<number | null>(null);
-  const onLongPressRef = useRef(options.onLongPress);
-  onLongPressRef.current = options.onLongPress;
+  const onLongPress = useStableCallback(options.onLongPress);
 
-  const clearTimer = useCallback((gesture: LongPressGesture) => {
-    if (gesture.timer !== null) {
-      window.clearTimeout(gesture.timer);
-      gesture.timer = null;
-    }
-  }, []);
+  const fire = useStableCallback((gesture: LongPressGesture) => {
+    if (gesture.state !== "pending") return;
+    gesture.state = "fired";
+    clearTimer(gesture);
+    suppressorRef.current.suppress(performance.now());
+    onLongPress({ x: gesture.x, y: gesture.y });
+  });
 
-  const fire = useCallback(
-    (gesture: LongPressGesture) => {
-      if (gesture.state !== "pending") return;
-      gesture.state = "fired";
-      clearTimer(gesture);
-      suppressorRef.current.suppress(performance.now());
-      onLongPressRef.current({ x: gesture.x, y: gesture.y });
-    },
-    [clearTimer],
-  );
-
-  const removeGuard = useCallback(() => {
+  const removeGuard = useStableCallback(() => {
     if (guardTimerRef.current !== null) {
       window.clearTimeout(guardTimerRef.current);
       guardTimerRef.current = null;
     }
     removeGuardRef.current?.();
     removeGuardRef.current = null;
-  }, []);
+  });
 
-  const installGuard = useCallback(
-    (gesture: LongPressGesture) => {
-      removeGuard();
-      const onContextMenu = (event: MouseEvent) => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        fire(gesture);
-      };
-      window.addEventListener("contextmenu", onContextMenu, true);
-      removeGuardRef.current = () => window.removeEventListener("contextmenu", onContextMenu, true);
-    },
-    [fire, removeGuard],
-  );
+  const installGuard = useStableCallback((gesture: LongPressGesture) => {
+    removeGuard();
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      fire(gesture);
+    };
+    window.addEventListener("contextmenu", onContextMenu, true);
+    removeGuardRef.current = () => window.removeEventListener("contextmenu", onContextMenu, true);
+  });
 
-  const cancel = useCallback(() => {
+  const cancel = useStableCallback(() => {
     const gesture = gestureRef.current;
     if (gesture === null) return;
     clearTimer(gesture);
     if (gesture.state === "pending") gesture.state = "cancelled";
-  }, [clearTimer]);
+  });
 
-  const release = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      const gesture = gestureRef.current;
-      if (gesture === null || gesture.pointerId !== event.pointerId) return;
-      gestureRef.current = null;
-      clearTimer(gesture);
-      // A release before the delay is a plain tap; the guard stays up only
-      // to swallow (and honor) a trailing native contextmenu.
-      guardTimerRef.current = window.setTimeout(removeGuard, NATIVE_CONTEXT_MENU_GRACE_MS);
-    },
-    [clearTimer, removeGuard],
-  );
+  const release = useStableCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = gestureRef.current;
+    if (gesture === null || gesture.pointerId !== event.pointerId) return;
+    gestureRef.current = null;
+    clearTimer(gesture);
+    // A release before the delay is a plain tap; the guard stays up only
+    // to swallow (and honor) a trailing native contextmenu.
+    guardTimerRef.current = window.setTimeout(removeGuard, NATIVE_CONTEXT_MENU_GRACE_MS);
+  });
 
   useEffect(
     () => () => {
       if (gestureRef.current !== null) clearTimer(gestureRef.current);
       removeGuard();
     },
-    [clearTimer, removeGuard],
+    [removeGuard],
   );
 
-  const handlers = useMemo<LongPressPointerHandlers | undefined>(() => {
-    if (!enabled) return undefined;
-    return {
-      onPointerDown: (event) => {
-        if (!isGesturePointer(event.pointerType) || event.button !== 0) return;
-        if ((event.target as HTMLElement).closest("input, textarea")) return;
-        if (gestureRef.current !== null) clearTimer(gestureRef.current);
-        const gesture: LongPressGesture = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          x: event.clientX,
-          y: event.clientY,
-          state: "pending",
-          timer: null,
-        };
-        gesture.timer = window.setTimeout(() => fire(gesture), LONG_PRESS_DELAY_MS);
-        gestureRef.current = gesture;
-        installGuard(gesture);
-      },
-      onPointerMove: (event) => {
-        const gesture = gestureRef.current;
-        if (gesture === null || gesture.pointerId !== event.pointerId) return;
-        gesture.x = event.clientX;
-        gesture.y = event.clientY;
-        if (
-          gesture.state === "pending" &&
-          exceedsLongPressTolerance(event.clientX - gesture.startX, event.clientY - gesture.startY)
-        ) {
-          cancel();
-        }
-      },
-      onPointerUp: release,
-      // pointercancel may be the browser starting its own long-press
-      // gesture, so it stops our timer but leaves the press "pending": a
-      // native contextmenu arriving in the grace window still opens ours.
-      onPointerCancel: release,
-    };
-  }, [cancel, clearTimer, enabled, fire, installGuard, release]);
+  const handlers: LongPressPointerHandlers | undefined = enabled
+    ? {
+        onPointerDown: (event) => {
+          if (!isGesturePointer(event.pointerType) || event.button !== 0) return;
+          if ((event.target as HTMLElement).closest("input, textarea")) return;
+          if (gestureRef.current !== null) clearTimer(gestureRef.current);
+          const gesture: LongPressGesture = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            x: event.clientX,
+            y: event.clientY,
+            state: "pending",
+            timer: null,
+          };
+          gesture.timer = window.setTimeout(() => fire(gesture), LONG_PRESS_DELAY_MS);
+          gestureRef.current = gesture;
+          installGuard(gesture);
+        },
+        onPointerMove: (event) => {
+          const gesture = gestureRef.current;
+          if (gesture === null || gesture.pointerId !== event.pointerId) return;
+          gesture.x = event.clientX;
+          gesture.y = event.clientY;
+          if (
+            gesture.state === "pending" &&
+            exceedsLongPressTolerance(
+              event.clientX - gesture.startX,
+              event.clientY - gesture.startY,
+            )
+          ) {
+            cancel();
+          }
+        },
+        onPointerUp: release,
+        // pointercancel may be the browser starting its own long-press
+        // gesture, so it stops our timer but leaves the press "pending": a
+        // native contextmenu arriving in the grace window still opens ours.
+        onPointerCancel: release,
+      }
+    : undefined;
 
-  const consumeSuppressedClick = useCallback(
-    () => suppressorRef.current.consume(performance.now()),
-    [],
+  const consumeSuppressedClick = useStableCallback(() =>
+    suppressorRef.current.consume(performance.now()),
   );
 
   return { handlers, cancel, consumeSuppressedClick };

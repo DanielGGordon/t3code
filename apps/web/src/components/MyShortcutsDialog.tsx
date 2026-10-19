@@ -1,6 +1,5 @@
 import type { KeybindingCommand } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { useMemo } from "react";
 import { create } from "zustand";
 
 import { usePrimarySettings } from "../hooks/useSettings";
@@ -36,7 +35,7 @@ function MyShortcutsDialog() {
   const slots = usePrimarySettings((settings) => settings.newThreadProjectSlots);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projects = useProjects();
-  const shortcuts = useMemo(() => collectMyShortcuts(keybindings), [keybindings]);
+  const shortcuts = collectMyShortcuts(keybindings);
 
   const describe = (command: KeybindingCommand): string => {
     const raw = String(command);

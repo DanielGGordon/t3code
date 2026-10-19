@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 import { resolveDriveMode } from "~/lib/driveMode";
 import { useIsMobile, useMediaQuery } from "./useMediaQuery";
@@ -60,13 +60,10 @@ export function useDriveMode(): boolean {
   // Explicit opt-in only: a phone's default touch layout never turns into
   // the car's compact density.
   const touchLayout = useClientSettings((settings) => settings.touchLayout);
-  const getSnapshot = useCallback(
-    () =>
-      typeof window === "undefined"
-        ? false
-        : resolveDriveMode({ touchLayout, viewportWidth: window.innerWidth }),
-    [touchLayout],
-  );
+  const getSnapshot = () =>
+    typeof window === "undefined"
+      ? false
+      : resolveDriveMode({ touchLayout, viewportWidth: window.innerWidth });
   return useSyncExternalStore(subscribeToViewportResize, getSnapshot, () => false);
 }
 

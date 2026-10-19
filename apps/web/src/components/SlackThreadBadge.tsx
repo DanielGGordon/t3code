@@ -1,5 +1,3 @@
-import { useMemo } from "react";
-
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { SlackIcon } from "./Icons";
 import { getThreadChannel, stripThreadChannelPrefix } from "~/lib/threadChannel";
@@ -12,14 +10,12 @@ import { cn } from "~/lib/utils";
  * the row gets those characters back for the actual sentence. Rename still
  * edits the full stored title.
  */
-export function useThreadDisplayTitle(
+export function resolveThreadDisplayTitle(
   title: string,
   threadId: string,
 ): { isSlack: boolean; displayTitle: string } {
-  return useMemo(() => {
-    const isSlack = getThreadChannel(title, threadId) === "slack";
-    return { isSlack, displayTitle: isSlack ? stripThreadChannelPrefix(title) : title };
-  }, [title, threadId]);
+  const isSlack = getThreadChannel(title, threadId) === "slack";
+  return { isSlack, displayTitle: isSlack ? stripThreadChannelPrefix(title) : title };
 }
 
 export type SlackThreadBadgeDensity = "card" | "slim" | "v1";

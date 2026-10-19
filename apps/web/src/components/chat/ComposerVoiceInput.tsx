@@ -51,8 +51,7 @@ export const ComposerVoiceInput = memo(function ComposerVoiceInput(props: {
         <Button
           type="button"
           size="icon"
-          variant="ghost"
-          className="rounded-full text-muted-foreground"
+          variant="ghost-muted"
           onClick={dictation.cancel}
           aria-label="Cancel voice input"
         >
@@ -69,7 +68,6 @@ export const ComposerVoiceInput = memo(function ComposerVoiceInput(props: {
           type="button"
           size="icon"
           variant="outline"
-          className="rounded-full"
           onClick={() => dictation.finish("insert")}
           aria-label="Stop and insert transcript"
         >
@@ -79,7 +77,6 @@ export const ComposerVoiceInput = memo(function ComposerVoiceInput(props: {
           <Button
             type="button"
             size="icon"
-            className="rounded-full"
             onClick={() => dictation.finish("send")}
             aria-label="Stop and send"
           >
@@ -97,8 +94,8 @@ export const ComposerVoiceInput = memo(function ComposerVoiceInput(props: {
           <Button
             type="button"
             size="icon"
-            variant="ghost"
-            className="shrink-0 rounded-full text-muted-foreground/70 hover:text-foreground/80"
+            variant="ghost-muted"
+            className="shrink-0"
             onClick={dictation.start}
             disabled={props.disabled || dictation.phase === "starting"}
             aria-label="Voice input"

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { useStableCallback } from "../hooks/useStableCallback";
 import { startVoiceRecording, type VoiceRecording } from "./recorder";
 import { transcribeVoiceRecording } from "./transcriptionClient";
 
@@ -30,10 +31,10 @@ export function useVoiceDictation(options: {
   const startedAtRef = useRef(0);
   // Bumped on cancel/unmount so a late start or transcript is ignored.
   const generationRef = useRef(0);
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+  const onTranscript = useStableCallback(options.onTranscript);
+  const onError = useStableCallback(options.onError);
 
-  const finish = useCallback((mode: VoiceDictationFinishMode) => {
+  const finish = useStableCallback((mode: VoiceDictationFinishMode) => {
     const recording = recordingRef.current;
     if (!recording) return;
     recordingRef.current = null;
@@ -46,31 +47,29 @@ export function useVoiceDictation(options: {
         (text) => {
           if (generation !== generationRef.current) return;
           if (text.trim().length === 0) {
-            optionsRef.current.onError("No speech was detected.");
+            onError("No speech was detected.");
           } else {
-            optionsRef.current.onTranscript(text.trim(), mode);
+            onTranscript(text.trim(), mode);
           }
         },
         (error: unknown) => {
           if (generation !== generationRef.current) return;
-          optionsRef.current.onError(
-            error instanceof Error ? error.message : "Transcription failed.",
-          );
+          onError(error instanceof Error ? error.message : "Transcription failed.");
         },
       )
       .finally(() => {
         if (generation === generationRef.current) setPhase("idle");
       });
-  }, []);
+  });
 
-  const cancel = useCallback(() => {
+  const cancel = useStableCallback(() => {
     generationRef.current += 1;
     recordingRef.current?.cancel();
     recordingRef.current = null;
     setPhase("idle");
-  }, []);
+  });
 
-  const start = useCallback(() => {
+  const start = useStableCallback(() => {
     if (recordingRef.current || phase !== "idle") return;
     const generation = ++generationRef.current;
     setPhase("starting");
@@ -88,12 +87,10 @@ export function useVoiceDictation(options: {
       (error: unknown) => {
         if (generation !== generationRef.current) return;
         setPhase("idle");
-        optionsRef.current.onError(
-          error instanceof Error ? error.message : "Could not start the microphone.",
-        );
+        onError(error instanceof Error ? error.message : "Could not start the microphone.");
       },
     );
-  }, [phase]);
+  });
 
   useEffect(() => {
     if (phase !== "recording") return;

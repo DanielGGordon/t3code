@@ -1,5 +1,5 @@
 import type { HostResourcesSnapshot } from "@t3tools/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentQuery } from "../state/query";
@@ -35,7 +35,7 @@ export function useHostStats(enabled: boolean): HostStatsSnapshot | null {
     };
   }, [enabled, refresh]);
 
-  return useMemo(() => toHostStatsSnapshot(query.data), [query.data]);
+  return toHostStatsSnapshot(query.data);
 }
 
 /** Sidebar-readout view of the server's `hostResources` snapshot. */
@@ -82,6 +82,26 @@ export interface HostStatsWithHistory {
 // Module-level so the window survives sidebar unmounts (e.g. visiting the
 // Settings page and coming back) — only an explicit disable clears it.
 let cachedHistory: readonly HostStatsSample[] = [];
+const EMPTY_HISTORY: readonly HostStatsSample[] = [];
+const historyListeners = new Set<() => void>();
+
+function setCachedHistory(next: readonly HostStatsSample[]) {
+  cachedHistory = next;
+  for (const listener of historyListeners) listener();
+}
+
+function subscribeToHistory(listener: () => void): () => void {
+  historyListeners.add(listener);
+  return () => historyListeners.delete(listener);
+}
+
+function getHistorySnapshot() {
+  return cachedHistory;
+}
+
+function getServerHistorySnapshot() {
+  return EMPTY_HISTORY;
+}
 
 /**
  * `useHostStats` plus a client-side rolling window of recent samples so
@@ -90,14 +110,17 @@ let cachedHistory: readonly HostStatsSample[] = [];
  */
 export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory {
   const stats = useHostStats(enabled);
-  const [history, setHistory] = useState<readonly HostStatsSample[]>(cachedHistory);
+  const history = useSyncExternalStore(
+    subscribeToHistory,
+    getHistorySnapshot,
+    getServerHistorySnapshot,
+  );
   const lastSampleRef = useRef<HostStatsSnapshot | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       lastSampleRef.current = null;
-      cachedHistory = [];
-      setHistory([]);
+      if (cachedHistory.length > 0) setCachedHistory([]);
       return;
     }
     if (stats === null || stats === lastSampleRef.current) {
@@ -110,8 +133,7 @@ export function useHostStatsWithHistory(enabled: boolean): HostStatsWithHistory 
       memUsedBytes: stats.memUsedBytes,
       memTotalBytes: stats.memTotalBytes,
     };
-    cachedHistory = [...cachedHistory.slice(-(HISTORY_LIMIT - 1)), sample];
-    setHistory(cachedHistory);
+    setCachedHistory([...cachedHistory.slice(-(HISTORY_LIMIT - 1)), sample]);
   }, [enabled, stats]);
 
   return { stats, history };

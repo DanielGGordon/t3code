@@ -267,7 +267,7 @@ import {
 } from "./Sidebar.snooze";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
-import { SlackThreadBadge, useThreadDisplayTitle } from "./SlackThreadBadge";
+import { SlackThreadBadge, resolveThreadDisplayTitle } from "./SlackThreadBadge";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -2101,7 +2101,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   });
 
   // Threads bridged from Slack show the Slack mark in place of any channel prefix.
-  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title, thread.id);
+  const { isSlack, displayTitle } = resolveThreadDisplayTitle(thread.title, thread.id);
 
   const title =
     isRenaming && canOperateThread ? (
@@ -2854,7 +2854,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const { thread } = props;
-  const { isSlack, displayTitle } = useThreadDisplayTitle(thread.title, thread.id);
+  const { isSlack, displayTitle } = resolveThreadDisplayTitle(thread.title, thread.id);
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel: null,

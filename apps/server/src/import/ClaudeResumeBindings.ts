@@ -57,10 +57,6 @@ const mapFailure =
       (cause) => new ClaudeResumeBindingError({ detail: `${what}: ${describe(cause)}` }),
     );
 
-// ---------------------------------------------------------------------------
-// Audit
-// ---------------------------------------------------------------------------
-
 export type ThreadLifecycle = "active" | "archived" | "deleted" | "unknown";
 
 /**
@@ -261,10 +257,6 @@ export const auditClaudeResumeTargets = Effect.fn("auditClaudeResumeTargets")(fu
       a.threadId.localeCompare(b.threadId),
   ) as ReadonlyArray<SessionAuditRow>;
 });
-
-// ---------------------------------------------------------------------------
-// Reset + legacy restore (write through the event sink)
-// ---------------------------------------------------------------------------
 
 export interface ClaudeSessionResetResult {
   readonly lines: ReadonlyArray<string>;
