@@ -115,7 +115,7 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 // variant (com.t3tools.t3code.preview) ships this way, so only it gets the in-app updater.
 // The manifest URL can be overridden at build time for testing (T3CODE_SIDELOAD_MANIFEST_URL).
 // Since versionCode 4 it is the gordonlabs.dev hostname (Let's Encrypt, so system CAs).
-// Builds up to 3 poll https://15.204.108.12:7443/sideload/t3code/latest.json, which keeps
+// Builds up to 3 poll https://<server-ip>:7443/sideload/t3code/latest.json, which keeps
 // serving the same file until every installed phone has updated past 3.
 const SIDELOAD_MANIFEST_URL =
   repoEnv.T3CODE_SIDELOAD_MANIFEST_URL?.trim() || "https://apps.gordonlabs.dev/t3code/latest.json";

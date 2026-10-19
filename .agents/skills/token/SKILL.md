@@ -18,7 +18,7 @@ is to run it and hand back the printed URL.
    directory `t3code.service` is already serving from) with `T3CODE_PORT=3773`, so the
    token lands in the running server's live database — no restart needed.
 3. Prints a ready-to-use `https://t3.gordonlabs.dev/pair#token=...` link (sessions are per
-   origin; the old `https://15.204.108.12:7443` and IP `:443` roots are being retired to a
+   origin; the old `https://<server-ip>:7443` and IP `:443` roots are being retired to a
    308 redirect, so pair on the hostname. `T3_PUBLIC_URL` overrides it).
 
 Unlike `/redeploy`, this never touches the running service — no session drop.

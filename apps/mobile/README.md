@@ -163,7 +163,7 @@ The `preview` variant (`com.t3tools.t3code.preview`) is distributed through
 - **First install:** open `https://apps.gordonlabs.dev/` on the phone and tap *T3 Code*.
 - **Updates:** Settings > About > **Check for updates** (also a quiet check on launch and each
   foreground, at most every 6 hours) against `https://apps.gordonlabs.dev/t3code/latest.json`
-  (versionCode 4 on; older builds poll `https://15.204.108.12:7443/sideload/t3code/latest.json`,
+  (versionCode 4 on; older builds poll `https://<server-ip>:7443/sideload/t3code/latest.json`,
   the same file, which stays served for them). It downloads the APK, verifies its SHA-256 and opens the
   system installer. Implemented by `modules/t3-sideload-updater` (a vendored copy of the
   android-sideload updater, see its `VENDORED.md`) and `src/features/updates/sideload-updates.ts`;
