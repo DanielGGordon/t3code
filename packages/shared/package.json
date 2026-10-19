@@ -207,6 +207,10 @@
       "types": "./src/qrCode.ts",
       "import": "./src/qrCode.ts"
     },
+    "./youtubeComments": {
+      "types": "./src/youtubeComments.ts",
+      "import": "./src/youtubeComments.ts"
+    },
     "./cliArgs": {
       "types": "./src/cliArgs.ts",
       "import": "./src/cliArgs.ts"
