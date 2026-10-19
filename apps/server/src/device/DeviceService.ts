@@ -23,6 +23,7 @@ import {
   DeviceHostUnavailableError,
   DeviceNotFoundError,
   DeviceOperationError,
+  DeviceStoppedError,
   type DeviceOpenInput,
   type DevicePlatform,
   DevicePlatformUnavailableError,
@@ -52,6 +53,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -155,12 +157,23 @@ export class DeviceService extends Context.Service<
     ) => Effect.Effect<DeviceAgentReadiness | null, DeviceError>;
     readonly currentReadiness: (hostId?: DeviceHostId) => Effect.Effect<DeviceReadiness | null>;
     readonly sessionsForThread: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<DeviceSession>>;
+    /** Sessions this thread lost because their device stopped running, until it reopens them. */
+    readonly stoppedSessionsForThread: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<StoppedDeviceSession>>;
   }
 >()("t3/device/DeviceService") {}
+
+export interface StoppedDeviceSession extends DeviceSession {
+  readonly name: string;
+}
 
 interface ServiceState {
   readonly state: DeviceServiceState;
 }
+
+const sameTarget = (a: DeviceSession, b: DeviceSession) =>
+  a.threadId === b.threadId && a.hostId === b.hostId && a.deviceId === b.deviceId;
 
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
@@ -222,6 +235,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       revision: 0,
     },
   });
+
+  const stoppedSessionsRef = yield* Ref.make<ReadonlyArray<StoppedDeviceSession>>([]);
 
   const publish = (update: (state: DeviceServiceState) => DeviceServiceState) =>
     SynchronizedRef.updateAndGetEffect(stateRef, ({ state }) => {
@@ -426,14 +441,71 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     return { devices, detail: list.errors?.map((error) => error.message).join("\n") || undefined };
   });
 
+  /**
+   * The targets on this host whose device is no longer running. The hub lists
+   * only online emulators, so an Android emulator missing from its list counts
+   * as stopped only once adb no longer lists it either: one that is offline
+   * under load is still running.
+   */
+  const stoppedTargets = Effect.fn("DeviceService.stoppedTargets")(function* <
+    T extends {
+      readonly hostId: DeviceHostId;
+      readonly deviceId: DeviceId;
+      readonly platform: DevicePlatform;
+    },
+  >(ready: DeviceReadiness, devices: ReadonlyArray<DeviceSummary>, targets: ReadonlyArray<T>) {
+    const missing = targets.filter(
+      (target) =>
+        target.hostId === ready.hostId &&
+        !devices.some(
+          (device) =>
+            device.hostId === ready.hostId && device.id === target.deviceId && device.booted,
+        ),
+    );
+    if (!missing.some((target) => target.platform === "android")) return missing;
+    const adb = yield* ready.run("adb", ["devices"]);
+    if (adb.code !== 0) return missing.filter((target) => target.platform !== "android");
+    const serials = new Set(
+      adb.stdout
+        .split(/\r?\n/)
+        .slice(1)
+        .map((line) => line.trim().split(/\s+/)[0])
+        .filter(Boolean),
+    );
+    return missing.filter(
+      (target) => target.platform !== "android" || !serials.has(target.deviceId),
+    );
+  });
+
   const refresh = Effect.fn("DeviceService.refresh")(function* (ready: DeviceReadiness) {
     const host = hosts.get(ready.hostId);
     const { devices, detail } = yield* fetchDevices(ready);
     const hostSummaries = yield* Effect.forEach(hosts.values(), (host) => host.summary);
+    const stopped = yield* stoppedTargets(
+      ready,
+      devices,
+      (yield* SynchronizedRef.get(stateRef)).state.sessions,
+    );
     return yield* lifecycleLock.withPermit(
       Effect.gen(function* () {
         if (!(yield* readDeviceSettings).enabled || !host || hosts.get(ready.hostId) !== host)
           return (yield* SynchronizedRef.get(stateRef)).state;
+        if (stopped.length > 0) {
+          const { state } = yield* SynchronizedRef.get(stateRef);
+          const lost = stopped
+            .filter((session) => state.sessions.includes(session))
+            .map((session) => ({
+              ...session,
+              name: findDevice(state, session.hostId, session.deviceId)?.name ?? session.deviceId,
+            }));
+          yield* Ref.update(stoppedSessionsRef, (current) => [
+            ...current.filter((entry) => !lost.some((session) => sameTarget(entry, session))),
+            ...lost,
+          ]);
+          yield* Effect.logInfo("Device stopped running while open", {
+            devices: lost.map((session) => session.deviceId),
+          });
+        }
         return yield* publish((state) => ({
           ...state,
           hosts: hostSummaries,
@@ -442,6 +514,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
             ...state.devices.filter((device) => device.hostId !== ready.hostId),
             ...devices,
           ],
+          sessions: state.sessions.filter((session) => !stopped.includes(session)),
           hostStatuses: {
             ...state.hostStatuses,
             [ready.hostId]: { status: "ready", ...(detail ? { detail } : {}) },
@@ -733,6 +806,18 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         }));
       }),
     );
+    // A rebooted Android AVD may come back under another serial; its name is stable.
+    const deviceName = device.name;
+    yield* Ref.update(stoppedSessionsRef, (current) =>
+      current.filter(
+        (entry) =>
+          !(
+            entry.threadId === session.threadId &&
+            entry.hostId === session.hostId &&
+            (entry.deviceId === session.deviceId || entry.name === deviceName)
+          ),
+      ),
+    );
     return session;
   });
 
@@ -809,7 +894,37 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           (input.hostId === undefined || session.hostId === input.hostId) &&
           (input.deviceId === undefined || session.deviceId === input.deviceId),
       );
-      if (closing.length === 0) return;
+      yield* Ref.update(stoppedSessionsRef, (current) =>
+        current.filter(
+          (entry) =>
+            !(
+              entry.threadId === input.threadId &&
+              (input.hostId === undefined || entry.hostId === input.hostId) &&
+              (input.deviceId === undefined || entry.deviceId === input.deviceId)
+            ),
+        ),
+      );
+      if (closing.length === 0) {
+        // Shutting down a named device does not require this thread to have opened it.
+        if (input.shutdown && input.deviceId !== undefined) {
+          const host = yield* resolveHost(input.hostId);
+          const listed = yield* refresh(yield* readiness(host.id));
+          const device =
+            findDevice(listed, host.id, input.deviceId) ??
+            listed.devices.find(
+              (candidate) =>
+                candidate.hostId === host.id &&
+                candidate.platform === "android" &&
+                candidate.booted &&
+                candidate.name === input.deviceId,
+            );
+          if (!device) {
+            return yield* new DeviceNotFoundError({ hostId: host.id, deviceId: input.deviceId });
+          }
+          if (device.booted) yield* shutdownDevice(host.id, device.id, device.platform);
+        }
+        return;
+      }
       yield* publish((current) => ({
         ...current,
         sessions: current.sessions.filter((session) => !closing.includes(session)),
@@ -855,6 +970,25 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
               reason: "request_failed",
               cause,
             }),
+        ),
+        // A capture fails first when the device itself has died; say so.
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            const stopped = yield* refresh(ready).pipe(
+              Effect.flatMap((state) =>
+                stoppedTargets(ready, state.devices, [
+                  { hostId: ready.hostId, deviceId: device.id, platform: device.platform },
+                ]),
+              ),
+              Effect.orElseSucceed(() => []),
+            );
+            if (stopped.length === 0) return yield* error;
+            return yield* new DeviceStoppedError({
+              hostId: ready.hostId,
+              deviceId: device.id,
+              name: device.name,
+            });
+          }),
         ),
       );
       return { device, png };
@@ -967,6 +1101,10 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       agentReadinessIfSupported,
       currentReadiness,
       sessionsForThread,
+      stoppedSessionsForThread: (threadId) =>
+        Ref.get(stoppedSessionsRef).pipe(
+          Effect.map((sessions) => sessions.filter((session) => session.threadId === threadId)),
+        ),
     }),
     setHostStatus,
     withLifecycleLock: lifecycleLock.withPermit,

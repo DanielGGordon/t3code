@@ -3,6 +3,7 @@ import {
   type DeviceHostId,
   type DeviceId,
   type DevicePlatform,
+  DeviceStoppedError,
   type DeviceSummary,
   DeviceToolUnavailableError,
   LOCAL_DEVICE_HOST_ID,
@@ -60,6 +61,7 @@ export function agentDeviceQuickStart(
     `  ${executable} screenshot /tmp/shot.png ${target}        # or call device_screenshot`,
     `  ${executable} install <app> <path-to-.app-or-.apk> ${target}`,
     `Prefer snapshot refs over coordinates. Run ${executable} help for workflow guides and ${executable} <command> --help for flags.`,
+    "A ref taps where its element was at snapshot time. Take a fresh snapshot after the keyboard opens or closes, or the screen scrolls or reflows.",
     "Prefer agent-device for driving this device. simctl, adb, and xcrun remain available for anything it does not cover.",
     "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. T3 provides discovery, streaming, and control only.",
     "Keep the returned --config and --session flags on every command. Other hosts can be used concurrently; opening one does not switch these commands.",
@@ -214,12 +216,21 @@ const handlers = {
       // Only devices this thread opened: another thread's device is not this agent's to watch.
       const hostId =
         input.deviceId === undefined ? input.hostId : (input.hostId ?? LOCAL_DEVICE_HOST_ID);
-      const target = sessions.findLast(
-        (session) =>
-          (hostId === undefined || session.hostId === hostId) &&
-          (input.deviceId === undefined || session.deviceId === input.deviceId),
-      );
+      const matches = (session: { hostId: DeviceHostId; deviceId: DeviceId }) =>
+        (hostId === undefined || session.hostId === hostId) &&
+        (input.deviceId === undefined || session.deviceId === input.deviceId);
+      const target = sessions.findLast(matches);
       if (!target) {
+        const stopped = (yield* devices.stoppedSessionsForThread(scope.thread.threadId)).findLast(
+          matches,
+        );
+        if (stopped) {
+          return yield* new DeviceStoppedError({
+            hostId: stopped.hostId,
+            deviceId: stopped.deviceId,
+            name: stopped.name,
+          });
+        }
         return yield* new DeviceToolUnavailableError({
           reason:
             input.deviceId === undefined
@@ -242,6 +253,17 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* requireDeviceAccess;
       const devices = yield* DeviceService.DeviceService;
+      if (input.shutdown && input.deviceId === undefined) {
+        const open = (yield* devices.sessionsForThread(scope.thread.threadId)).filter(
+          (session) => input.hostId === undefined || session.hostId === input.hostId,
+        );
+        if (open.length === 0) {
+          return yield* new DeviceToolUnavailableError({
+            reason:
+              "No device is open in this thread, so there is nothing to shut down. Pass deviceId from device_list to shut down a specific device.",
+          });
+        }
+      }
       yield* devices.close({
         threadId: scope.thread.threadId,
         ...(input.hostId === undefined ? {} : { hostId: input.hostId }),
