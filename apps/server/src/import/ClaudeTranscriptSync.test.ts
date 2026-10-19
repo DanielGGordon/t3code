@@ -101,6 +101,12 @@ function fixtureWithFailingWrites() {
             ? Effect.fail(new EventSink.EventSinkWriteError({ eventCount: input.events.length }))
             : sink.write(input);
         },
+        writeWithEffects: (input) => {
+          control.writes += 1;
+          return control.writes > control.failWritesAfter
+            ? Effect.fail(new EventSink.EventSinkWriteError({ eventCount: input.events.length }))
+            : sink.writeWithEffects(input);
+        },
       } satisfies EventSink.EventSinkV2Shape;
     }),
   );
@@ -134,6 +140,17 @@ describe("ClaudeTranscriptSync", () => {
       ]);
       assert.strictEqual(records.thread.historyOrigin, "v1_import");
       assert.strictEqual(records.thread.title, "Fix the login bug");
+      // The first prompt is only a placeholder: a title generation is queued
+      // with the import, armed by the thread's in-flight marker.
+      const sql = yield* SqlClient.SqlClient;
+      const titleEffects = yield* sql<{ readonly command_id: string }>`
+        SELECT command_id FROM orchestration_v2_effect_outbox
+        WHERE thread_id = ${threadId} AND effect_type = 'thread-title.generate'
+      `;
+      assert.deepStrictEqual(
+        titleEffects.map((row) => row.command_id),
+        [records.thread.titleRegeneration?.requestId],
+      );
       assert.deepStrictEqual(
         records.messages.map((message) => [message.id, message.role, message.runId]),
         [

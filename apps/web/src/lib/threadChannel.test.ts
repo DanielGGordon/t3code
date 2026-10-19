@@ -9,6 +9,11 @@ describe("getThreadChannel", () => {
     expect(getThreadChannel("  SLACK : spaced")).toBe("slack");
   });
 
+  it("detects a bridged thread by its id once the title has no prefix", () => {
+    expect(getThreadChannel("Raise Yeshiva buy cost", "slack-C0BDDUX2BGW-1792361")).toBe("slack");
+    expect(getThreadChannel("Raise Yeshiva buy cost", "458861f1-bb90-46a6")).toBeNull();
+  });
+
   it("ignores titles that merely mention Slack", () => {
     expect(getThreadChannel("Add Slack: integration")).toBeNull();
     expect(getThreadChannel("Slackline tricks")).toBeNull();
@@ -20,6 +25,10 @@ describe("getThreadChannel", () => {
 describe("stripThreadChannelPrefix", () => {
   it("removes the prefix and leading whitespace", () => {
     expect(stripThreadChannelPrefix("Slack: Can you look?")).toBe("Can you look?");
+  });
+
+  it("removes a #channel prefix", () => {
+    expect(stripThreadChannelPrefix("#jootopia: raise the price")).toBe("raise the price");
   });
 
   it("keeps the original title when only the prefix is present", () => {

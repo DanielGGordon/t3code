@@ -52,11 +52,21 @@ export function sanitizePrTitle(raw: string): string {
   return "Update project changes";
 }
 
-// Prompts ask for under 40 characters. This cap only stops a runaway model
-// from pushing a paragraph into the sidebar, header, and window title.
-const MAX_THREAD_TITLE_CHARS = 120;
+// The sidebar shows roughly 35 characters. Prompts ask for at most 36; this cap
+// is what makes the limit real, cutting at a word boundary instead of
+// appending "..." (an ellipsis spends three of the few visible characters).
+export const MAX_THREAD_TITLE_CHARS = 40;
 
-/** Normalise a raw thread title to a single line. Clients truncate for display. */
+/** Shorten to `max` characters at the last word boundary that keeps most of the text. */
+function truncateAtWordBoundary(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max + 1);
+  const boundary = cut.lastIndexOf(" ");
+  const shortened = boundary >= Math.floor(max / 2) ? cut.slice(0, boundary) : text.slice(0, max);
+  return shortened.replace(/[\s,;:\-–—/&]+$/u, "");
+}
+
+/** Normalise a raw thread title to a single line of at most 40 characters. */
 export function sanitizeThreadTitle(raw: string): string {
   // Unwrap a JSON-formatted title before truncation can cut off the closing brace.
   const decoded = decodeJsonThreadTitle(raw);
@@ -67,17 +77,45 @@ export function sanitizeThreadTitle(raw: string): string {
     ?.trim()
     .replace(/^['"`]+|['"`]+$/g, "")
     .trim()
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .replace(/[.!?]+$/u, "");
 
   if (!normalized || normalized.trim().length === 0) {
     return "New thread";
   }
+  return truncateAtWordBoundary(normalized, MAX_THREAD_TITLE_CHARS);
+}
 
-  if (normalized.length <= MAX_THREAD_TITLE_CHARS) {
-    return normalized;
-  }
+/**
+ * Whether a generated title is fit to show. Rejects structural garbage the
+ * model sometimes copies out of the message: slash commands, Slack mentions
+ * and channel prefixes, the untrusted-content wrapper, and the placeholder.
+ */
+export function isUsableThreadTitle(title: string): boolean {
+  const trimmed = title.trim();
+  if (trimmed.length === 0 || trimmed === "New thread") return false;
+  if (/^[$/]/u.test(trimmed)) return false;
+  if (/^(?:#[\w-]+|slack)\s*:/iu.test(trimmed)) return false;
+  if (/<@[A-Z0-9]+>|<<<|>>>|&(?:lt|gt|amp);/u.test(trimmed)) return false;
+  return true;
+}
 
-  return `${normalized.slice(0, MAX_THREAD_TITLE_CHARS - 3).trimEnd()}...`;
+/**
+ * The placeholder shown until a generated title lands: the opening message
+ * without bridge markup (the untrusted-content wrapper, `#channel:` prefixes,
+ * Slack mentions, HTML entities), shortened like a generated title.
+ */
+export function cleanThreadTitleSeed(raw: string): string {
+  const text = raw
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&amp;/gu, "&")
+    .replace(/<<<[^<>]*>>>/gu, " ")
+    .replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^(?:#[\w-]+|slack)\s*:\s*/iu, "");
+  return truncateAtWordBoundary(text, MAX_THREAD_TITLE_CHARS) || "New thread";
 }
 
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
