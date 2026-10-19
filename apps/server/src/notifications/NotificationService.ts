@@ -306,26 +306,37 @@ const make = Effect.gen(function* () {
         expiresAt = isoAt(parsed.value);
       }
       const now = yield* nowIso;
-      // The WHERE on the conflict branch is what keeps a resolved row resolved.
-      yield* sql`
-        INSERT INTO notifications (
-          notification_id, source, source_id, kind, title, body, body_trust, url,
-          actions_json, callback_url, state, created_at, updated_at, expires_at
-        ) VALUES (
-          ${id}, ${source}, ${sourceId}, ${request.kind}, ${request.title}, ${request.body},
-          ${request.bodyTrust}, ${request.url ?? null}, ${encodeActions(actions)}, ${callbackUrl},
-          'open', ${now}, ${now}, ${expiresAt}
-        )
-        ON CONFLICT (notification_id) DO UPDATE SET
-          kind = excluded.kind, title = excluded.title, body = excluded.body,
-          body_trust = excluded.body_trust, url = excluded.url,
-          actions_json = excluded.actions_json, callback_url = excluded.callback_url,
-          expires_at = excluded.expires_at, updated_at = excluded.updated_at
-        WHERE notifications.state = 'open'
-      `.pipe(Effect.mapError(storageError));
-      yield* expireDue(now);
+      // One transaction: rows already past their expiry are resolved first, so the conflict
+      // update below cannot extend a card the sweep has not reached yet, and a new card that
+      // arrives already expired is stored resolved.
+      const row = yield* Effect.gen(function* () {
+        yield* expireDue(now);
+        // The WHERE on the conflict branch is what keeps a resolved row resolved.
+        yield* sql`
+          INSERT INTO notifications (
+            notification_id, source, source_id, kind, title, body, body_trust, url,
+            actions_json, callback_url, state, created_at, updated_at, expires_at
+          ) VALUES (
+            ${id}, ${source}, ${sourceId}, ${request.kind}, ${request.title}, ${request.body},
+            ${request.bodyTrust}, ${request.url ?? null}, ${encodeActions(actions)}, ${callbackUrl},
+            'open', ${now}, ${now}, ${expiresAt}
+          )
+          ON CONFLICT (notification_id) DO UPDATE SET
+            kind = excluded.kind, title = excluded.title, body = excluded.body,
+            body_trust = excluded.body_trust, url = excluded.url,
+            actions_json = excluded.actions_json, callback_url = excluded.callback_url,
+            expires_at = excluded.expires_at, updated_at = excluded.updated_at
+          WHERE notifications.state = 'open'
+        `.pipe(Effect.mapError(storageError));
+        yield* expireDue(now);
+        return yield* findRow(id);
+      }).pipe(
+        sql.withTransaction,
+        Effect.mapError((error) =>
+          error instanceof NotificationError ? error : storageError(error),
+        ),
+      );
       yield* notifyChanged;
-      const row = yield* findRow(id);
       return {
         id: NotificationId.make(id),
         state: row?.state === "open" ? ("open" as const) : ("resolved" as const),
@@ -335,16 +346,27 @@ const make = Effect.gen(function* () {
   const resolve: NotificationService["Service"]["resolve"] = ({ source, sourceId, request }) =>
     Effect.gen(function* () {
       const id = yield* notificationIdFor(source, sourceId);
-      yield* markResolved({
-        id,
-        resolution: request.resolution,
-        resolvedBy: "source",
-        label: request.resolvedBy ?? null,
-        now: yield* nowIso,
-      });
-      const row = yield* findRow(id);
+      const now = yield* nowIso;
+      const row = yield* Effect.gen(function* () {
+        yield* markResolved({
+          id,
+          resolution: request.resolution,
+          resolvedBy: "source",
+          label: request.resolvedBy ?? null,
+          now,
+        });
+        return yield* findRow(id);
+      }).pipe(
+        sql.withTransaction,
+        Effect.mapError((error) =>
+          error instanceof NotificationError ? error : storageError(error),
+        ),
+      );
       if (row === undefined) return yield* notFound(id);
-      return { id: NotificationId.make(id), state: "resolved" as const };
+      return {
+        id: NotificationId.make(id),
+        state: row.state === "open" ? ("open" as const) : ("resolved" as const),
+      };
     });
 
   const list: NotificationService["Service"]["list"] = () =>
@@ -373,6 +395,14 @@ const make = Effect.gen(function* () {
 
   const dismiss: NotificationService["Service"]["dismiss"] = ({ id }) =>
     Effect.gen(function* () {
+      // Resolving mid-delivery would let the source accept an action on a card already dismissed.
+      if ((yield* Ref.get(inFlight)).has(id)) {
+        return yield* new NotificationError({
+          message: "An action on this notification is being delivered.",
+          reason: "in_flight",
+          notificationId: id,
+        });
+      }
       yield* markResolved({
         id,
         resolution: "dismissed",
@@ -385,12 +415,12 @@ const make = Effect.gen(function* () {
       return mutationResult(row);
     });
 
-  const deliveryFailed = (id: NotificationId, label: string, cause?: unknown) =>
+  /** Carries no cause: HTTP client errors embed the callback URL, which clients never see. */
+  const deliveryFailed = (id: NotificationId, label: string) =>
     new NotificationError({
       message: `Could not deliver '${label}' — try again.`,
       reason: "delivery_failed",
       notificationId: id,
-      ...(cause === undefined ? {} : { cause }),
     });
 
   /** Sends the callback; `Some(resolution)` when the source accepted or had already resolved it. */
@@ -448,7 +478,7 @@ const make = Effect.gen(function* () {
             outcome: error.reason._tag,
           }),
         ),
-        Effect.mapError((cause) => deliveryFailed(id, action.label, cause)),
+        Effect.mapError(() => deliveryFailed(id, action.label)),
       );
       if (Option.isNone(outcome) || Option.isNone(outcome.value)) {
         yield* Effect.logWarning("Notification action was not accepted by its source", {

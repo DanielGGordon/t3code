@@ -2,6 +2,7 @@ import type { Notification } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
+import { environmentCatalog } from "../connection/catalog";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { serverEnvironment } from "./server";
 
@@ -20,3 +21,19 @@ export const primaryNotificationsAtom = Atom.make((get): ReadonlyArray<Notificat
     { onNone: () => null, onSome: (value) => value.notifications },
   );
 }).pipe(Atom.withLabel("web-primary-notifications"));
+
+/**
+ * Whether the primary environment's transport is up. The notifications
+ * subscription keeps its last value across transport loss, so consumers use
+ * this to tell "still the old snapshot" from "fresh snapshot after reconnect".
+ */
+export const primaryNotificationsConnectedAtom = Atom.make((get): boolean => {
+  const environmentId = get(primaryEnvironmentIdAtom);
+  if (environmentId === null) {
+    return false;
+  }
+  return Option.match(AsyncResult.value(get(environmentCatalog.stateAtom(environmentId))), {
+    onNone: () => false,
+    onSome: (state) => state.phase === "connected",
+  });
+}).pipe(Atom.withLabel("web-primary-notifications-connected"));

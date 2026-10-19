@@ -3,7 +3,10 @@ import { BellIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { getClientSettings } from "../../hooks/useSettings";
-import { primaryNotificationsAtom } from "../../state/notifications";
+import {
+  primaryNotificationsAtom,
+  primaryNotificationsConnectedAtom,
+} from "../../state/notifications";
 import { hasDesktopNotifications } from "../../threadNotifications";
 import { toastManager } from "../ui/toast";
 import { detectArrivals } from "./notifications.logic";
@@ -16,15 +19,26 @@ import { detectArrivals } from "./notifications.logic";
  */
 export function NotificationCoordinator() {
   const notifications = useAtomValue(primaryNotificationsAtom);
+  const connected = useAtomValue(primaryNotificationsConnectedAtom);
   const seenRef = useRef<ReadonlySet<string> | null>(null);
+  // While disconnected, the list we last saw. The subscription keeps it until the new
+  // session's snapshot replaces it, so it must not be mistaken for that snapshot.
+  const staleRef = useRef<ReadonlyArray<unknown> | null>(null);
+  const wasConnectedRef = useRef(false);
   const osRef = useRef(new Map<string, Notification>());
 
   useEffect(() => {
-    if (notifications === null) {
-      // No snapshot (disconnected or still loading): the next one is a new baseline.
+    if (notifications === null || !connected) {
+      // No snapshot, or transport lost: the next fresh one is a new baseline, so
+      // cards that arrived while offline are not announced as arrivals.
       seenRef.current = null;
+      if (wasConnectedRef.current) staleRef.current = notifications;
+      wasConnectedRef.current = false;
       return;
     }
+    wasConnectedRef.current = true;
+    if (notifications === staleRef.current) return;
+    staleRef.current = null;
     const { arrivals, seen } = detectArrivals(seenRef.current, notifications);
     seenRef.current = seen;
 
@@ -61,7 +75,7 @@ export function NotificationCoordinator() {
         }
       }
     }
-  }, [notifications]);
+  }, [notifications, connected]);
 
   return null;
 }

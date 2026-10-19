@@ -205,3 +205,9 @@ def verify_t3_signature(header: str | None, raw_body: bytes, secret: str) -> boo
     expected = hmac.new(secret.encode(), f"{timestamp}.".encode() + raw_body, hashlib.sha256)
     return hmac.compare_digest(expected.hexdigest(), match.group(2))
 ```
+
+## Known limitation: two-factor authentication
+
+Once two-factor authentication is enrolled on the server, every HTTP request must carry a verified
+second factor. A `notifications:write` token issued from the CLI has none, so its requests are
+rejected with 401 until two-factor is disabled. Service tokens are not yet exempt.

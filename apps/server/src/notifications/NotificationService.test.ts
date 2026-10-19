@@ -506,3 +506,93 @@ it.effect("fails acting clearly when no callback secret is configured", () =>
     expect((yield* service.list()).notifications).toHaveLength(1);
   }).pipe(Effect.provide(layerFor({ T3_NOTIFICATION_CALLBACK_ORIGINS: "http://127.0.0.1:8791" }))),
 );
+
+it.effect("does not let an upsert extend a card that is past its expiry but not yet swept", () =>
+  TestClock.setTime(Date.parse("2026-10-19T12:00:00.000Z")).pipe(
+    Effect.andThen(
+      Effect.gen(function* () {
+        const service = yield* NotificationService.NotificationService;
+        yield* service.upsert({
+          source: "pps",
+          sourceId: "h1",
+          request: card({ expiresAt: "2026-10-19T12:00:10Z" }),
+        });
+        // Past the expiry, before the 30 s sweep runs.
+        yield* TestClock.setTime(Date.parse("2026-10-19T12:00:20.000Z"));
+        expect(
+          yield* service.upsert({
+            source: "pps",
+            sourceId: "h1",
+            request: card({ title: "Revived", expiresAt: "2026-10-19T13:00:00Z" }),
+          }),
+        ).toEqual({ id: "pps:h1", state: "resolved" });
+        expect((yield* service.list()).notifications).toEqual([]);
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ readonly title: string; readonly resolution: string }>`
+          SELECT title, resolution FROM notifications WHERE notification_id = 'pps:h1'
+        `;
+        expect(rows).toEqual([
+          { title: "Slack message held: Dan in #general", resolution: "expired" },
+        ]);
+      }).pipe(Effect.provide(layerFor({}))),
+    ),
+  ),
+);
+
+it.effect("resolve returns the row's real state", () =>
+  Effect.gen(function* () {
+    const service = yield* NotificationService.NotificationService;
+    yield* service.upsert({ source: "pps", sourceId: "h1", request: card() });
+    // A write that does not take effect leaves the row open; the answer must say so.
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`CREATE TRIGGER keep_open BEFORE UPDATE ON notifications BEGIN SELECT RAISE(IGNORE); END`;
+    expect(
+      yield* service.resolve({ source: "pps", sourceId: "h1", request: { resolution: "x" } }),
+    ).toEqual({ id: "pps:h1", state: "open" });
+    yield* sql`DROP TRIGGER keep_open`;
+    expect(
+      yield* service.resolve({ source: "pps", sourceId: "h1", request: { resolution: "x" } }),
+    ).toEqual({ id: "pps:h1", state: "resolved" });
+  }).pipe(Effect.provide(layerFor({}))),
+);
+
+it.effect("keeps the callback URL out of the act failure and refuses dismiss mid-delivery", () =>
+  Effect.gen(function* () {
+    const callbacks = yield* startCallbackServer;
+    yield* Effect.gen(function* () {
+      const service = yield* NotificationService.NotificationService;
+      yield* service.upsert({ source: "pps", sourceId: "h1", request: actionsCard(callbacks.url) });
+
+      const first = yield* service
+        .act({ id: id("pps:h1"), actionId: "approve" })
+        .pipe(Effect.exit, Effect.forkScoped);
+      const request = yield* Effect.promise(() => callbacks.nextRequest());
+      const dismissed = yield* service.dismiss({ id: id("pps:h1") }).pipe(Effect.exit);
+      expect(failureOf(dismissed).reason).toBe("in_flight");
+      request.respond(204);
+      expect(Exit.isSuccess(yield* Fiber.join(first))).toBe(true);
+
+      // Connection refused: the HTTP client error would name the URL.
+      yield* service.upsert({
+        source: "pps",
+        sourceId: "h2",
+        request: actionsCard(`${callbacks.origin.replace(/:\d+$/, ":1")}/secret-path`),
+      });
+      const unreachable = yield* service
+        .act({ id: id("pps:h2"), actionId: "approve" })
+        .pipe(Effect.exit);
+      const error = failureOf(unreachable);
+      expect(error.reason).toBe("delivery_failed");
+      expect(JSON.stringify(error)).not.toContain("secret-path");
+      expect(String((error as { cause?: unknown }).cause)).not.toContain("secret-path");
+      expect(error.cause).toBeUndefined();
+    }).pipe(
+      Effect.provide(
+        layerFor({
+          T3_NOTIFICATION_CALLBACK_ORIGINS: [callbacks.origin, "http://127.0.0.1:1"].join(","),
+          T3_NOTIFICATION_CALLBACK_SECRET: SECRET,
+        }),
+      ),
+    );
+  }).pipe(Effect.scoped),
+);
