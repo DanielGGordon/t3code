@@ -216,7 +216,18 @@ describe("promptCacheExpiresAtMs", () => {
     expect(expiry({ cacheKeepAliveContext: null })).toBeNull();
     expect(expiry({ cacheKeepAliveContext: { ...context, run: null } })).toBeNull();
     expect(expiry({ cacheKeepAliveContext: { ...context, driver: null } })).toBeNull();
-    expect(expiry(withRun({ status: "running" }))).toBeNull();
+    expect(expiry(withRun({ status: "failed" }))).toBeNull();
+    expect(expiry(withRun({ status: "preparing", lastProviderActivityAt: null }))).toBeNull();
+  });
+
+  it("keeps counting while a turn runs", () => {
+    const nowMs = lastRequestMs + 5 * MINUTE;
+    // Counts from the turn's latest model item.
+    expect(expiry(withRun({ status: "running" }), nowMs)).toBe(expiresAtMs);
+    // Before the first item the turn is mid-request, so the cache is fresh.
+    expect(expiry(withRun({ status: "running", lastProviderActivityAt: null }), nowMs)).toBe(
+      nowMs + PROMPT_CACHE_TTL_MS,
+    );
   });
 });
 

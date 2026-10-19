@@ -140,9 +140,10 @@ export function cacheKeepAliveSupportsDriver(driver: string | null | undefined):
 
 /**
  * When the thread's prompt cache lapses, whether or not keep-alive is on; null
- * when there is no live cache to count down (no finished turn on a Claude
- * session, or it already lapsed). While a turn runs the cache is being
- * refreshed and the run has no anchor yet, so this is null then too.
+ * when there is no live cache to count down (no turn yet on a Claude session,
+ * a failed or cancelled turn that may not have refreshed it, or it already
+ * lapsed). A turn in progress counts from its latest model item; before it has
+ * produced one, a running turn is mid-request, so the cache is fresh.
  */
 export function promptCacheExpiresAtMs(input: {
   readonly thread: Pick<CacheKeepAliveThread, "cacheKeepAliveContext">;
@@ -151,7 +152,17 @@ export function promptCacheExpiresAtMs(input: {
   const context = input.thread.cacheKeepAliveContext ?? null;
   if (context === null || context.run === null) return null;
   if (!cacheKeepAliveSupportsDriver(context.driver)) return null;
-  const anchorMs = cacheKeepAliveAnchorMs(context.run);
+  const { run } = context;
+  const finishedAnchorMs = cacheKeepAliveAnchorMs(run);
+  let anchorMs: number | null = finishedAnchorMs;
+  if (finishedAnchorMs === null && BUSY_RUN_STATUSES.has(run.status)) {
+    anchorMs =
+      run.lastProviderActivityAt !== null
+        ? DateTime.toEpochMillis(run.lastProviderActivityAt)
+        : run.status === "running"
+          ? input.nowMs
+          : null;
+  }
   if (anchorMs === null) return null;
   const expiresAtMs = anchorMs + PROMPT_CACHE_TTL_MS;
   return input.nowMs >= expiresAtMs ? null : expiresAtMs;
