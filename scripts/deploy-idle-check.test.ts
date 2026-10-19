@@ -10,7 +10,10 @@ function makeDb() {
       run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL,
       requested_at TEXT NOT NULL);
     CREATE TABLE orchestration_v2_projection_threads (
-      thread_id TEXT PRIMARY KEY, title TEXT NOT NULL, payload_json TEXT NOT NULL);`);
+      thread_id TEXT PRIMARY KEY, title TEXT NOT NULL, payload_json TEXT NOT NULL);
+    CREATE TABLE orchestration_v2_projection_subagents (
+      subagent_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL,
+      started_at TEXT);`);
   const addThread = (id: string, title: string, worktreePath: string | null) =>
     db
       .prepare("INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?)")
@@ -20,7 +23,11 @@ function makeDb() {
     db
       .prepare("INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?)")
       .run(`run-${++n}`, threadId, status, `2026-01-01T00:00:${String(n).padStart(2, "0")}Z`);
-  return { db, addThread, addRun };
+  const addSubagent = (threadId: string, status: string) =>
+    db
+      .prepare("INSERT INTO orchestration_v2_projection_subagents VALUES (?, ?, ?, ?)")
+      .run(`sub-${++n}`, threadId, status, `2026-01-01T00:00:${String(n).padStart(2, "0")}Z`);
+  return { db, addThread, addRun, addSubagent };
 }
 
 it("counts only queued and running runs, once per thread", () => {
@@ -46,4 +53,15 @@ it("skips ignored threads and the worktree of the chat running the deploy", () =
   const busy = findActiveRuns(db, { ignoreWorktrees: ["/wt/t3-1"], ignoreThreads: ["pinned"] });
   expect(busy.map((run) => run.threadId)).toEqual(["other"]);
   expect(findActiveRuns(db, { ignoreThreads: ["deployer", "other", "pinned"] })).toEqual([]);
+});
+
+it("counts a thread whose run completed but whose background subagent is still running", () => {
+  const { db, addThread, addRun, addSubagent } = makeDb();
+  addThread("a", "Alpha", null);
+  addThread("b", "Beta", null);
+  addRun("a", "completed");
+  addSubagent("a", "running");
+  addSubagent("b", "completed");
+  expect(findActiveRuns(db)).toEqual([{ threadId: "a", status: "subagent", title: "Alpha" }]);
+  expect(findActiveRuns(db, { ignoreThreads: ["a"] })).toEqual([]);
 });

@@ -1,12 +1,34 @@
 ---
 name: redeploy
-description: Redeploy this self-hosted T3 Code prod server (https://t3.gordonlabs.dev) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main, or wants it deployed "when idle" / once nothing is running. Only runs on the T3 deploy host.
+description: Redeploy this self-hosted T3 Code prod server (https://t3.gordonlabs.dev) to the latest origin/main. Syncs the deploy checkout to a detached copy of origin/main, rebuilds, and restarts t3code.service via a detached unit. Always waits for every other thread to be idle (2 minutes quiet) before restarting; never interrupts running work. Use when the user says "/redeploy", "redeploy T3", or wants prod updated to main. Only runs on the T3 deploy host.
 ---
 
 # Redeploy T3 Code (prod)
 
 Redeploys the self-hosted T3 Code server to the current `origin/main`. The logic lives in
 `redeploy.sh` next to this file; your job is to run it and report what it prints.
+
+## HARD RULE — never redeploy while other threads are active
+
+**`/redeploy` ALWAYS means "wait until every other thread has been idle for 2 minutes, then
+deploy".** Restarting `t3code.service` kills every running agent turn on the box, and the user
+has lost real work to this. So:
+
+- **Never assume the user wants an immediate restart.** Not because they said "now", "asap",
+  "quickly", or "just redeploy"; not because the deploy "looks small"; not because the
+  threads "look finished". Only the idle gate decides when it is safe.
+- **Never bypass the gate.** `redeploy.sh` waits for idle on its own (before the checkout and
+  again before the restart) and has no flag to skip it. Do not edit the script, set
+  `T3_IDLE_SECS=0`, restart `t3code.service` by hand, or run `systemctl`/`systemd-run` yourself
+  to get around the wait.
+- **Never use `--ignore-thread` to release a thread that is actually working.** It exists for
+  your own chat and for a run you have _verified_ is a zombie. If you are unsure, wait.
+- **Just run it and let it wait**, in the background, up to the two-hour limit. Do not ask the
+  user "should I wait for the other threads?" — the answer is always yes. If it aborts on the
+  timeout, nothing was restarted: report which threads held it and offer to retry.
+- Only an explicit, unambiguous instruction to interrupt other running threads (for example
+  "kill everything and redeploy now, I don't care about the other chats") changes this, and
+  even then, name the threads that will be cut off and confirm first.
 
 ## What the script does
 
@@ -50,17 +72,16 @@ snapshot would be silently lost once the new server started on the already-exist
 Don't run other `t3` CLI commands from the deploy checkout between the checkout and the
 restart either.
 
-## Deploying only when T3 is idle (`--when-idle`)
+## The idle gate (always on)
 
-```bash
-bash "$(git rev-parse --show-toplevel)/.claude/skills/redeploy/redeploy.sh" --when-idle
-```
+`redeploy.sh` waits for T3 to be idle on every run. Run it in the background
+(`run_in_background`): it can wait up to two hours (`T3_IDLE_MAX_WAIT_SECS`, in each of its two
+gates) before it aborts with nothing changed. (`--when-idle` is still accepted but does nothing
+extra; waiting is no longer optional.)
 
-Use it when the user says to deploy "when nothing is running". Run it in the background
-(`run_in_background`): it can wait for up to two hours (`T3_IDLE_MAX_WAIT_SECS`, in each of
-its two gates) before it aborts with nothing changed.
-
-- **What counts as busy:** a thread with a `pending` (queued) or `running` run, read straight
+- **What counts as busy:** a thread with a `pending` (queued) or `running` run, or with a
+  `running` subagent (a background agent keeps working after the parent's turn has completed,
+  and a restart kills it), read straight
   from `statev2.sqlite` by `scripts/deploy-idle-check.ts`. A run `waiting` on a person's
   approval or answer is not busy, since it survives a restart. Any busy poll restarts the
   quiet clock; the server must stay quiet for `T3_IDLE_SECS` (default 120) in a row.
@@ -69,10 +90,10 @@ its two gates) before it aborts with nothing changed.
   since the install and build take minutes. The import timer is only paused between them.
 - **Your own chat is excluded** when it runs in a `t3code/*` worktree (the idle check matches
   the thread by worktree path). From a chat in the main checkout, pass its thread id with
-  `--ignore-thread <id>`; the same flag releases a run you know is a zombie that would
-  otherwise hold the deploy.
+  `--ignore-thread <id>`, otherwise the script waits on the chat that launched it until the
+  timeout. The same flag releases a run you know is a zombie (see the hard rule above).
 - **While it waits** it prints each busy thread (id, status, title) whenever that list changes.
-- **Notice:** after every redeploy, plain or `--when-idle`, the detached unit publishes
+- **Notice:** after every redeploy, the detached unit publishes
   "T3 was updated and restarted (now at <sha>)" with `t3 notice` once the new server answers.
   Every connected client shows it as a warning toast, and clients that reconnect within two
   minutes still see it. It runs from the new build against the new server on purpose: the
@@ -92,7 +113,9 @@ background. Reconnect and read the status log.
 bash "$(git rev-parse --show-toplevel)/.claude/skills/redeploy/redeploy.sh"
 ```
 
-Then:
+Launch it with `run_in_background: true` (it may wait up to two hours for other threads to
+finish), tell the user it is waiting for the other threads and will deploy once they have been
+idle for 2 minutes, and check its output as it progresses. Then:
 
 - **If the script aborts before the restart** (e.g. build failure): report the error and do
   NOT restart anything. Nothing was deployed; the old server is still running untouched.
