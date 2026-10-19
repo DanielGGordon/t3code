@@ -558,13 +558,14 @@ describe("KeybindingsSettings.logic", () => {
     ).toEqual(["Chat: New Local"]);
   });
 
-  it("lists only rebinds and additions as the user's own shortcuts", () => {
+  it("lists only Ctrl/Cmd+Shift rebinds and additions as the user's own shortcuts", () => {
     const keybindings = [
       ...compileResolvedKeybindingsConfig([
         { key: "mod+shift+u", command: "modelPicker.toggle", when: "!terminalFocus" },
         { key: "mod+shift+m", command: "chat.newInProject.1", when: "!terminalFocus" },
         { key: "mod+shift+h", command: "thread.snoozeHour" },
         { key: "f9", command: "thread.snoozeHour" },
+        { key: "mod+3", command: "chat.newInProject.3" },
       ]),
       ...DEFAULT_RESOLVED_KEYBINDINGS.filter((rule) => rule.command !== "modelPicker.toggle"),
     ];
@@ -572,7 +573,7 @@ describe("KeybindingsSettings.logic", () => {
       [
         { command: "chat.newInProject.1", keys: ["mod+shift+m"] },
         { command: "modelPicker.toggle", keys: ["mod+shift+u"] },
-        { command: "thread.snoozeHour", keys: ["f9", "mod+shift+h"] },
+        { command: "thread.snoozeHour", keys: ["mod+shift+h"] },
       ],
     );
   });
