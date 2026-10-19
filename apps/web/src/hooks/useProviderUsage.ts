@@ -5,15 +5,17 @@ import { useMemo } from "react";
 import {
   type HeaderClaudeUsage,
   type HeaderCodexUsage,
+  type HeaderGeminiUsage,
   selectClaudeUsage,
   selectCodexUsage,
+  selectGeminiUsage,
 } from "../lib/headerUsageLimits";
 import { serverEnvironment } from "../state/server";
 
 const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 /**
- * Claude plan and Codex subscription windows for one environment, read from
+ * Claude plan, Codex and Gemini (Antigravity) subscription windows for one environment, read from
  * the provider snapshots' `usageLimits` the server already publishes and
  * refreshes. Null for a provider that reports no windows (API key, never
  * probed) — render nothing in that case.
@@ -21,11 +23,16 @@ const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 export function useProviderUsage(environmentId: EnvironmentId): {
   readonly claude: HeaderClaudeUsage | null;
   readonly codex: HeaderCodexUsage | null;
+  readonly gemini: HeaderGeminiUsage | null;
 } {
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_PROVIDERS;
   return useMemo(
-    () => ({ claude: selectClaudeUsage(providers), codex: selectCodexUsage(providers) }),
+    () => ({
+      claude: selectClaudeUsage(providers),
+      codex: selectCodexUsage(providers),
+      gemini: selectGeminiUsage(providers),
+    }),
     [providers],
   );
 }

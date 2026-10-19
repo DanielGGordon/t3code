@@ -513,6 +513,12 @@ export const ClientSettingsSchema = Schema.Struct({
   // viewports. All default off; toggled per device from the header menu.
   headerUsageCodexVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageContextVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageGeminiSessionVisible: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  headerUsageGeminiWeeklyVisible: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   headerUsageScopedWeeklyVisible: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1827,6 +1833,8 @@ export const ClientSettingsPatch = Schema.Struct({
   headerProjectScriptsVisibility: Schema.optionalKey(HeaderControlVisibility),
   headerUsageCodexVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageContextVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageGeminiSessionVisible: Schema.optionalKey(Schema.Boolean),
+  headerUsageGeminiWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageScopedWeeklyVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSessionVisible: Schema.optionalKey(Schema.Boolean),
   headerUsageSpendVisible: Schema.optionalKey(Schema.Boolean),

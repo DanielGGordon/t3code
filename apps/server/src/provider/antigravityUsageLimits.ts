@@ -227,6 +227,10 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       operation: string,
       parse: (response: unknown) => Effect.Effect<ServerProviderUsageWindow[], E>,
     ) {
+      // Endpoints report different groups for the same account (the daily one
+      // can list only Claude & GPT while the production one adds Gemini), so
+      // merge every endpoint's windows; the first to report an id wins.
+      const merged = new Map<string, ServerProviderUsageWindow>();
       for (const endpoint of ENDPOINTS) {
         const windows = yield* request(
           HttpClientRequest.post(`${endpoint}/v1internal:${operation}`).pipe(
@@ -240,9 +244,9 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
           Effect.flatMap(parse),
           Effect.orElseSucceed(() => []),
         );
-        if (windows.length > 0) return windows;
+        for (const window of windows) if (!merged.has(window.id)) merged.set(window.id, window);
       }
-      return [];
+      return [...merged.values()];
     });
     const summary = yield* fetchWindows("retrieveUserQuotaSummary", (response) =>
       decodeSummary(response).pipe(Effect.map(summaryWindows)),

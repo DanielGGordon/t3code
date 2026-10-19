@@ -58,6 +58,8 @@ const clientSettings: ClientSettings = {
   headerProjectScriptsVisibility: "auto",
   headerUsageCodexVisible: true,
   headerUsageContextVisible: false,
+  headerUsageGeminiSessionVisible: false,
+  headerUsageGeminiWeeklyVisible: false,
   headerUsageScopedWeeklyVisible: false,
   headerUsageSessionVisible: false,
   headerUsageSpendVisible: false,

@@ -119,8 +119,11 @@ export const ChatHeader = memo(function ChatHeader({
   );
   // Subscription windows ride on the thread's own environment's provider
   // snapshots, so they always describe the account the thread runs on.
-  const { claude: claudeAccountUsage, codex: codexUsage } =
-    useProviderUsage(activeThreadEnvironmentId);
+  const {
+    claude: claudeAccountUsage,
+    codex: codexUsage,
+    gemini: geminiUsage,
+  } = useProviderUsage(activeThreadEnvironmentId);
   const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
   const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
   const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
@@ -138,6 +141,7 @@ export const ChatHeader = memo(function ChatHeader({
     contextWindow,
     claudeUsage: claudeAccountUsage,
     codexUsage,
+    geminiUsage,
     // A stock quote is a public, host-agnostic value, so it is shown for every
     // thread (no primary-environment gate like the credential-backed stats).
     stockQuote,

@@ -59,6 +59,8 @@ const claudeUsage: HeaderClaudeUsage = {
 
 const allVisible: HeaderUsageStatsVisibility = {
   codex: true,
+  geminiSession: true,
+  geminiWeekly: true,
   stock: true,
   context: true,
   spend: true,
@@ -71,6 +73,8 @@ describe("selectHeaderUsageStatsVisibility", () => {
   it("defaults every stat to hidden", () => {
     expect(selectHeaderUsageStatsVisibility(DEFAULT_CLIENT_SETTINGS)).toEqual({
       codex: false,
+      geminiSession: false,
+      geminiWeekly: false,
       stock: false,
       context: false,
       spend: false,
@@ -268,6 +272,35 @@ describe("selectHeaderUsageStats", () => {
     });
 
     expect(stats.some((stat) => stat.id === "codex")).toBe(false);
+  });
+
+  it("renders the Gemini 5h and weekly windows as separate stats with reset times", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      geminiUsage: {
+        session: { usedPercent: 37.4, resetsAt: "2026-03-23T04:36:00.000Z" },
+        weekly: { usedPercent: 8, resetsAt: "2026-03-26T12:06:00.000Z" },
+      },
+    });
+
+    expect(stats.map((stat) => ({ id: stat.id, label: stat.label, value: stat.value }))).toEqual([
+      { id: "geminiSession", label: "Gemini 5h", value: "37%" },
+      { id: "geminiWeekly", label: "Gemini Weekly", value: "8%" },
+    ]);
+    expect(stats[0]?.resetsAt).toBe("2026-03-23T04:36:00.000Z");
+  });
+
+  it("omits the Gemini stats when Antigravity reports no Gemini windows", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      geminiUsage: { session: null, weekly: { usedPercent: 8 } },
+    });
+
+    expect(stats.map((stat) => stat.id)).toEqual(["geminiWeekly"]);
   });
 
   it("renders the stock price with a green tint and change tooltip when up", () => {
