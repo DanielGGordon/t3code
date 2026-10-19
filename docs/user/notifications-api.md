@@ -206,8 +206,10 @@ def verify_t3_signature(header: str | None, raw_body: bytes, secret: str) -> boo
     return hmac.compare_digest(expected.hexdigest(), match.group(2))
 ```
 
-## Known limitation: two-factor authentication
+## Two-factor authentication
 
-Once two-factor authentication is enrolled on the server, every HTTP request must carry a verified
-second factor. A `notifications:write` token issued from the CLI has none, so its requests are
-rejected with 401 until two-factor is disabled. Service tokens are not yet exempt.
+Tokens issued on the server with `t3 auth session issue` are exempt from two-factor
+authentication, so a `notifications:write` token keeps working after you enable 2FA.
+This needs a server that includes the exemption (#99). A token issued before that
+version is treated like a paired device and gets 401 once 2FA is enabled; issue a
+new one and revoke the old one with `t3 auth session revoke <id>`.
