@@ -9,7 +9,7 @@
 #   redeploy.sh [--when-idle] [--ignore-thread <id>]...
 #
 # --when-idle waits until no T3 conversation has had a queued or running turn for
-# T3_IDLE_SECS (default 60) before touching the checkout, and again before the restart
+# T3_IDLE_SECS (default 120) before touching the checkout, and again before the restart
 # (the build takes minutes). The chat running this script is excluded automatically
 # when it lives in a git worktree; otherwise pass its id with --ignore-thread.
 # Either way, once the new server answers, every connected client gets a notice.
@@ -46,7 +46,7 @@ IMPORT_WAIT_SECS="${T3_IMPORT_WAIT_SECS:-900}"
 # --when-idle: how long the server must be quiet, how long to wait for that in each
 # of the two gates (before the checkout, and again right before the restart), and
 # where the state lives. T3_BASE_DIR must match the deployed server's --base-dir.
-IDLE_SECS="${T3_IDLE_SECS:-60}"
+IDLE_SECS="${T3_IDLE_SECS:-120}"
 IDLE_MAX_WAIT_SECS="${T3_IDLE_MAX_WAIT_SECS:-7200}"
 IDLE_POLL_SECS="${T3_IDLE_POLL_SECS:-5}"
 T3_BASE_DIR="${T3_BASE_DIR:-$HOME/.t3}"
