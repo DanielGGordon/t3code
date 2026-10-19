@@ -13,10 +13,11 @@ import {
   type CacheKeepAliveThread,
 } from "@t3tools/shared/cacheKeepAlive";
 import { CirclePauseIcon, FlameIcon } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import { useClientSettings } from "../../hooks/useSettings";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useEnvironmentProviders } from "../../state/environments";
 import { useEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
@@ -85,38 +86,34 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   readonly composerSize?: ComposerControlSize;
 }) {
   const { environmentId, threadId, placement } = props;
-  const shell = useThreadShell(
-    useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
-  );
+  const shell = useThreadShell(scopeThreadRef(environmentId, threadId));
   const serverConfig = useServerConfigs().get(environmentId);
+  const providers = useEnvironmentProviders().get(environmentId);
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const setCacheKeepAlive = useOrchestrationCommand(threadEnvironment.setCacheKeepAlive);
   // The tooltip judges the thread against the clock read when it opens.
   const [openedAtMs, setOpenedAtMs] = useState(0);
-  const handleOpenChange = useCallback((open: boolean) => {
+  const handleOpenChange = (open: boolean) => {
     if (open) setOpenedAtMs(Date.now());
-  }, []);
+  };
   const heartbeat = shell !== null && cacheKeptWarmByHeartbeat(shell.source);
   const keepAlive = shell?.source.cacheKeepAlive ?? null;
   const keepAliveActive = keepAlive !== null && keepAlive.pausedAt === null;
-  const handlePressedChange = useCallback(
-    (enabled: boolean) => {
-      if (heartbeat && !enabled) {
-        // The heartbeat is the agent's own doing; only the toggle can go off.
-        if (keepAliveActive) {
-          void setCacheKeepAlive({ environmentId, input: { threadId, enabled: false } });
-        }
-        toastManager.add({
-          type: "info",
-          title: "Cache is being kept warm by the subagent heartbeat",
-          description: `${HEARTBEAT_EXPLANATION}${keepAliveActive ? " Keep cache warm is now off, so pings won't continue after that." : ""}`,
-        });
-        return;
+  const handlePressedChange = (enabled: boolean) => {
+    if (heartbeat && !enabled) {
+      // The heartbeat is the agent's own doing; only the toggle can go off.
+      if (keepAliveActive) {
+        void setCacheKeepAlive({ environmentId, input: { threadId, enabled: false } });
       }
-      void setCacheKeepAlive({ environmentId, input: { threadId, enabled } });
-    },
-    [heartbeat, keepAliveActive, setCacheKeepAlive, environmentId, threadId],
-  );
+      toastManager.add({
+        type: "info",
+        title: "Cache is being kept warm by the subagent heartbeat",
+        description: `${HEARTBEAT_EXPLANATION}${keepAliveActive ? " Keep cache warm is now off, so pings won't continue after that." : ""}`,
+      });
+      return;
+    }
+    void setCacheKeepAlive({ environmentId, input: { threadId, enabled } });
+  };
   if (shell === null || serverConfig?.environment.capabilities.threadCacheKeepAlive !== true) {
     return null;
   }
@@ -127,8 +124,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   if (
     keepAlive === null &&
     !cacheKeepAliveSupportsDriver(
-      serverConfig.providers.find((provider) => provider.instanceId === thread.providerInstanceId)
-        ?.driver,
+      providers?.find((provider) => provider.instanceId === thread.providerInstanceId)?.driver,
     )
   ) {
     return null;

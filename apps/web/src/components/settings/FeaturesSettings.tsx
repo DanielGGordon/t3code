@@ -22,7 +22,7 @@ import {
 import { HOST_STATS_PICKER_STYLES, HOST_STATS_VARIANTS } from "../host-stats/variants";
 
 import { useCondensedChrome } from "../../hooks/useTouchLayout";
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import { useClientSettings, updateClientSettings } from "../../hooks/useSettings";
 import { resolveHeaderControlVisibility } from "../../lib/headerControlVisibility";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -103,7 +103,7 @@ export function FeaturesSettingsPanel() {
     sidebarHostStatsVisible: s.sidebarHostStatsVisible,
     sidebarHostStatsStyle: s.sidebarHostStatsStyle,
   }));
-  const updateSettings = useUpdateClientSettings();
+  const updateSettings = updateClientSettings;
 
   return (
     <SettingsPageContainer>

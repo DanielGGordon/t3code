@@ -16,7 +16,8 @@ const freshDatabase = () => NodeSqliteClient.layer({ filename: ":memory:" });
  * settled/snoozed pair as 34/35 (2026-07 sync), upstream 35..58 as 36..59
  * (2026-10-06 sync, incl. OrchestrationV2 at 56) and upstream 59..61 as 60..62
  * (2026-10-13 sync). The fork's later own migrations are 63 (AuthSessionClientIps),
- * 64 (TwoFactor) and 65 (Notifications).
+ * 64 (TwoFactor) and 65 (Notifications), so upstream 062..064 run as 66..68
+ * (2026-10-19 sync).
  *
  * This matters because Effect's Migrator run loop is purely ordinal —
  * `if (currentId <= latestMigrationId) continue` — with no name or checksum
@@ -89,19 +90,21 @@ describe("034_035 fork migration offset", () => {
 
       const executed = yield* runMigrations();
       // Every upstream migration from upstream-35 (TitleRegeneration) on runs,
-      // none is skipped, and the ids are contiguous 36..65.
+      // none is skipped, and the ids are contiguous 36..68.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        Array.from({ length: 65 - 35 }, (_, index) => 36 + index),
+        Array.from({ length: 68 - 35 }, (_, index) => 36 + index),
       );
       assert.deepStrictEqual(executed[0], [36, "ProjectionThreadTitleRegeneration"]);
       assert.deepStrictEqual(
         executed.find(([, name]) => name === "OrchestrationV2"),
         [56, "OrchestrationV2"],
       );
-      assert.deepStrictEqual(executed.at(-4), [62, "PullRequestReviewGuides"]);
-      assert.deepStrictEqual(executed.at(-3), [63, "AuthSessionClientIps"]);
-      assert.deepStrictEqual(executed.at(-1), [65, "Notifications"]);
+      assert.deepStrictEqual(executed.at(-7), [62, "PullRequestReviewGuides"]);
+      assert.deepStrictEqual(executed.at(-6), [63, "AuthSessionClientIps"]);
+      assert.deepStrictEqual(executed.at(-4), [65, "Notifications"]);
+      assert.deepStrictEqual(executed.at(-3), [66, "ThreadFailureLookupIndex"]);
+      assert.deepStrictEqual(executed.at(-1), [68, "CanonicalizeThreadPullRequestLinks"]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       // The recorded ledger equals this build's manifest (no divergence warning).

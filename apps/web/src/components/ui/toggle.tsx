@@ -56,5 +56,4 @@ function Toggle({
   );
 }
 
-// The *Variants function is for components/ui modules only.
 export { Toggle, toggleVariants };
