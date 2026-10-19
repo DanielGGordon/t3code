@@ -148,7 +148,7 @@ describe("ClaudeTranscriptSync", () => {
         WHERE thread_id = ${threadId} AND effect_type = 'thread-title.generate'
       `;
       assert.deepStrictEqual(
-        titleEffects.map((row) => row.command_id),
+        titleEffects.map((row): string | undefined => row.command_id),
         [records.thread.titleRegeneration?.requestId],
       );
       assert.deepStrictEqual(

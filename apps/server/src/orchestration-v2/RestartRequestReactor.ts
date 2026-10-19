@@ -75,7 +75,7 @@ export const make = Effect.gen(function* () {
     if (!classification.matched) return;
     const shell = yield* orchestrator.getThreadShell(message.threadId);
     if (shell === null || shell.restartRequest != null || shell.archivedAt !== null) return;
-    const uuid = yield* crypto.randomUUIDv4;
+    const uuid = yield* crypto.randomUUIDv4();
     yield* orchestrator.dispatch({
       type: "thread.restart-request.set",
       commandId: CommandId.make(`server:restart-request-detected:${uuid}`),

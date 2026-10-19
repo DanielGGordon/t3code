@@ -13,6 +13,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import type {
   HeaderClaudeUsage,
@@ -477,10 +478,11 @@ export function HeaderUsageStats(props: {
   compact?: boolean;
 }) {
   const { stats, condensed = false, compact = false } = props;
+  const nowMinute = useNowMinute();
   if (stats.length === 0) {
     return null;
   }
-  const now = Date.now();
+  const now = Date.parse(`${nowMinute}:00Z`);
   return (
     <div
       data-header-usage-stats
@@ -556,9 +558,11 @@ export function HeaderUsageStatsMenu(props: {
   const { visibility, scopedWeeklyLabel, stockSymbol, onPatch, condensed = false } = props;
   const [symbolDraft, setSymbolDraft] = useState(stockSymbol);
   // Keep the draft in sync when the persisted symbol changes elsewhere.
-  useEffect(() => {
+  const [syncedSymbol, setSyncedSymbol] = useState(stockSymbol);
+  if (syncedSymbol !== stockSymbol) {
+    setSyncedSymbol(stockSymbol);
     setSymbolDraft(stockSymbol);
-  }, [stockSymbol]);
+  }
   const commitSymbol = () => {
     const normalized = symbolDraft.trim().toUpperCase();
     if (normalized.length === 0) {

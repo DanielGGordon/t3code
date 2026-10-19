@@ -1,20 +1,9 @@
-/**
- * Migration runner with an inline loader.
- *
- * Uses Migrator.make with fromRecord to define migrations inline.
- * All migrations are statically imported - no dynamic file system loading.
- *
- * `runMigrations` is called by the SQLite persistence layer at startup, so the
- * schema is always up to date before the application starts.
- */
-
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileMigrationLedger } from "./reconcileMigrationLedger.ts";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
-// Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
 import Migration0002 from "./Migrations/002_OrchestrationCommandReceipts.ts";
 import Migration0003 from "./Migrations/003_CheckpointDiffBlobs.ts";
@@ -52,7 +41,7 @@ import Migration0033 from "./Migrations/033_ProjectionThreadRestartRequest.ts";
 // This fork's 033 (ProjectionThreadRestartRequest) has been recorded in
 // production's effect_sql_migrations since 2026-07-09. Effect's Migrator skips
 // any id <= the recorded max WITHOUT comparing names, so upstream's 33..61 run
-// locally as 34..62. File names keep upstream's numbering (so future syncs do
+// locally as 34..62 (and upstream's 062+ run at +4, after the fork's 63..65). File names keep upstream's numbering (so future syncs do
 // not re-conflict); only the ids in `migrationEntries` below are shifted.
 // Never renumber the fork's 033 upward. See UPSTREAM_DIVERGENCE.md and
 // Migrations/034_035_ForkMigrationOffset.test.ts.
@@ -86,21 +75,14 @@ import Migration0060 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0061 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0062 from "./Migrations/061_PullRequestReviewGuides.ts";
 // FORK MIGRATIONS — ids 63, 64 and 65 are this fork's own (recorded on production once
-// deployed). From the next sync on, upstream's 062+ run at +4 (062 -> 66).
+// deployed). Upstream's 062+ run at +4 (062 -> 66).
 import Migration0064 from "./Migrations/064_TwoFactor.ts";
 import Migration0063 from "./Migrations/063_AuthSessionClientIps.ts";
 import Migration0065 from "./Migrations/065_Notifications.ts";
+import Migration0066 from "./Migrations/062_ThreadFailureLookupIndex.ts";
+import Migration0067 from "./Migrations/063_DropUnusedV1Projections.ts";
+import Migration0068 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 
-/**
- * Migration loader with all migrations defined inline.
- *
- * Key format: "{id}_{name}" where:
- * - id: numeric migration ID (determines execution order)
- * - name: descriptive name for the migration
- *
- * Uses Migrator.fromRecord which parses the key format and
- * returns migrations sorted by ID.
- */
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -168,10 +150,14 @@ export const migrationEntries = [
   [60, "McpAppModelContext", Migration0060],
   [61, "ThreadSnapshotWindowIndexes", Migration0061],
   [62, "PullRequestReviewGuides", Migration0062],
-  // Fork-only (63-65); upstream's 062+ shift to 66+ (see the import block above).
+  // Fork-only (63-65); upstream's 062+ shift +4 to 66+ (see the import block above).
   [63, "AuthSessionClientIps", Migration0063],
   [64, "TwoFactor", Migration0064],
   [65, "Notifications", Migration0065],
+  // Upstream 062..064 at +4.
+  [66, "ThreadFailureLookupIndex", Migration0066],
+  [67, "DropUnusedV1Projections", Migration0067],
+  [68, "CanonicalizeThreadPullRequestLinks", Migration0068],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -193,8 +179,7 @@ const FIRST_V2_MIGRATION_ID = 56;
  * Fail before migrating when the migrator would skip one of V2's own
  * migrations. It skips every id up to the highest recorded one, whatever name
  * was recorded, so a database that took a V2 id for another migration would
- * start without V2's schema and fail on first use. Earlier ids keep the
- * warning below: databases with a site-local migration there still work.
+ * start without V2's schema and fail on first use.
  */
 const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
   throughId?: number,
@@ -228,26 +213,12 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
   });
 });
 
-/**
- * Migrator run function - no schema dumping needed
- * Uses the base Migrator.make without platform dependencies
- */
 const run = Migrator.make({});
 
 export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
 
-/**
- * Run all pending migrations.
- *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
- *
- * Returns array of [id, name] tuples for migrations that were run.
- *
- * @returns Effect containing array of executed migrations
- */
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
@@ -274,10 +245,6 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     ? Effect.logDebug("Database schema is current")
     : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
 
-  // The migrator keys on migration_id: a database that recorded a different
-  // migration under a shared id (local or fork builds) keeps that id and
-  // silently skips this build's migration at it. Surface the divergence so the
-  // skipped schema change is diagnosable.
   const sql = yield* SqlClient.SqlClient;
   const recorded = yield* sql<{
     readonly migration_id: number;

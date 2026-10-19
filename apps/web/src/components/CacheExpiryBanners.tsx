@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { BellOffIcon, TimerIcon } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   dueCacheExpiryBanners,
@@ -10,8 +10,10 @@ import {
   type CacheExpiryBanner,
 } from "../cacheExpiryBanners.logic";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { useClientSettings } from "../hooks/useSettings";
-import { useServerConfigs, useThreadShells } from "../state/entities";
+import { useThreadShells } from "../state/entities";
+import { useEnvironmentProviders } from "../state/environments";
 import { formatShortTimestamp } from "../timestampFormat";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
@@ -46,7 +48,7 @@ export function CacheExpiryBanners() {
   const minTokens = useClientSettings((settings) => settings.cacheExpiryBannerMinTokens);
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const threads = useThreadShells(enabled);
-  const serverConfigs = useServerConfigs();
+  const providersByEnvironment = useEnvironmentProviders();
   const navigate = useNavigate();
   const [store, setStore] = useLocalStorage(STORAGE_KEY, EMPTY_STORE, BannerStore);
   const toasts = useRef(new Map<string, ToastId>());
@@ -61,10 +63,9 @@ export function CacheExpiryBanners() {
         nowMs: Date.now(),
         minTokens,
         driverOf: (thread) =>
-          serverConfigs
+          providersByEnvironment
             .get(thread.environmentId)
-            ?.providers.find((provider) => provider.instanceId === thread.providerInstanceId)
-            ?.driver,
+            ?.find((provider) => provider.instanceId === thread.providerInstanceId)?.driver,
       });
       if (due.length === 0) return;
       setStore((current) => {
@@ -79,24 +80,21 @@ export function CacheExpiryBanners() {
     openDue();
     const timer = setInterval(openDue, RECHECK_MS);
     return () => clearInterval(timer);
-  }, [enabled, threads, minTokens, serverConfigs, setStore]);
+  }, [enabled, threads, minTokens, providersByEnvironment, setStore]);
 
-  const dismiss = useCallback(
-    (key: string) => {
-      toasts.current.delete(key);
-      const now = Date.now();
-      setStore((current) => ({
-        open: current.open.filter((banner) => banner.key !== key),
-        dismissed: [
-          ...current.dismissed.filter((entry) => now - entry.at < KEEP_DISMISSED_MS),
-          { key, at: now },
-        ],
-      }));
-    },
-    [setStore],
-  );
+  const dismiss = useStableCallback((key: string) => {
+    toasts.current.delete(key);
+    const now = Date.now();
+    setStore((current) => ({
+      open: current.open.filter((banner) => banner.key !== key),
+      dismissed: [
+        ...current.dismissed.filter((entry) => now - entry.at < KEEP_DISMISSED_MS),
+        { key, at: now },
+      ],
+    }));
+  });
 
-  const dismissAll = useCallback(() => {
+  const dismissAll = useStableCallback(() => {
     toasts.current.clear();
     const now = Date.now();
     setStore((current) => ({
@@ -106,7 +104,7 @@ export function CacheExpiryBanners() {
         ...current.open.map((banner) => ({ key: banner.key, at: now })),
       ],
     }));
-  }, [setStore]);
+  });
 
   // Turning the setting off drops the open banners rather than parking them.
   useEffect(() => {

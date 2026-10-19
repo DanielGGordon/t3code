@@ -69,9 +69,10 @@ export const voiceTranscriptionRouteLayer = HttpRouter.add(
         Effect.map((text) =>
           HttpServerResponse.jsonUnsafe({ text } satisfies VoiceTranscriptionResult),
         ),
-        Effect.catchTag("VoiceTranscriptionError", (error) =>
-          Effect.succeed(failureResponse(error.reason, error.message)),
-        ),
+        Effect.catchTags({
+          VoiceTranscriptionError: (error) =>
+            Effect.succeed(failureResponse(error.reason, error.message)),
+        }),
       );
   }).pipe(
     Effect.catchTags({

@@ -23,6 +23,54 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-10-19 — True merge of upstream through `f0fb0e852` (2026-10-19)
+
+1149 upstream commits since `98a6246d0` (mostly React Compiler perf work, server/web fixes,
+`t3 doctor` storage reclaim, delegated tasks in separate worktrees, PR link canonicalization,
+telemetry via `ingest.t3.codes`). 60 files conflicted (26 server, 28 web, 6 packages).
+
+### Migration numbering (offset +4)
+
+Upstream's 062 `ThreadFailureLookupIndex`, 063 `DropUnusedV1Projections` and 064
+`CanonicalizeThreadPullRequestLinks` run at fork ids **66, 67, 68** (fork owns 63–65). A forward
+run on a snapshot of the prod ledger (fork-numbered through 64) ran exactly 65–68; a second run
+was a no-op. 063 drops the dead V1 projections (`projection_thread_activities`, `projection_turns`,
+`projection_thread_proposed_plans`, `projection_pending_approvals`, `projection_state`,
+`checkpoint_diff_blobs`); no fork server code reads them. 062 is an unguarded `CREATE INDEX`, so
+it fails loudly if `reconcileMigrationLedger` ever has to run it as a gap with the index present.
+
+### Resolutions worth knowing
+
+- **Auth:** upstream folded `AuthAdministrativeScopes` into `AuthStandardClientScopes`, so every
+  paired device (and the `t3` CLI / dev token) now gets `access:write` and `relay:write`. Taken
+  as-is; the fork's 2FA gate (`requireVerified`) runs before every authorized RPC via a new
+  `verifySession` argument to `RpcAuthorization.layer`, ahead of upstream's `onAuthorized`
+  analytics hook. Narrowing `/token` scopes is an open decision.
+- **Workspace writes:** upstream's write hardening (`resolveWriteTarget`, `O_NOFOLLOW`, known-
+  workspace containment) is taken. Saving through a symlink that escapes the workspace, or into an
+  explorer root that is not a registered project/worktree, is now refused. Fork reads (symlinked
+  files, re-rooted explorer) are unchanged.
+- **Antigravity usage:** upstream's both-endpoints merge replaces fork `71ba6c152c`.
+- **Web:** fork touch features (swipe, long-press, touch pills, keyboard-on-demand, voice input,
+  restart request, header usage stats, re-rooted explorer, Solarized) ported onto upstream's
+  compiler-friendly components (no manual memo, `useStableCallback`). `FilePreviewPanel` now
+  passes `cwd` only when it differs from the project root, so a file opened from the explorer and
+  from chat share one tab. `ComposerPendingApprovalActions.test.tsx` was replaced upstream by a
+  browser test; the fork's touch case moved there. Fork files were reworked to pass upstream's new
+  `no-manual-memo` / React Compiler lint rules.
+
+### Upstream behaviour on this host (audited, no fork change)
+
+- **Event-store compaction** now runs 1 min after start and every 6 h, deleting superseded
+  events. The Claude import's "stream ever existed" tombstone survives it: compaction keeps the
+  newest whole-thread event per stream, and every `claude-import-*` stream on prod has V2 events.
+- Settled-worktree cleanup (`storageCleanup`) is off by default; leave it off on this host (it
+  can't see test-deploy slots or external agents). Branch deletion after merge is a manual button.
+- Telemetry was already on by default; only the endpoint moved to `ingest.t3.codes`. Set
+  `T3CODE_TELEMETRY_ENABLED=false` in the unit to opt out.
+- SQLite now runs `synchronous = NORMAL`: a host crash can lose the last commits, not corrupt.
+- `t3 doctor` can delete `state.sqlite` (the pre-v2 rollback copy) only when explicitly chosen.
+
 ## 2026-10-19 — Fork migrations 64 and 65 (no upstream sync)
 
 The fork now owns **64 `TwoFactor`** (session two-factor verification, added without an entry

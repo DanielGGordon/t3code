@@ -38,8 +38,8 @@ export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props
     <Button
       type="button"
       size="icon"
-      variant="ghost"
-      className="shrink-0 rounded-full text-muted-foreground/70 hover:text-foreground/80"
+      variant="ghost-muted"
+      className="shrink-0"
       // Keep focus in the editor so a tap while open closes rather than
       // blurring (which already relocks) and then reopening.
       onPointerDown={(event) => event.preventDefault()}

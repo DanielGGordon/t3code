@@ -1,5 +1,6 @@
 // Fork (F7 thread spend): finished provider turns without an adapter-reported
 // cost are priced by TurnCostEstimator during ingestion.
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
@@ -15,8 +16,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as TurnCostEstimator from "../usage/TurnCostEstimator.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -36,6 +39,10 @@ const layerStores = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
 const layerEventSink = EventSink.layer.pipe(
   Layer.provide(Layer.mergeAll(layerStores, SqlitePersistence.layerMemory)),
 );
+const layerGit = GitVcsDriver.layer.pipe(
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "ingestor-cost-git-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
 const layerIngestor = (estimator: TurnCostEstimator.TurnCostEstimatorShape) =>
   Layer.mergeAll(
     IdAllocator.layer,
@@ -46,6 +53,7 @@ const layerIngestor = (estimator: TurnCostEstimator.TurnCostEstimatorShape) =>
           layerEventSink,
           IdAllocator.layer,
           ThreadCommandExecutor.layer,
+          layerGit,
           Layer.succeed(TurnCostEstimator.TurnCostEstimator, estimator),
         ),
       ),

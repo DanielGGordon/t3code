@@ -5,7 +5,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useState } from "react";
 import { RotateCcwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -58,12 +58,8 @@ export const RestartRequestBanner = memo(function RestartRequestBanner({
   threadId: ThreadId;
   projectId: ProjectId;
 }) {
-  const currentShell = useThreadShell(
-    useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
-  );
-  const siblingShells = useThreadShellsForProjectRefs(
-    useMemo(() => [scopeProjectRef(environmentId, projectId)], [environmentId, projectId]),
-  );
+  const currentShell = useThreadShell(scopeThreadRef(environmentId, threadId));
+  const siblingShells = useThreadShellsForProjectRefs([scopeProjectRef(environmentId, projectId)]);
   const requestingSibling = siblingShells.find(
     (sibling) => sibling.id !== threadId && sibling.requestingRestart,
   );
@@ -75,24 +71,24 @@ export const RestartRequestBanner = memo(function RestartRequestBanner({
 
   const [dismissedThreadIds, setDismissedThreadIds] = useState<readonly string[]>(readDismissals);
 
-  const handleDismissSibling = useCallback(() => {
+  const handleDismissSibling = () => {
     if (!siblingThreadId) return;
     persistDismissal(siblingThreadId);
     setDismissedThreadIds((current) =>
       current.includes(siblingThreadId) ? current : [...current, siblingThreadId],
     );
-  }, [siblingThreadId]);
+  };
 
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const setRestartRequest = useOrchestrationCommand(threadEnvironment.setRestartRequest, {
     reportFailure: false,
   });
-  const handleMarkResolved = useCallback(() => {
+  const handleMarkResolved = () => {
     void setRestartRequest({
       environmentId,
       input: { threadId, requesting: false, source: "manual", reason: null },
     });
-  }, [setRestartRequest, environmentId, threadId]);
+  };
 
   // The chat that raised the request gets a clear-it affordance.
   if (currentRequesting) {

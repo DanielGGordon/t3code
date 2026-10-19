@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { syncBrowserChromeTheme } from "./useTheme";
 
 /**
@@ -105,15 +105,15 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+function setColorScheme(next: ColorScheme) {
+  if (!hasSchemeStorage()) return;
+  localStorage.setItem(STORAGE_KEY, next);
+  applyColorScheme(next, true);
+  emitChange();
+}
+
 export function useColorScheme() {
   const colorScheme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-
-  const setColorScheme = useCallback((next: ColorScheme) => {
-    if (!hasSchemeStorage()) return;
-    localStorage.setItem(STORAGE_KEY, next);
-    applyColorScheme(next, true);
-    emitChange();
-  }, []);
 
   return { colorScheme, setColorScheme } as const;
 }

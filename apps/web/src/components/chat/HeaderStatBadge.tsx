@@ -17,16 +17,15 @@ export function HeaderStatBadge(props: {
         delay={150}
         closeDelay={0}
         render={
-          <Button
-            size="xs"
-            variant="outline"
-            className="shrink-0 text-muted-foreground data-[tone=critical]:text-destructive data-[tone=warning]:text-warning-foreground"
-            data-tone={props.tone ?? "default"}
-            aria-label={props.ariaLabel}
-          />
+          <Button size="xs" variant="outline" className="shrink-0" aria-label={props.ariaLabel} />
         }
       >
-        {props.trigger}
+        <span
+          className="contents text-muted-foreground data-[tone=critical]:text-destructive data-[tone=warning]:text-warning-foreground"
+          data-tone={props.tone ?? "default"}
+        >
+          {props.trigger}
+        </span>
       </PopoverTrigger>
       <PopoverPopup
         tooltipStyle

@@ -5,7 +5,6 @@ import {
   type ProjectId,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -29,15 +28,11 @@ export function NewThreadProjectSlotsSettings({
   const updateSettings = useUpdatePrimarySettings();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const allProjects = useProjects();
-  const projects = useMemo(
-    () =>
-      allProjects
-        .filter(
-          (project) => project.environmentId === primaryEnvironmentId && project.isScratch !== true,
-        )
-        .toSorted((left, right) => left.title.localeCompare(right.title)),
-    [allProjects, primaryEnvironmentId],
-  );
+  const projects = allProjects
+    .filter(
+      (project) => project.environmentId === primaryEnvironmentId && project.isScratch !== true,
+    )
+    .toSorted((left, right) => left.title.localeCompare(right.title));
   if (primaryEnvironmentId === null) return null;
 
   return (

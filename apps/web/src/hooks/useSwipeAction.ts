@@ -1,12 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
+import { useStableCallback } from "./useStableCallback";
 import { GestureClickSuppressor, isGesturePointer } from "./touchGestures";
 
 /**
@@ -138,112 +132,107 @@ export function useSwipeAction(
   const gestureRef = useRef<SwipeGesture | null>(null);
   const frameRef = useRef<number | null>(null);
   const suppressorRef = useRef(new GestureClickSuppressor());
-  // Latest callbacks without re-binding handlers on every parent render.
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+  const onCommit = useStableCallback(options.onCommit);
+  const onSwipeStart = useStableCallback(() => options.onSwipeStart?.());
 
-  const cancelFrame = useCallback(() => {
+  const cancelFrame = useStableCallback(() => {
     if (frameRef.current !== null) {
       window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     }
-  }, []);
+  });
   useEffect(() => cancelFrame, [cancelFrame]);
 
-  const finish = useCallback(
-    (commit: boolean) => {
-      const gesture = gestureRef.current;
-      gestureRef.current = null;
-      cancelFrame();
-      setDragging(false);
-      setOffset(0);
-      if (gesture === null || gesture.axis !== "horizontal") return;
-      suppressorRef.current.suppress(performance.now());
-      if (!commit) return;
-      const direction = resolveSwipeRelease({
-        offset: gesture.offset,
-        width: gesture.width,
-        velocity: estimateSwipeVelocity(gesture.samples),
-        allowLeft: optionsRef.current.allowLeft,
-        allowRight: optionsRef.current.allowRight,
-      });
-      if (direction !== null) optionsRef.current.onCommit(direction);
-    },
-    [cancelFrame],
-  );
+  const finish = useStableCallback((commit: boolean) => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    cancelFrame();
+    setDragging(false);
+    setOffset(0);
+    if (gesture === null || gesture.axis !== "horizontal") return;
+    suppressorRef.current.suppress(performance.now());
+    if (!commit) return;
+    const direction = resolveSwipeRelease({
+      offset: gesture.offset,
+      width: gesture.width,
+      velocity: estimateSwipeVelocity(gesture.samples),
+      allowLeft: options.allowLeft,
+      allowRight: options.allowRight,
+    });
+    if (direction !== null) onCommit(direction);
+  });
 
-  const handlers = useMemo<SwipePointerHandlers | undefined>(() => {
-    if (!enabled || (!allowLeft && !allowRight)) return undefined;
-    return {
-      onPointerDown: (event) => {
-        if (!isGesturePointer(event.pointerType) || event.button !== 0) return;
-        if (gestureRef.current !== null) return;
-        if ((event.target as HTMLElement).closest("input, textarea")) return;
-        gestureRef.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          width: event.currentTarget.getBoundingClientRect().width,
-          axis: "pending",
-          offset: 0,
-          samples: [{ x: event.clientX, t: event.timeStamp }],
-        };
-      },
-      onPointerMove: (event) => {
-        const gesture = gestureRef.current;
-        if (gesture === null || gesture.pointerId !== event.pointerId) return;
-        const dx = event.clientX - gesture.startX;
-        if (gesture.axis === "pending") {
-          gesture.axis = resolveSwipeAxis(dx, event.clientY - gesture.startY);
-          if (gesture.axis === "vertical") {
-            // Scrolling wins for the rest of this gesture.
-            gestureRef.current = null;
-            return;
+  const active = enabled && (allowLeft || allowRight);
+  const handlers: SwipePointerHandlers | undefined = !active
+    ? undefined
+    : {
+        onPointerDown: (event) => {
+          if (!isGesturePointer(event.pointerType) || event.button !== 0) return;
+          if (gestureRef.current !== null) return;
+          if ((event.target as HTMLElement).closest("input, textarea")) return;
+          gestureRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            width: event.currentTarget.getBoundingClientRect().width,
+            axis: "pending",
+            offset: 0,
+            samples: [{ x: event.clientX, t: event.timeStamp }],
+          };
+        },
+        onPointerMove: (event) => {
+          const gesture = gestureRef.current;
+          if (gesture === null || gesture.pointerId !== event.pointerId) return;
+          const dx = event.clientX - gesture.startX;
+          if (gesture.axis === "pending") {
+            gesture.axis = resolveSwipeAxis(dx, event.clientY - gesture.startY);
+            if (gesture.axis === "vertical") {
+              // Scrolling wins for the rest of this gesture.
+              gestureRef.current = null;
+              return;
+            }
+            if (gesture.axis === "pending") return;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            setDragging(true);
+            setWidth(gesture.width);
+            onSwipeStart();
           }
-          if (gesture.axis === "pending") return;
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          setDragging(true);
-          setWidth(gesture.width);
-          optionsRef.current.onSwipeStart?.();
-        }
-        gesture.offset = clampSwipeOffset(dx, {
-          allowLeft: optionsRef.current.allowLeft,
-          allowRight: optionsRef.current.allowRight,
-          width: gesture.width,
-        });
-        gesture.samples.push({ x: event.clientX, t: event.timeStamp });
-        if (gesture.samples.length > 8) gesture.samples.shift();
-        // Coalesce to one render per frame: pointermove can outpace paint.
-        if (frameRef.current === null) {
-          frameRef.current = window.requestAnimationFrame(() => {
-            frameRef.current = null;
-            setOffset(gestureRef.current?.offset ?? 0);
+          gesture.offset = clampSwipeOffset(dx, {
+            allowLeft: options.allowLeft,
+            allowRight: options.allowRight,
+            width: gesture.width,
           });
-        }
-      },
-      onPointerUp: (event) => {
-        if (gestureRef.current?.pointerId !== event.pointerId) return;
-        finish(true);
-      },
-      onPointerCancel: (event) => {
-        if (gestureRef.current?.pointerId !== event.pointerId) return;
-        finish(false);
-      },
-    };
-  }, [allowLeft, allowRight, enabled, finish]);
+          gesture.samples.push({ x: event.clientX, t: event.timeStamp });
+          if (gesture.samples.length > 8) gesture.samples.shift();
+          // Coalesce to one render per frame: pointermove can outpace paint.
+          if (frameRef.current === null) {
+            frameRef.current = window.requestAnimationFrame(() => {
+              frameRef.current = null;
+              setOffset(gestureRef.current?.offset ?? 0);
+            });
+          }
+        },
+        onPointerUp: (event) => {
+          if (gestureRef.current?.pointerId !== event.pointerId) return;
+          finish(true);
+        },
+        onPointerCancel: (event) => {
+          if (gestureRef.current?.pointerId !== event.pointerId) return;
+          finish(false);
+        },
+      };
 
   // Turning the feature off mid-gesture must not strand a translated row.
   useEffect(() => {
-    if (handlers === undefined && gestureRef.current !== null) finish(false);
-  }, [finish, handlers]);
+    if (!active && gestureRef.current !== null) finish(false);
+  }, [finish, active]);
 
-  const consumeSuppressedClick = useCallback(
-    () => suppressorRef.current.consume(performance.now()),
-    [],
+  const consumeSuppressedClick = useStableCallback(() =>
+    suppressorRef.current.consume(performance.now()),
   );
-  const cancel = useCallback(() => {
+  const cancel = useStableCallback(() => {
     if (gestureRef.current !== null) finish(false);
-  }, [finish]);
+  });
 
   const armed = width > 0 && Math.abs(offset) >= width * SWIPE_COMMIT_RATIO;
   return { offset, dragging, armed, handlers, cancel, consumeSuppressedClick };

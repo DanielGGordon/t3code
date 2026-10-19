@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import {
   type HeaderClaudeUsage,
@@ -27,12 +26,9 @@ export function useProviderUsage(environmentId: EnvironmentId): {
 } {
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_PROVIDERS;
-  return useMemo(
-    () => ({
-      claude: selectClaudeUsage(providers),
-      codex: selectCodexUsage(providers),
-      gemini: selectGeminiUsage(providers),
-    }),
-    [providers],
-  );
+  return {
+    claude: selectClaudeUsage(providers),
+    codex: selectCodexUsage(providers),
+    gemini: selectGeminiUsage(providers),
+  };
 }
