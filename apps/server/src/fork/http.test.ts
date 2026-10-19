@@ -8,13 +8,16 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as HttpRouter from "effect/http/HttpRouter";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
+import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 import {
   FORK_CLAUDE_IMPORT_ROUTE_PATH,
+  FORK_NOTICE_ROUTE_PATH,
   FORK_SESSION_RESET_ROUTE_PATH,
   forkRouteLayer,
 } from "./http.ts";
@@ -80,6 +83,15 @@ function run(request: Request, calls: Array<unknown>) {
           }),
     restoreLegacyResume: Effect.succeed({ restored: 0, skipped: 0 }),
   });
+  const lifecycleEvents = ServerLifecycleEvents.ServerLifecycleEvents.of({
+    publish: (event) =>
+      Effect.sync(() => {
+        calls.push({ publish: event });
+        return { ...event, sequence: 1 };
+      }),
+    snapshot: Effect.succeed({ sequence: 0, events: [] }),
+    stream: Stream.empty,
+  });
   return Effect.acquireUseRelease(
     Effect.sync(() =>
       HttpRouter.toWebHandler(forkRouteLayer.pipe(Layer.provide(NodeServices.layer)), {
@@ -93,6 +105,7 @@ function run(request: Request, calls: Array<unknown>) {
           Context.make(EnvironmentAuth.EnvironmentAuth, auth).pipe(
             Context.add(ClaudeTranscriptSync.ClaudeTranscriptSync, sync),
             Context.add(ClaudeResumeBindings.ClaudeResumeBindings, bindings),
+            Context.add(ServerLifecycleEvents.ServerLifecycleEvents, lifecycleEvents),
           ),
         ),
       ),
@@ -155,5 +168,33 @@ it.effect("resets a thread and maps refusals to 409", () =>
       calls,
     );
     expect(invalid.status).toBe(400);
+  }),
+);
+
+it.effect("publishes a trimmed notice on the lifecycle stream and rejects blank ones", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const ok = yield* run(
+      post(FORK_NOTICE_ROUTE_PATH, { message: "  Restarting to deploy  " }, OPERATE_TOKEN),
+      calls,
+    );
+    expect(ok.status).toBe(200);
+    const { id } = (yield* Effect.promise(() => ok.json())) as { id: string };
+    expect(id).toMatch(/^\d+$/);
+    expect(calls).toEqual([
+      { publish: { version: 1, type: "notice", payload: { id, message: "Restarting to deploy" } } },
+    ]);
+
+    const blank = yield* run(
+      post(FORK_NOTICE_ROUTE_PATH, { message: "   " }, OPERATE_TOKEN),
+      calls,
+    );
+    expect(blank.status).toBe(400);
+    const unauthorized = yield* run(
+      post(FORK_NOTICE_ROUTE_PATH, { message: "x" }, READ_ONLY_TOKEN),
+      calls,
+    );
+    expect(unauthorized.status).toBe(403);
+    expect(calls).toHaveLength(1);
   }),
 );

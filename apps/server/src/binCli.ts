@@ -24,6 +24,7 @@ import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
 import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { serviceCommand } from "./cli/service.ts";
+import { noticeCommand } from "./cli/notice.ts";
 import { sessionCommand } from "./cli/session.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
@@ -80,6 +81,8 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       // `t3 session audit|reset` (dangling Claude resume cursors).
       importCommand,
       sessionCommand,
+      // Fork: `t3 notice <message>` (banner on every connected client).
+      noticeCommand,
       serviceCommand,
       updateCommand,
       uninstallCommand,

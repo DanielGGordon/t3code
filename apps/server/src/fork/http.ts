@@ -10,6 +10,7 @@
  * Auth: an operate-scoped session, like the other raw routes.
  */
 import { AuthOrchestrationOperateScope, ThreadId } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -23,9 +24,11 @@ import {
 import { authenticateRawRouteWithScope } from "../http.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
+import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 
 export const FORK_CLAUDE_IMPORT_ROUTE_PATH = "/api/fork/import/claude-sync";
 export const FORK_SESSION_RESET_ROUTE_PATH = "/api/fork/session/reset";
+export const FORK_NOTICE_ROUTE_PATH = "/api/fork/notice";
 
 export const ClaudeImportRequest = Schema.Struct({
   ...ClaudeTranscriptSync.ClaudeImportOptions.fields,
@@ -54,6 +57,13 @@ export const SessionResetResponse = Schema.Struct({
 export type SessionResetResponse = typeof SessionResetResponse.Type;
 export const decodeSessionResetResponse = Schema.decodeUnknownOption(SessionResetResponse);
 
+export const NoticeRequest = Schema.Struct({ message: Schema.String });
+export type NoticeRequest = typeof NoticeRequest.Type;
+
+export const NoticeResponse = Schema.Struct({ id: Schema.String });
+export type NoticeResponse = typeof NoticeResponse.Type;
+export const decodeNoticeResponse = Schema.decodeUnknownOption(NoticeResponse);
+
 /** Body of every non-2xx response from these routes. */
 export const ForkRouteFailure = Schema.Struct({ error: Schema.String });
 
@@ -62,6 +72,7 @@ const failure = (status: number, error: string) =>
 
 const decodeClaudeImportRequest = Schema.decodeUnknownOption(ClaudeImportRequest);
 const decodeSessionResetRequest = Schema.decodeUnknownOption(SessionResetRequest);
+const decodeNoticeRequest = Schema.decodeUnknownOption(NoticeRequest);
 
 /** The JSON body, or `undefined` when it is missing or not JSON. */
 const readJsonBody = Effect.gen(function* () {
@@ -137,4 +148,29 @@ const sessionResetRoute = HttpRouter.add(
   ),
 );
 
-export const forkRouteLayer = Layer.mergeAll(claudeImportRoute, sessionResetRoute);
+/** `POST /api/fork/notice` — body `NoticeRequest`; shown to every connected client. */
+const noticeRoute = HttpRouter.add(
+  "POST",
+  FORK_NOTICE_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const body = decodeNoticeRequest(yield* readJsonBody);
+    const message = body._tag === "Some" ? body.value.message.trim() : "";
+    if (message.length === 0) {
+      return failure(400, "Invalid notice request body.");
+    }
+    const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+    // Unique per notice and across restarts, which reset the stream's sequence.
+    const id = String(yield* Clock.currentTimeMillis);
+    yield* lifecycleEvents.publish({ version: 1, type: "notice", payload: { id, message } });
+    return HttpServerResponse.jsonUnsafe({ id } satisfies NoticeResponse);
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const forkRouteLayer = Layer.mergeAll(claudeImportRoute, sessionResetRoute, noticeRoute);
