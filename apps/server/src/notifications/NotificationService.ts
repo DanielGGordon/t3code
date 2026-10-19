@@ -94,6 +94,7 @@ function parseCallbackOrigins(value: string): ReadonlySet<string> {
   return origins;
 }
 
+const isNotificationError = Schema.is(NotificationError);
 const invalid = (message: string) => new NotificationError({ message, reason: "invalid_request" });
 const storageError = (cause: unknown) =>
   new NotificationError({
@@ -332,9 +333,7 @@ const make = Effect.gen(function* () {
         return yield* findRow(id);
       }).pipe(
         sql.withTransaction,
-        Effect.mapError((error) =>
-          error instanceof NotificationError ? error : storageError(error),
-        ),
+        Effect.mapError((error) => (isNotificationError(error) ? error : storageError(error))),
       );
       yield* notifyChanged;
       return {
@@ -358,9 +357,7 @@ const make = Effect.gen(function* () {
         return yield* findRow(id);
       }).pipe(
         sql.withTransaction,
-        Effect.mapError((error) =>
-          error instanceof NotificationError ? error : storageError(error),
-        ),
+        Effect.mapError((error) => (isNotificationError(error) ? error : storageError(error))),
       );
       if (row === undefined) return yield* notFound(id);
       return {
