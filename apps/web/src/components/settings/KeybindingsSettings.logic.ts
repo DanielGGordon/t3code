@@ -369,8 +369,9 @@ export interface MyShortcut {
 
 /**
  * The user's own shortcuts for the "Show My Shortcuts" popup: every rule that
- * is not a stock default (rebinds and additions) plus project action
- * shortcuts, one entry per command.
+ * is not a stock default (rebinds and additions) and is bound as Ctrl/Cmd+Shift+key,
+ * one entry per command. The popup is a short cheat sheet of the shortcuts the
+ * user made on purpose, which all use that chord; other rows are noise.
  */
 export function collectMyShortcuts(
   keybindings: ResolvedKeybindingsConfig,
@@ -381,6 +382,10 @@ export function collectMyShortcuts(
   >();
   for (const row of buildKeybindingRows(keybindings)) {
     if (row.source === "Default") continue;
+    const { modKey, ctrlKey, metaKey, shiftKey, altKey } = row.binding.shortcut;
+    if (!shiftKey || altKey || (modKey ? 1 : 0) + (ctrlKey ? 1 : 0) + (metaKey ? 1 : 0) !== 1) {
+      continue;
+    }
     const entry = byCommand.get(row.command) ?? { keys: [], shortcuts: [] };
     byCommand.set(row.command, entry);
     if (entry.keys.includes(row.key)) continue;
