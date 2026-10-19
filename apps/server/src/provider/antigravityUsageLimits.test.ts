@@ -50,6 +50,8 @@ const summary = {
 const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
   options: {
     summary?: unknown;
+    /** Per-host summary override; the host is the first label of the endpoint URL. */
+    summaryByEndpoint?: Record<string, unknown>;
     models?: unknown;
     summaryStatus?: number;
     tokenStatus?: number;
@@ -96,7 +98,12 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
       return HttpClientResponse.fromWeb(
         request,
         request.url.endsWith(":retrieveUserQuotaSummary")
-          ? Response.json(options.summary ?? summary, { status: options.summaryStatus ?? 200 })
+          ? Response.json(
+              options.summaryByEndpoint?.[new URL(request.url).hostname.split(".")[0] ?? ""] ??
+                options.summary ??
+                summary,
+              { status: options.summaryStatus ?? 200 },
+            )
           : Response.json(options.models ?? { models: {} }),
       );
     }),
@@ -130,9 +137,28 @@ describe("Antigravity subscription limits", () => {
       expect(byId.get("3p-5h")?.usedPercent).toBeCloseTo(56);
       yield* probe;
       expect(requests.filter((request) => request.url.endsWith("/token"))).toHaveLength(1);
+      // Both endpoints are read on every probe, twice over two probes.
       expect(
         requests.filter((request) => request.url.endsWith(":retrieveUserQuotaSummary")),
-      ).toHaveLength(2);
+      ).toHaveLength(4);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("merges Gemini buckets that only the second endpoint reports", () =>
+    Effect.gen(function* () {
+      const { probe } = yield* fixture({
+        summaryByEndpoint: {
+          "daily-cloudcode-pa": { groups: [summary.groups[1]] },
+          "cloudcode-pa": summary,
+        },
+      });
+      const limits = yield* probe;
+      expect(limits.windows.map((window) => window.id).toSorted()).toEqual([
+        "3p-5h",
+        "3p-weekly",
+        "gemini-5h",
+        "gemini-weekly",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
