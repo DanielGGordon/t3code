@@ -1,7 +1,8 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { ChevronUpIcon, EllipsisIcon, PaperclipIcon } from "lucide-react";
+import { ChevronUpIcon, EllipsisIcon, HandIcon, PaperclipIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { openTouchGestures } from "../TouchGesturesDialog";
 import { ComposerTouchButton } from "./ComposerTouchButton";
 import {
   Menu,
@@ -164,6 +165,15 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuItem disabled={props.attachDisabled ?? false} onClick={props.onAttach}>
               <PaperclipIcon className="size-4 shrink-0" />
               Attach files
+            </MenuItem>
+          </>
+        ) : null}
+        {props.touchLayout ? (
+          <>
+            <MenuDivider />
+            <MenuItem onClick={openTouchGestures}>
+              <HandIcon className="size-4 shrink-0" />
+              Gestures
             </MenuItem>
           </>
         ) : null}
