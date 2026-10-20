@@ -141,7 +141,7 @@ git merge-base origin/main upstream/main   # must be the SHA you merged, not an 
 
 When a feature or bugfix is complete in a `t3code/*` worktree, do NOT merge to `main`. Follow **[docs/test-deployments.md](docs/test-deployments.md)**: open a PR, deploy the branch to a test slot from the pool (`node scripts/test-deploy.ts --pr <url> --note "<desc>" --comment`; each slot has its own URL, `https://t3-test-<port>.gordonlabs.dev`, override with `T3_TEST_DEPLOY_URL_TEMPLATE`), and comment the test URL on the PR so the user can jump straight into the running instance. Prod (external `7443` / loopback `3773` / unit `t3code.service`) is only redeployed from `main` after the user approves the PR — and `t3code.service` is never restarted without explicit user approval in the conversation. The scripts refuse all prod targets; never work around the guard.
 
-**`/redeploy` always waits for every other thread to be idle (2 minutes quiet) before restarting prod — never restart `t3code.service` while any thread has a queued or running turn, and never assume the user wants an immediate restart.** The skill's script enforces this with no opt-out; see `.agents/skills/redeploy/SKILL.md`.
+**`/redeploy` always waits for every other thread to be idle (2 minutes quiet) before restarting prod — never restart `t3code.service` while any thread has a queued or running turn, and never assume the user wants an immediate restart.** The only exception is the user explicitly invoking `/force-redeploy` (`.agents/skills/force-redeploy/SKILL.md`), which restarts regardless and then nudges every thread it cut off; never choose it on your own. The skill's script enforces this with no opt-out; see `.agents/skills/redeploy/SKILL.md`.
 
 ## Reference Repos
 
