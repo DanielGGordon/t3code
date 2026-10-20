@@ -357,7 +357,9 @@ screenshots, logs, or bug reports.
 ### Alerts for new devices and addresses
 
 The server can notify you when a device pairs, or when a paired session connects
-from an IP address it has not used before. Set either or both in the server's
+from an IP address it has not used before. Each alert always appears as a card
+under the bell in T3 Code (see [External notifications](./notifications-api.md)),
+with no setup. To also send it elsewhere, set either or both in the server's
 environment before starting it:
 
 - `T3CODE_SECURITY_ALERT_WEBHOOK_URL`: receives a JSON `{"text": "…"}` POST, such
