@@ -14,6 +14,7 @@ interface CapturedRequest {
   readonly model: File | string | null;
   readonly fileName: string | undefined;
   readonly fileType: string | undefined;
+  readonly prompt: File | string | null;
 }
 
 /** The layer can also fail with a ConfigError; these cases expect the domain error. */
@@ -39,6 +40,7 @@ const makeHarness = (options: {
         model: form?.get("model") ?? null,
         fileName: file instanceof File ? file.name : undefined,
         fileType: file instanceof File ? file.type : undefined,
+        prompt: form?.get("prompt") ?? null,
       });
       const response =
         options.respond?.(request.url) ??
@@ -109,6 +111,7 @@ describe("VoiceTranscription", () => {
           model: VoiceTranscription.DEFAULT_VOICE_TRANSCRIPTION_MODEL,
           fileName: "speech.webm",
           fileType: "audio/webm;codecs=opus",
+          prompt: null,
         },
       ]);
     }),
@@ -196,6 +199,7 @@ describe("VoiceTranscription with a local Whisper server", () => {
           model: VoiceTranscription.DEFAULT_LOCAL_VOICE_TRANSCRIPTION_MODEL,
           fileName: "speech.webm",
           fileType: "audio/webm;codecs=opus",
+          prompt: null,
         },
       ]);
     }),
@@ -237,6 +241,37 @@ describe("VoiceTranscription with a local Whisper server", () => {
           ],
         );
       }
+    }),
+  );
+
+  it.effect("sends the configured vocabulary prompt to both backends, trimmed", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        storedKey: "sk-stored",
+        env: {
+          T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650",
+          T3CODE_VOICE_TRANSCRIPTION_PROMPT: "  T3 Code, Tailscale, Techloq.\n",
+        },
+        respond: (url) => (url === LOCAL_URL ? "unreachable" : Response.json({ text: "ok" })),
+      });
+      yield* harness.transcribe();
+      assert.deepEqual(
+        harness.captured.map((request) => request.prompt),
+        ["T3 Code, Tailscale, Techloq.", "T3 Code, Tailscale, Techloq."],
+      );
+    }),
+  );
+
+  it.effect("omits the prompt field when the setting is blank", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        env: {
+          T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650",
+          T3CODE_VOICE_TRANSCRIPTION_PROMPT: "   ",
+        },
+      });
+      yield* harness.transcribe();
+      assert.equal(harness.captured[0]?.prompt, null);
     }),
   );
 

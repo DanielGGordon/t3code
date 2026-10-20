@@ -41,6 +41,12 @@ three seconds and a minute in about twelve on a modern CPU). Avoid the
 `distil` models for dictation: they are faster but silently drop the end of
 recordings longer than about 30 seconds.
 
+**Vocabulary hint.** Whisper mishears names it has never seen ("tee three code"
+for T3 Code). Set `T3CODE_VOICE_TRANSCRIPTION_PROMPT` to a short, comma-separated
+list of the names and jargon you say often and the server passes it to the local
+and OpenAI backends as Whisper's `prompt`. Whisper only reads roughly the last
+220 tokens of it, so keep it to the terms that actually get mangled.
+
 **OpenAI.** Without a local server, or when it fails, the server uses OpenAI.
 It looks for the API key in, in order:
 
