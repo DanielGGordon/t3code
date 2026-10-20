@@ -10,6 +10,10 @@
  * fallback when it fails. The OpenAI key comes from the server secret store
  * (`secrets/voice-transcription-openai-api-key.bin`, re-read on every request
  * so it can be set without a restart) and falls back to `OPENAI_API_KEY`.
+ *
+ * `T3CODE_VOICE_TRANSCRIPTION_PROMPT` is forwarded to both backends as
+ * Whisper's `prompt`: a vocabulary hint that biases spelling toward project and
+ * product names a general model would otherwise mishear.
  */
 import {
   type VoiceTranscriptionFailureReason,
@@ -45,6 +49,7 @@ const VoiceTranscriptionEnvConfig = Config.all({
   localModel: Config.String("T3CODE_VOICE_TRANSCRIPTION_LOCAL_MODEL").pipe(
     Config.withDefault(DEFAULT_LOCAL_VOICE_TRANSCRIPTION_MODEL),
   ),
+  prompt: Config.String("T3CODE_VOICE_TRANSCRIPTION_PROMPT").pipe(Config.option),
 });
 
 export class VoiceTranscriptionError extends Schema.TaggedError<VoiceTranscriptionError>()(
@@ -152,6 +157,10 @@ export const make = Effect.gen(function* () {
     }),
   );
 
+  const prompt = Option.filter(envConfig.prompt, (value) => value.trim().length > 0).pipe(
+    Option.map((value) => value.trim()),
+  );
+
   const localUrl = Option.filter(envConfig.localUrl, (url) => url.trim().length > 0).pipe(
     Option.map(localTranscriptionsUrl),
   );
@@ -168,6 +177,7 @@ export const make = Effect.gen(function* () {
     const form = new FormData();
     form.append("model", target.model);
     form.append("response_format", "json");
+    if (Option.isSome(prompt)) form.append("prompt", prompt.value);
     form.append(
       "file",
       new Blob([input.audio], { type: input.mimeType }),
