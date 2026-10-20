@@ -23,6 +23,7 @@ export const ComposerKeyboardToggle = memo(function ComposerKeyboardToggle(props
       <ComposerTouchButton
         tone="outline"
         size="icon"
+        className="max-md:size-11"
         onPointerDown={(event) => event.preventDefault()}
         onClick={props.open ? props.onClose : props.onOpen}
         disabled={props.disabled}
