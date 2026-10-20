@@ -4,7 +4,6 @@ import {
   GESTURE_CLICK_SUPPRESSION_MS,
   GestureClickSuppressor,
   classifyTwoFingerSwipe,
-  RepeatedTapCounter,
   composePointerHandlers,
   isGesturePointer,
 } from "./touchGestures";
@@ -90,32 +89,5 @@ describe("classifyTwoFingerSwipe", () => {
       { x: 320, y: 300 },
     ] as const;
     expect(classifyTwoFingerSwipe(down(400, 400), diagonal)).toBeNull();
-  });
-});
-
-describe("RepeatedTapCounter", () => {
-  it("completes on the third tap inside the gap window, then starts over", () => {
-    const counter = new RepeatedTapCounter(3);
-    expect(counter.register(0)).toBe(false);
-    expect(counter.register(300)).toBe(false);
-    expect(counter.register(600)).toBe(true);
-    expect(counter.register(700)).toBe(false);
-  });
-
-  it("starts over when a pause is too long", () => {
-    const counter = new RepeatedTapCounter(3, 500);
-    counter.register(0);
-    counter.register(300);
-    expect(counter.register(1_000)).toBe(false);
-    expect(counter.register(1_200)).toBe(false);
-    expect(counter.register(1_400)).toBe(true);
-  });
-
-  it("forgets earlier taps after reset", () => {
-    const counter = new RepeatedTapCounter(3);
-    counter.register(0);
-    counter.register(100);
-    counter.reset();
-    expect(counter.register(200)).toBe(false);
   });
 });

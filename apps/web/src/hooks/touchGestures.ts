@@ -83,36 +83,5 @@ export function classifyTwoFingerSwipe(
 
 /** Longest a multi-finger touch may stay down and still count as a tap. */
 export const MULTI_FINGER_TAP_MAX_DURATION_MS = 350;
-/** Longest pause between taps of a repeated tap. */
-export const MULTI_FINGER_TAP_MAX_GAP_MS = 500;
 /** Travel (px) any finger may drift before the touch stops being a tap. */
 export const MULTI_FINGER_TAP_MAX_TRAVEL_PX = 24;
-
-/**
- * Counts consecutive taps: a tap that arrives within `maxGapMs` of the
- * previous one extends the run, a later one starts over. `register` returns
- * true on the tap that completes the run and begins a fresh one.
- */
-export class RepeatedTapCounter {
-  private count = 0;
-  private lastTapMs: number | null = null;
-
-  constructor(
-    private readonly taps: number,
-    private readonly maxGapMs = MULTI_FINGER_TAP_MAX_GAP_MS,
-  ) {}
-
-  register(nowMs: number): boolean {
-    this.count =
-      this.lastTapMs !== null && nowMs - this.lastTapMs <= this.maxGapMs ? this.count + 1 : 1;
-    this.lastTapMs = nowMs;
-    if (this.count < this.taps) return false;
-    this.reset();
-    return true;
-  }
-
-  reset(): void {
-    this.count = 0;
-    this.lastTapMs = null;
-  }
-}

@@ -32,7 +32,7 @@ import {
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
-import { useThreeFingerTripleTap } from "../hooks/useThreeFingerTripleTap";
+import { useThreeFingerTap } from "../hooks/useThreeFingerTap";
 import { useTouchLayout } from "../hooks/useTouchLayout";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -125,7 +125,7 @@ function SidebarControl() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
   const touchLayout = useTouchLayout();
-  useThreeFingerTripleTap(touchLayout, toggleSidebar);
+  useThreeFingerTap(touchLayout, toggleSidebar);
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(
