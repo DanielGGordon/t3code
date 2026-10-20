@@ -28,7 +28,8 @@ const SECTION_LABEL_CLASS_NAME =
  * The composer's folded controls: traits, interaction mode and access. Used
  * for whichever blocks the footer has no room for, and in the touch layout for
  * all of them, where it also takes "Attach files" and its trigger spells out
- * the current state (`summaryLabel`) instead of an ellipsis. Access changes
+ * the current state (`summaryLabel`) instead of an ellipsis (on a phone it is
+ * an ellipsis again, to keep the footer to one row). Access changes
  * stay two taps deep (open, then pick).
  */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
@@ -52,6 +53,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   /** Touch layout: a big labelled pill that opens upward. */
   touchLayout?: boolean;
   summaryLabel?: string | undefined;
+  /** Phone footer: the model picker has no button of its own, so the menu opens it. */
+  modelLabel?: string | null | undefined;
+  onChooseModel?: (() => void) | undefined;
   attachDisabled?: boolean;
   onAttach?: (() => void) | undefined;
 }) {
@@ -66,7 +70,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         render={
           props.touchLayout ? (
             <ComposerTouchButton
-              className="min-w-0 shrink justify-start px-4 text-base"
+              className="min-w-0 shrink justify-start px-4 text-base max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
               aria-label={
                 props.summaryLabel
                   ? `Composer controls: ${props.summaryLabel}`
@@ -86,8 +90,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         {props.touchLayout ? (
           <>
-            <span className="min-w-0 truncate">{props.summaryLabel || "Controls"}</span>
-            <ChevronUpIcon aria-hidden="true" className="size-5 shrink-0 opacity-60" />
+            <span className="min-w-0 truncate max-md:hidden">{props.summaryLabel || "Controls"}</span>
+            <ChevronUpIcon aria-hidden="true" className="size-5 shrink-0 opacity-60 max-md:hidden" />
+            <EllipsisIcon aria-hidden="true" className="hidden max-md:block" />
           </>
         ) : (
           <ComposerControlIcon icon={EllipsisIcon} size={size} />
@@ -99,6 +104,17 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         {...(props.touchLayout ? { side: "top" as const } : {})}
         className={cn(props.touchLayout && TOUCH_MENU_POPUP_CLASS_NAME)}
       >
+        {props.onChooseModel ? (
+          <>
+            <MenuItem className="max-md:flex md:hidden" onClick={props.onChooseModel}>
+              <span className="min-w-0 flex-1 truncate">Model</span>
+              {props.modelLabel ? (
+                <span className="truncate text-muted-foreground">{props.modelLabel}</span>
+              ) : null}
+            </MenuItem>
+            <MenuDivider className="md:hidden" />
+          </>
+        ) : null}
         {props.traitsMenuContent ? (
           <>
             {props.traitsMenuContent}

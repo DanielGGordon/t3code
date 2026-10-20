@@ -175,6 +175,7 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
     <ComposerTouchButton
       tone="primary"
       size="large"
+      className="max-md:gap-2 max-md:px-4"
       onClick={dictation.start}
       disabled={props.disabled || dictation.phase === "starting"}
       aria-label="Speak (voice input)"

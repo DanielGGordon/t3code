@@ -6580,7 +6580,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-footer-compact="true"
       data-chat-composer-footer-touch="true"
       className={cn(
-        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:flex-wrap max-md:gap-x-2",
+        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:gap-2",
         pendingUserInputs.length > 0 && "pt-2",
         showMobilePendingAnswerActions && "hidden sm:flex",
       )}
@@ -6589,16 +6589,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         composerVoiceInput
       ) : (
         <>
-          {/* On a phone the model and controls pill takes its own row above
-              Speak, so neither is squeezed to a sliver beside the big buttons. */}
-          <div className="flex min-w-0 flex-1 items-center gap-3 max-md:contents">
+          {/* One row on a phone: Speak, keyboard, attach and the folded controls
+              as icon buttons, then send. Model and thinking level live in the
+              folded controls menu; the picker stays mounted, out of sight, so
+              that menu can open it. */}
+          <div className="relative flex min-w-0 flex-1 items-center gap-3 max-md:gap-2">
             {composerVoiceInput}
             {composerKeyboardToggle}
             {showComposerAttachAction ? (
               <ComposerTouchButton
                 tone="outline"
                 size="icon"
-                className="max-md:size-12"
+                className="max-md:size-11"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={openComposerAttachmentPicker}
                 disabled={isConnecting || isComposerApprovalState}
@@ -6610,12 +6612,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             {showProviderUnavailable ? (
               composerControls
             ) : (
-              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:order-first max-md:basis-full">
-                {composerModelPicker}
-                <ComposerControlSeparator className="mx-0 block h-8" />
+              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:contents">
+                <div className="min-w-0 max-md:invisible max-md:absolute max-md:top-0 max-md:left-0 max-md:size-0 max-md:overflow-hidden">
+                  {composerModelPicker}
+                </div>
+                <ComposerControlSeparator className="mx-0 block h-8 max-md:hidden" />
                 <CompactComposerControlsMenu
                   touchLayout
                   summaryLabel={composerControlsSummary}
+                  modelLabel={activeThreadModelDisplayName}
+                  onChooseModel={() => setIsComposerModelPickerOpen(true)}
                   interactionMode={interactionMode}
                   runtimeMode={compatibleRuntimeMode}
                   runtimeModeOptions={compatibleRuntimeModeOptions}
@@ -7416,6 +7422,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isComposerResting &&
                         "my-0 max-h-8 min-h-8 overflow-hidden py-0 whitespace-pre! leading-8",
                       isComposerApprovalState && "min-h-10",
+                      // Dictated, not typed: an empty box is one line tall and
+                      // grows once a transcript lands in it.
+                      touchLayout && prompt.length === 0 && "min-h-7",
                     )}
                     placeholderClassName={cn(
                       isComposerResting &&
@@ -7443,7 +7452,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Choose a project above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
-                                : driveMode
+                                : driveMode || touchLayout
                                   ? "Ask anything..."
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
