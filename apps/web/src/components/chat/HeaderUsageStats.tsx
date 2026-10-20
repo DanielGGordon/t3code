@@ -468,7 +468,7 @@ export function selectHeaderUsageBadges(input: {
  *
  * `compact` (drive density: the touch layout in a car-sized viewport) trades
  * the big readouts for "LABEL value" pairs that wrap into a right-aligned
- * stack at most two lines tall inside the 52px header, e.g. the ticker on one
+ * stack at most two lines tall inside the 52px header (the width fits two or three readouts per line), e.g. the ticker on one
  * line and "5H 42%  WK 61%" under it. The stack never shrinks, so the thread
  * title truncates before the readouts do.
  */
@@ -488,7 +488,7 @@ export function HeaderUsageStats(props: {
       data-header-usage-stats
       className={
         compact
-          ? "flex max-h-[var(--workspace-topbar-height)] max-w-32 shrink-0 flex-wrap items-center justify-end gap-x-2.5 overflow-hidden"
+          ? "flex max-h-[var(--workspace-topbar-height)] max-w-60 shrink-0 flex-wrap items-center justify-end gap-x-2.5 overflow-hidden"
           : condensed
             ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:-ml-[calc(var(--workspace-titlebar-content-left)-var(--workspace-gutter-start))] max-md:flex-[1_1_8rem] max-md:justify-between max-md:gap-2.5 max-md:pb-1.5 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
             : "hidden shrink-0 items-center gap-8 xl:flex"

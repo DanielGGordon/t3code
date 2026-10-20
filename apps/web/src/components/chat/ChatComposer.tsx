@@ -1240,7 +1240,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
 
 // Touch layout: the model picker is the first segment of the folded controls pill.
 const TOUCH_MODEL_PICKER_TRIGGER_CLASS_NAME =
-  "touch:h-14 touch:max-w-56 touch:rounded-full touch:px-4 touch:text-base";
+  "touch:h-14 touch:max-w-56 touch:rounded-full touch:px-4 touch:text-base short:h-11";
 
 type RuntimeModeOption = { mode: RuntimeMode } & (typeof runtimeModeConfig)[RuntimeMode];
 const runtimeModeOptions = runtimeModes.map((mode) => ({ mode, ...runtimeModeConfig[mode] }));
@@ -6580,7 +6580,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-footer-compact="true"
       data-chat-composer-footer-touch="true"
       className={cn(
-        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:gap-2",
+        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:gap-2 short:pb-2",
         pendingUserInputs.length > 0 && "pt-2",
         showMobilePendingAnswerActions && "hidden sm:flex",
       )}
@@ -6600,7 +6600,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerTouchButton
                 tone="outline"
                 size="icon"
-                className="max-md:size-11"
+                className="max-md:size-11 short:size-11"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={openComposerAttachmentPicker}
                 disabled={isConnecting || isComposerApprovalState}

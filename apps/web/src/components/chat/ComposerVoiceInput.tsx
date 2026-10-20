@@ -124,10 +124,10 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
   if (dictation.phase === "transcribing") {
     return (
       <span
-        className="flex h-16 min-w-0 flex-1 items-center justify-center gap-3 font-medium text-foreground text-lg"
+        className="flex h-16 min-w-0 flex-1 items-center justify-center gap-3 font-medium text-foreground text-lg short:h-11 short:text-base"
         role="status"
       >
-        <Spinner className="size-6" aria-hidden="true" />
+        <Spinner className="size-6 short:size-5" aria-hidden="true" />
         Transcribing…
       </span>
     );
@@ -140,10 +140,10 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
         data-voice-dictation="recording"
       >
         <ComposerTouchButton size="icon" onClick={dictation.cancel} aria-label="Cancel voice input">
-          <XIcon className="size-7" />
+          <XIcon className="size-7 short:size-5" />
         </ComposerTouchButton>
         <span
-          className="flex min-w-0 flex-1 items-center justify-center gap-3 font-semibold text-3xl text-destructive tabular-nums max-md:gap-2 max-md:text-2xl"
+          className="flex min-w-0 flex-1 items-center justify-center gap-3 font-semibold text-3xl text-destructive tabular-nums max-md:gap-2 max-md:text-2xl short:text-xl"
           aria-live="off"
         >
           <span className="size-3 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
@@ -185,7 +185,7 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
       {dictation.phase === "starting" ? (
         <Spinner className="size-6" aria-hidden="true" />
       ) : (
-        <MicIcon aria-hidden="true" className="size-7" />
+        <MicIcon aria-hidden="true" className="size-7 short:size-5" />
       )}
       Speak
     </ComposerTouchButton>
