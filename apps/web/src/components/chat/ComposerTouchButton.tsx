@@ -18,8 +18,12 @@ function composerTouchButtonClassName(
   className?: string,
 ) {
   return cn(
-    "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-full border font-medium text-lg outline-none transition-[scale,background-color] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:scale-[0.97] disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-6",
-    size === "large" ? "h-16 px-6" : size === "icon" ? "size-14" : "h-14 px-5",
+    "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-full border font-medium text-lg outline-none transition-[scale,background-color] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:scale-[0.97] disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-6 short:text-base short:[&_svg:not([class*='size-'])]:size-5",
+    size === "large"
+      ? "h-16 px-6 short:h-11 short:px-4"
+      : size === "icon"
+        ? "size-14 short:size-11"
+        : "h-14 px-5 short:h-11 short:px-4",
     tone === "primary" &&
       "border-message-action bg-message-action text-message-action-foreground shadow-xs shadow-message-action/24 hover:bg-message-action-hover",
     tone === "outline" && "border-input bg-popover text-foreground shadow-xs/5 hover:bg-accent/50",

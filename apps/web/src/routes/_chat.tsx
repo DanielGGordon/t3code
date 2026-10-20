@@ -1,7 +1,10 @@
 import {
   AuthPreviewOperateScope,
   NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS,
+  type EnvironmentId,
   type NewThreadProjectSlot,
+  type NewThreadProjectSlots,
+  type ProjectId,
 } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
@@ -50,6 +53,37 @@ const NEW_THREAD_IN_PROJECT_SLOT_BY_COMMAND = new Map<string, NewThreadProjectSl
   ]),
 );
 
+// Slots hold primary-environment project ids, like the keybindings.
+function startThreadInProjectSlot(
+  projectSlot: NewThreadProjectSlot,
+  context: {
+    readonly handleNewThread: (projectRef: ReturnType<typeof scopeProjectRef>) => Promise<unknown>;
+    readonly newThreadProjectSlots: NewThreadProjectSlots;
+    readonly primaryEnvironmentId: EnvironmentId | null;
+    readonly projects: ReadonlyArray<{ environmentId: EnvironmentId; id: ProjectId }>;
+  },
+) {
+  const projectId = context.newThreadProjectSlots[projectSlot] ?? null;
+  const project =
+    projectId === null || context.primaryEnvironmentId === null
+      ? undefined
+      : context.projects.find(
+          (candidate) =>
+            candidate.environmentId === context.primaryEnvironmentId && candidate.id === projectId,
+        );
+  if (!project) {
+    toastManager.add(
+      stackedThreadToast({
+        type: "info",
+        title: `Project slot ${projectSlot} is empty`,
+        description: "Pick its project in Settings → Keybindings.",
+      }),
+    );
+    return;
+  }
+  void context.handleNewThread(scopeProjectRef(project.environmentId, project.id));
+}
+
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
@@ -85,16 +119,24 @@ function ChatRouteGlobalShortcuts() {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
-  // Touch layout (phones by default): two fingers up opens the "new thread in"
-  // project picker, two fingers down opens the palette's recent chats.
+  const startNewThreadInSlot = (projectSlot: NewThreadProjectSlot) =>
+    startThreadInProjectSlot(projectSlot, {
+      handleNewThread,
+      newThreadProjectSlots,
+      primaryEnvironmentId,
+      projects,
+    });
+  // Touch layout (phones by default): two fingers up starts a new thread in
+  // project slot 1, two fingers down in slot 2.
   const touchLayout = useTouchLayout();
-  const onSwipeUp = () => {
-    if (!isCommandPaletteOpen()) openCommandPalette({ open: "new-thread-in" });
-  };
-  const onSwipeDown = () => {
-    if (!isCommandPaletteOpen()) openCommandPalette({ open: "recent-threads" });
-  };
-  useTwoFingerSwipe(touchLayout, { onSwipeUp, onSwipeDown });
+  useTwoFingerSwipe(touchLayout, {
+    onSwipeUp: () => {
+      if (!isCommandPaletteOpen()) startNewThreadInSlot("1");
+    },
+    onSwipeDown: () => {
+      if (!isCommandPaletteOpen()) startNewThreadInSlot("2");
+    },
+  });
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -163,26 +205,12 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (event.repeat) return;
-        // Slots hold primary-environment project ids, like the keybindings.
-        const projectId = newThreadProjectSlots[projectSlot] ?? null;
-        const project =
-          projectId === null || primaryEnvironmentId === null
-            ? undefined
-            : projects.find(
-                (candidate) =>
-                  candidate.environmentId === primaryEnvironmentId && candidate.id === projectId,
-              );
-        if (!project) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: `Project slot ${projectSlot} is empty`,
-              description: "Pick its project in Settings → Keybindings.",
-            }),
-          );
-          return;
-        }
-        void handleNewThread(scopeProjectRef(project.environmentId, project.id));
+        startThreadInProjectSlot(projectSlot, {
+          handleNewThread,
+          newThreadProjectSlots,
+          primaryEnvironmentId,
+          projects,
+        });
         return;
       }
 

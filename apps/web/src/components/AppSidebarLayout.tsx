@@ -32,8 +32,9 @@ import {
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
+import { useThreeFingerTripleTap } from "../hooks/useThreeFingerTripleTap";
+import { useTouchLayout } from "../hooks/useTouchLayout";
 import ThreadSidebar from "./Sidebar";
-import { ThemeToggle } from "./ThemeToggle";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
@@ -123,6 +124,8 @@ function SidebarControl() {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
+  const touchLayout = useTouchLayout();
+  useThreeFingerTripleTap(touchLayout, toggleSidebar);
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(
@@ -196,7 +199,6 @@ function SidebarControl() {
           Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
         </TooltipPopup>
       </Tooltip>
-      <ThemeToggle className="pointer-events-auto" />
     </div>
   );
 }
@@ -294,10 +296,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
-    // Two fixed controls sit top-left (sidebar trigger + theme toggle, 0.25rem apart);
-    // content starts after both.
-    "--workspace-titlebar-content-left":
-      "calc(var(--workspace-controls-left) + var(--workspace-titlebar-control-size) + 0.25rem + var(--workspace-titlebar-control-size) + var(--workspace-titlebar-control-gap))",
     ...windowControlsInsetStyle,
   } as CSSProperties;
 

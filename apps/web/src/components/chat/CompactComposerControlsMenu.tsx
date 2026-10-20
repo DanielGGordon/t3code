@@ -70,7 +70,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         render={
           props.touchLayout ? (
             <ComposerTouchButton
-              className="min-w-0 shrink justify-start px-4 text-base max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
+              className="min-w-0 shrink justify-start px-4 text-base short:h-11 max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
               aria-label={
                 props.summaryLabel
                   ? `Composer controls: ${props.summaryLabel}`
@@ -90,8 +90,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         {props.touchLayout ? (
           <>
-            <span className="min-w-0 truncate max-md:hidden">{props.summaryLabel || "Controls"}</span>
-            <ChevronUpIcon aria-hidden="true" className="size-5 shrink-0 opacity-60 max-md:hidden" />
+            <span className="min-w-0 truncate max-md:hidden">
+              {props.summaryLabel || "Controls"}
+            </span>
+            <ChevronUpIcon
+              aria-hidden="true"
+              className="size-5 shrink-0 opacity-60 max-md:hidden"
+            />
             <EllipsisIcon aria-hidden="true" className="hidden max-md:block" />
           </>
         ) : (

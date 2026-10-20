@@ -16,7 +16,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
  * The touch layout (`touchLayout`) makes the idle mic a big labelled "Speak"
  * button and spreads the recording controls across the whole footer: cancel
  * on the driver's (left) side, a large timer, then labelled insert and send on
- * the far right, so cancel and send are never next to each other.
+ * the far right, so cancel and send are never next to each other. Below `md`
+ * insert and send drop their labels so the timer keeps its room.
  */
 export const ComposerVoiceInput = memo(function ComposerVoiceInput(props: {
   dictation: VoiceDictation;
@@ -123,10 +124,10 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
   if (dictation.phase === "transcribing") {
     return (
       <span
-        className="flex h-16 min-w-0 flex-1 items-center justify-center gap-3 font-medium text-foreground text-lg"
+        className="flex h-16 min-w-0 flex-1 items-center justify-center gap-3 font-medium text-foreground text-lg short:h-11 short:text-base"
         role="status"
       >
-        <Spinner className="size-6" aria-hidden="true" />
+        <Spinner className="size-6 short:size-5" aria-hidden="true" />
         Transcribing…
       </span>
     );
@@ -135,14 +136,14 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
   if (dictation.phase === "recording") {
     return (
       <div
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-full border border-destructive/30 bg-destructive/6 p-1"
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-full border border-destructive/30 bg-destructive/6 p-1 max-md:gap-2"
         data-voice-dictation="recording"
       >
         <ComposerTouchButton size="icon" onClick={dictation.cancel} aria-label="Cancel voice input">
-          <XIcon className="size-7" />
+          <XIcon className="size-7 short:size-5" />
         </ComposerTouchButton>
         <span
-          className="flex min-w-0 flex-1 items-center justify-center gap-3 font-semibold text-3xl text-destructive tabular-nums"
+          className="flex min-w-0 flex-1 items-center justify-center gap-3 font-semibold text-3xl text-destructive tabular-nums max-md:gap-2 max-md:text-2xl short:text-xl"
           aria-live="off"
         >
           <span className="size-3 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
@@ -150,21 +151,22 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
         </span>
         <ComposerTouchButton
           tone="outline"
+          className="max-md:size-14 max-md:px-0"
           onClick={() => dictation.finish("insert")}
           aria-label="Stop and insert transcript"
         >
           <CheckIcon />
-          Insert
+          <span className="max-md:hidden">Insert</span>
         </ComposerTouchButton>
         {props.canSend ? (
           <ComposerTouchButton
             tone="primary"
-            className="min-w-36"
+            className="min-w-36 max-md:size-14 max-md:min-w-0 max-md:px-0"
             onClick={() => dictation.finish("send")}
             aria-label="Stop and send"
           >
             <ArrowUpIcon />
-            Send
+            <span className="max-md:hidden">Send</span>
           </ComposerTouchButton>
         ) : null}
       </div>
@@ -183,7 +185,7 @@ const TouchComposerVoiceInput = memo(function TouchComposerVoiceInput(props: {
       {dictation.phase === "starting" ? (
         <Spinner className="size-6" aria-hidden="true" />
       ) : (
-        <MicIcon aria-hidden="true" className="size-7" />
+        <MicIcon aria-hidden="true" className="size-7 short:size-5" />
       )}
       Speak
     </ComposerTouchButton>
