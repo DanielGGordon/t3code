@@ -42,6 +42,7 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
+import { Switch } from "../ui/switch";
 import { DraftProjectName } from "./DraftProjectName";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
@@ -80,6 +81,7 @@ export function DraftHeroHeadline({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projectSortOrder = useClientSettings((settings) => settings.sidebarProjectSortOrder);
+  const hiddenProjectKeys = useClientSettings((settings) => settings.sidebarHiddenProjectKeys);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
@@ -93,6 +95,7 @@ export function DraftHeroHeadline({
   const pillSelector = useCondensedChrome();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [showHiddenProjects, setShowHiddenProjects] = useState(false);
   const pickerFilter = useComboboxFilter();
 
   const environmentLabelById = new Map(
@@ -162,14 +165,18 @@ export function DraftHeroHeadline({
     { value: ADD_PROJECT_VALUE, label: "Add project" },
   ];
   const pickerSearch = pickerQuery.trim();
-  const filteredPickerItems =
-    pickerSearch.length === 0
-      ? pickerItems
-      : pickerItems.filter(
-          (item) =>
-            item.value !== ADD_PROJECT_VALUE &&
-            pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label),
-        );
+  const filteredPickerItems = pickerItems.filter((item) => {
+    if (item.value === ADD_PROJECT_VALUE) return pickerSearch.length === 0;
+    const entry = projectEntryByKey.get(item.value);
+    const hidden =
+      entry?.group.memberProjects.every((member) =>
+        hiddenProjectKeys.includes(member.physicalProjectKey),
+      ) ?? false;
+    if (pickerSearch.length > 0) {
+      return pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label);
+    }
+    return showHiddenProjects || !hidden;
+  });
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
 
   // The picker can change the draft's target while the no-project home is
@@ -331,6 +338,15 @@ export function DraftHeroHeadline({
             );
           }}
         </ComboboxList>
+        <div className="flex items-center justify-between border-t border-border px-3 py-2.5">
+          <span className="text-xs text-muted-foreground">Show hidden projects</span>
+          <Switch
+            aria-label="Show hidden projects"
+            checked={showHiddenProjects}
+            onCheckedChange={setShowHiddenProjects}
+            size="sm"
+          />
+        </div>
       </ComboboxPopup>
     </Combobox>
   ) : (
