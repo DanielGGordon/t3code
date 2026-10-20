@@ -45,6 +45,7 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { MyShortcutsDialogHost, toggleMyShortcuts } from "~/components/MyShortcutsDialog";
+import { TouchGesturesDialogHost } from "~/components/TouchGesturesDialog";
 
 const NEW_THREAD_IN_PROJECT_SLOT_BY_COMMAND = new Map<string, NewThreadProjectSlot>(
   NEW_THREAD_IN_PROJECT_KEYBINDING_COMMANDS.map((command) => [
@@ -307,6 +308,7 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <TouchGesturesDialogHost />
       {threadTarget?.kind === "server" ? (
         <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
       ) : null}

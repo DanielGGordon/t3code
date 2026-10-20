@@ -195,7 +195,7 @@ export function FeaturesSettingsPanel() {
               Touch layout on phones
             </span>
           }
-          description="Phones get the touch layout automatically: bigger buttons, a tidier top bar, and two-finger swipes (up for a new chat, down for recent chats). Turn this off to keep the regular layout on this phone. Stored on this device only."
+          description="Phones get the touch layout automatically: bigger buttons, a tidier top bar, and gestures (two-finger swipes for new chats in your project slots, a three-finger tap for the project list, swipe and hold on chats; the full list is under the ⋯ menu in the composer). Turn this off to keep the regular layout on this phone. Stored on this device only."
           control={
             <Switch
               checked={settings.touchLayoutOnPhones}
