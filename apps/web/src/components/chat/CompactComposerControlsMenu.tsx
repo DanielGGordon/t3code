@@ -71,7 +71,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         render={
           props.touchLayout ? (
             <ComposerTouchButton
-              className="min-w-0 shrink justify-start px-4 text-base short:h-11 max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
+              className="min-w-0 shrink justify-start px-4 text-base short:size-11 short:justify-center short:border short:border-input short:bg-popover short:px-0 max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
               aria-label={
                 props.summaryLabel
                   ? `Composer controls: ${props.summaryLabel}`
@@ -91,14 +91,14 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         {props.touchLayout ? (
           <>
-            <span className="min-w-0 truncate max-md:hidden">
+            <span className="min-w-0 truncate max-md:hidden short:hidden">
               {props.summaryLabel || "Controls"}
             </span>
             <ChevronUpIcon
               aria-hidden="true"
-              className="size-5 shrink-0 opacity-60 max-md:hidden"
+              className="size-5 shrink-0 opacity-60 max-md:hidden short:hidden"
             />
-            <EllipsisIcon aria-hidden="true" className="hidden max-md:block" />
+            <EllipsisIcon aria-hidden="true" className="hidden max-md:block short:block" />
           </>
         ) : (
           <ComposerControlIcon icon={EllipsisIcon} size={size} />
@@ -112,13 +112,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         {props.onChooseModel ? (
           <>
-            <MenuItem className="max-md:flex md:hidden" onClick={props.onChooseModel}>
+            <MenuItem className="max-md:flex md:hidden short:flex" onClick={props.onChooseModel}>
               <span className="min-w-0 flex-1 truncate">Model</span>
               {props.modelLabel ? (
                 <span className="truncate text-muted-foreground">{props.modelLabel}</span>
               ) : null}
             </MenuItem>
-            <MenuDivider className="md:hidden" />
+            <MenuDivider className="md:hidden short:block" />
           </>
         ) : null}
         {props.traitsMenuContent ? (
