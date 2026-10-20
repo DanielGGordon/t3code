@@ -298,6 +298,7 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerKeyboardToggle } from "./ComposerKeyboardToggle";
+import { ComposerTouchButton } from "./ComposerTouchButton";
 import { ComposerVoiceInput } from "./ComposerVoiceInput";
 import { isVoiceRecordingSupported } from "../../voice/recorder";
 import { useVoiceDictation } from "../../voice/useVoiceDictation";
@@ -6579,7 +6580,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-footer-compact="true"
       data-chat-composer-footer-touch="true"
       className={cn(
-        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:flex-wrap",
+        "flex min-w-0 flex-nowrap items-center gap-3 px-3 pb-3 max-md:flex-wrap max-md:gap-x-2",
         pendingUserInputs.length > 0 && "pt-2",
         showMobilePendingAnswerActions && "hidden sm:flex",
       )}
@@ -6593,6 +6594,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <div className="flex min-w-0 flex-1 items-center gap-3 max-md:contents">
             {composerVoiceInput}
             {composerKeyboardToggle}
+            {showComposerAttachAction ? (
+              <ComposerTouchButton
+                tone="outline"
+                size="icon"
+                className="max-md:size-12"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={openComposerAttachmentPicker}
+                disabled={isConnecting || isComposerApprovalState}
+                aria-label="Attach files"
+              >
+                <PaperclipIcon aria-hidden="true" />
+              </ComposerTouchButton>
+            ) : null}
             {showProviderUnavailable ? (
               composerControls
             ) : (
