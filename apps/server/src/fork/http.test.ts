@@ -14,10 +14,12 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 import {
   FORK_CLAUDE_IMPORT_ROUTE_PATH,
   FORK_NOTICE_ROUTE_PATH,
+  FORK_NUDGE_ROUTE_PATH,
   FORK_SESSION_RESET_ROUTE_PATH,
   forkRouteLayer,
 } from "./http.ts";
@@ -92,6 +94,17 @@ function run(request: Request, calls: Array<unknown>) {
     snapshot: Effect.succeed({ sequence: 0, events: [] }),
     stream: Stream.empty,
   });
+  const threads = {
+    getThreadRecords: (threadId: string) =>
+      threadId === "gone"
+        ? Effect.fail({ message: "Thread gone does not exist." })
+        : Effect.succeed({}),
+    dispatch: (command: unknown) =>
+      Effect.sync(() => {
+        calls.push({ dispatch: command });
+        return {};
+      }),
+  } as unknown as ThreadManagementService.ThreadManagementService["Service"];
   return Effect.acquireUseRelease(
     Effect.sync(() =>
       HttpRouter.toWebHandler(forkRouteLayer.pipe(Layer.provide(NodeServices.layer)), {
@@ -106,6 +119,7 @@ function run(request: Request, calls: Array<unknown>) {
             Context.add(ClaudeTranscriptSync.ClaudeTranscriptSync, sync),
             Context.add(ClaudeResumeBindings.ClaudeResumeBindings, bindings),
             Context.add(ServerLifecycleEvents.ServerLifecycleEvents, lifecycleEvents),
+            Context.add(ThreadManagementService.ThreadManagementService, threads),
           ),
         ),
       ),
@@ -192,6 +206,57 @@ it.effect("publishes a trimmed notice on the lifecycle stream and rejects blank 
     expect(blank.status).toBe(400);
     const unauthorized = yield* run(
       post(FORK_NOTICE_ROUTE_PATH, { message: "x" }, READ_ONLY_TOKEN),
+      calls,
+    );
+    expect(unauthorized.status).toBe(403);
+    expect(calls).toHaveLength(1);
+  }),
+);
+
+it.effect("queues the nudge as a system notification and reports threads that cannot take it", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const ok = yield* run(
+      post(
+        FORK_NUDGE_ROUTE_PATH,
+        { threadIds: ["thread-1", "gone"], message: "  Please continue.  ", nudgeId: "n1" },
+        OPERATE_TOKEN,
+      ),
+      calls,
+    );
+    expect(ok.status).toBe(200);
+    expect(yield* Effect.promise(() => ok.json())).toEqual({
+      results: [
+        { threadId: "thread-1", sent: true, detail: "queued" },
+        { threadId: "gone", sent: false, detail: "Thread gone does not exist." },
+      ],
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      dispatch: {
+        type: "message.dispatch",
+        commandId: "command:nudge:n1:thread-1",
+        messageId: "message:nudge:n1:thread-1",
+        threadId: "thread-1",
+        text: "Please continue.",
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "agent",
+        creationSource: "server",
+        notification: { source: { kind: "system" }, detail: "Please continue." },
+      },
+    });
+
+    const blank = yield* run(
+      post(FORK_NUDGE_ROUTE_PATH, { threadIds: ["t"], message: " ", nudgeId: "n" }, OPERATE_TOKEN),
+      calls,
+    );
+    expect(blank.status).toBe(400);
+    const unauthorized = yield* run(
+      post(
+        FORK_NUDGE_ROUTE_PATH,
+        { threadIds: ["t"], message: "x", nudgeId: "n" },
+        READ_ONLY_TOKEN,
+      ),
       calls,
     );
     expect(unauthorized.status).toBe(403);

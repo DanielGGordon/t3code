@@ -7,6 +7,7 @@
 # systemd unit so it completes regardless; results land in $STATUS_LOG.
 #
 #   redeploy.sh [--ignore-thread <id>]... [--force]
+#   redeploy.sh --interrupt-running [--force]     (the /force-redeploy skill only)
 #   redeploy.sh --status
 #
 # Only one redeploy runs at a time, and a second request never starts a second one:
@@ -24,22 +25,31 @@
 # The chat running this script is excluded automatically when it lives in a git
 # worktree; otherwise pass its id with --ignore-thread (also releases a known zombie).
 # Once the new server answers, every connected client gets a notice.
+#
+# The one exception is --interrupt-running, used only by the /force-redeploy skill when the user
+# explicitly asks to restart regardless of running threads: both idle gates are skipped, the threads
+# that were working at the moment of the restart are recorded, and once the new server answers each
+# gets a queued message saying why it was cut off. A /force-redeploy that finds a /redeploy already
+# waiting for idle does not join it quietly: it drops $STATE_DIR/interrupt, which that waiting
+# deploy sees on its next poll and stops waiting.
 set -euo pipefail
 
 IGNORE_THREADS=()
 FORCE=0
+INTERRUPT=0
 SHOW_STATUS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --when-idle) ;; # accepted for old callers; waiting for idle is no longer optional
     --force) FORCE=1 ;;
+    --interrupt-running) INTERRUPT=1 ;;
     --status) SHOW_STATUS=1 ;;
     --ignore-thread)
       [ $# -ge 2 ] || { echo "redeploy: --ignore-thread needs a thread id" >&2; exit 2; }
       IGNORE_THREADS+=("$2")
       shift
       ;;
-    *) echo "redeploy: unknown argument '$1' (usage: redeploy.sh [--ignore-thread <id>]... [--force] | --status)" >&2; exit 2 ;;
+    *) echo "redeploy: unknown argument '$1' (usage: redeploy.sh [--ignore-thread <id>]... [--force] [--interrupt-running] | --status)" >&2; exit 2 ;;
   esac
   shift
 done
@@ -56,6 +66,7 @@ LOCK_FILE="$STATE_DIR/lock"
 STATE_FILE="$STATE_DIR/state"
 DEPLOYED_FILE="$STATE_DIR/deployed"
 JOINERS_FILE="$STATE_DIR/joiners"
+INTERRUPT_FILE="$STATE_DIR/interrupt"
 MAX_SYNC_ROUNDS="${T3_REDEPLOY_MAX_SYNC_ROUNDS:-3}"
 # The 15-minute Claude transcript import runs `t3 import sync` from THIS checkout.
 # It must not run between the checkout below and the server restart: it would be
@@ -137,6 +148,14 @@ fi
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   printf '%s\t%s\t%s\n' "$(date -Is)" "$REQUESTER" "$REMOTE_MAIN" >>"$JOINERS_FILE"
+  if [ "$INTERRUPT" = 1 ]; then
+    printf '%s\n' "$REQUESTER" >"$INTERRUPT_FILE"
+    echo "redeploy: another redeploy is already pending (phase: $(state_get phase), started by $(state_get holder))."
+    echo "  --interrupt-running: told it to stop waiting for other threads. It restarts without the idle"
+    echo "  wait (re-fetching origin/main first) and nudges every thread it cuts off. Check on it with:"
+    echo "    bash \"$0\" --status"
+    exit 0
+  fi
   echo "redeploy: another redeploy is already pending (phase: $(state_get phase), started by $(state_get holder))."
   echo "  Not starting a second one. It re-fetches origin/main right before it restarts and rebuilds if"
   echo "  that moved, so it will carry origin/main as of your call (${REMOTE_MAIN:0:10})."
@@ -166,6 +185,8 @@ if [ "$FORCE" = 0 ] && [ -n "$REMOTE_MAIN" ] && [ "$REMOTE_MAIN" = "$(deployed_s
 fi
 HOLDS_LOCK=1
 : >"$JOINERS_FILE"
+# A leftover from a deploy that was killed hard must not make this one skip the idle wait.
+rm -f "$INTERRUPT_FILE"
 
 # --- pause the import timer for the whole checkout -> restart window ---
 # TIMER_PAUSED: we stopped a timer that was running, so we owe a restart of it.
@@ -188,6 +209,7 @@ resume_import_timer() {
 # does not report a dead deploy as in progress (the lock itself frees when the process exits).
 on_exit() {
   local rc=$?
+  [ "$HOLDS_LOCK" = 1 ] && rm -f "$INTERRUPT_FILE"
   resume_import_timer
   if [ "$HOLDS_LOCK" = 1 ] && [ "$HANDED_OFF" = 0 ]; then
     write_state "ended (exit $rc, nothing was restarted)" || true
@@ -210,6 +232,11 @@ wait_until_idle() {
   start="$(date +%s)"
   echo "==> Waiting for T3 to be idle for ${IDLE_SECS}s ($label)"
   while :; do
+    if [ "$INTERRUPT" = 1 ] || [ -e "$INTERRUPT_FILE" ]; then
+      INTERRUPT=1
+      echo "    interrupt requested — not waiting for running threads ($label)"
+      return 0
+    fi
     rc=0
     out="$("$MISE_BIN" exec node@24 -- node "$SKILL_REPO/scripts/deploy-idle-check.ts" \
       --base-dir "$T3_BASE_DIR" "${args[@]}")" || rc=$?
@@ -328,9 +355,29 @@ if [ -s "$JOINERS_FILE" ]; then
   cut -f2 "$JOINERS_FILE" | sort -u | sed 's/^/    /'
 fi
 
+# Who the restart is about to cut off, read at the last moment (the build took minutes). The
+# running thread that launched this is included on purpose: its turn dies too and needs the nudge.
+NUDGE_IDS=()
+if [ "$INTERRUPT" = 1 ]; then
+  nudge_out="$("$MISE_BIN" exec node@24 -- node "$SKILL_REPO/scripts/deploy-idle-check.ts" \
+    --base-dir "$T3_BASE_DIR" || true)"
+  while read -r _ thread_id _; do
+    [ -n "$thread_id" ] && NUDGE_IDS+=("$thread_id")
+  done <<<"$nudge_out"
+  if [ "${#NUDGE_IDS[@]}" -gt 0 ]; then
+    echo "==> Interrupting ${#NUDGE_IDS[@]} running thread(s); they get a message after the restart:"
+    printf '%s\n' "$nudge_out" | sed 's/^busy /    /'
+  else
+    echo "==> --interrupt-running, but no thread was running — nothing to nudge"
+  fi
+fi
+rm -f "$INTERRUPT_FILE"
+
 echo "==> Build OK. Firing detached restart of $SERVICE"
 echo "    (this chat's session will drop when the server restarts)"
 UNIT="t3-redeploy-$(date +%s)"
+# No single quotes: it is spliced into a single-quoted argument of the unit's script below.
+NUDGE_MESSAGE="Sorry, another thread had to reboot T3 and this conversation may have been interrupted. Please continue where you left off."
 ST_UNIT="$UNIT"
 write_state restarting
 # The detached unit re-enables the import timer only once the restart has been
@@ -354,6 +401,10 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
   if [ \"\$code\" = '200' ]; then
     if ( cd '$DEPLOY_DIR/apps/server' && '$MISE_BIN' exec node@24 -- node src/bin.ts notice 'T3 was updated and restarted (now at $TARGET_SHORT).' --base-dir '$T3_BASE_DIR' ) >/dev/null 2>&1; then notice=published; else notice=failed; fi
   fi
+  nudged=none
+  if [ \"\$code\" = '200' ] && [ -n '${NUDGE_IDS[*]:-}' ]; then
+    if ( cd '$DEPLOY_DIR/apps/server' && '$MISE_BIN' exec node@24 -- node src/bin.ts nudge --id '$UNIT' --message '$NUDGE_MESSAGE' --base-dir '$T3_BASE_DIR' ${NUDGE_IDS[*]:-} ) >/tmp/t3-redeploy-nudge.log 2>&1; then nudged=sent; else nudged=failed; fi
+  fi
   resume_timer
   [ \"\$code\" = '200' ] && git -C '$DEPLOY_DIR' rev-parse HEAD > '$DEPLOYED_FILE'
   {
@@ -363,6 +414,7 @@ systemd-run --user --collect --unit="$UNIT" bash -c "
     echo \"loopback-3773=\$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' '$LOOPBACK_URL' 2>/dev/null)\"
     echo \"public=\$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' '$PUBLIC_URL' 2>/dev/null)\"
     echo \"notice=\$notice\"
+    echo \"nudged=\$nudged (${#NUDGE_IDS[@]} thread(s); details in /tmp/t3-redeploy-nudge.log)\"
     echo \"served-commit=\$(git -C '$DEPLOY_DIR' rev-parse --short HEAD)\"
     echo \"import-timer=\$(systemctl --user is-active '$IMPORT_TIMER' 2>/dev/null) (paused-by-redeploy=$TIMER_PAUSED)\"
   } > '$STATUS_LOG' 2>&1

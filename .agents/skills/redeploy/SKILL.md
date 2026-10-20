@@ -18,7 +18,7 @@ has lost real work to this. So:
   "quickly", or "just redeploy"; not because the deploy "looks small"; not because the
   threads "look finished". Only the idle gate decides when it is safe.
 - **Never bypass the gate.** `redeploy.sh` waits for idle on its own (before the checkout and
-  again before the restart) and has no flag to skip it. Do not edit the script, set
+  again before the restart) and its only skip is `--interrupt-running`, reserved for `/force-redeploy`. Do not edit the script, set
   `T3_IDLE_SECS=0`, restart `t3code.service` by hand, or run `systemctl`/`systemd-run` yourself
   to get around the wait.
 - **Never use `--ignore-thread` to release a thread that is actually working.** It exists for
@@ -27,8 +27,10 @@ has lost real work to this. So:
   user "should I wait for the other threads?" — the answer is always yes. If it aborts on the
   timeout, nothing was restarted: report which threads held it and offer to retry.
 - Only an explicit, unambiguous instruction to interrupt other running threads (for example
-  "kill everything and redeploy now, I don't care about the other chats") changes this, and
-  even then, name the threads that will be cut off and confirm first.
+  "kill everything and redeploy now, I don't care about the other chats", or `/force-redeploy`)
+  changes this. That route is the separate **`force-redeploy`** skill, which runs this script with
+  `--interrupt-running`, names the threads it will cut off, and nudges each of them after the
+  restart. Never pass that flag from `/redeploy`.
 
 ## Only one redeploy at a time — a second call joins the first
 

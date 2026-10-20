@@ -9,7 +9,7 @@
  *
  * Auth: an operate-scoped session, like the other raw routes.
  */
-import { AuthOrchestrationOperateScope, ThreadId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,11 +24,13 @@ import {
 import { authenticateRawRouteWithScope } from "../http.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 
 export const FORK_CLAUDE_IMPORT_ROUTE_PATH = "/api/fork/import/claude-sync";
 export const FORK_SESSION_RESET_ROUTE_PATH = "/api/fork/session/reset";
 export const FORK_NOTICE_ROUTE_PATH = "/api/fork/notice";
+export const FORK_NUDGE_ROUTE_PATH = "/api/fork/thread/nudge";
 
 export const ClaudeImportRequest = Schema.Struct({
   ...ClaudeTranscriptSync.ClaudeImportOptions.fields,
@@ -64,6 +66,22 @@ export const NoticeResponse = Schema.Struct({ id: Schema.String });
 export type NoticeResponse = typeof NoticeResponse.Type;
 export const decodeNoticeResponse = Schema.decodeUnknownOption(NoticeResponse);
 
+export const NudgeRequest = Schema.Struct({
+  threadIds: Schema.Array(Schema.String),
+  message: Schema.String,
+  /** Makes a retried nudge a no-op instead of a second message. */
+  nudgeId: Schema.String,
+});
+export type NudgeRequest = typeof NudgeRequest.Type;
+
+export const NudgeResponse = Schema.Struct({
+  results: Schema.Array(
+    Schema.Struct({ threadId: Schema.String, sent: Schema.Boolean, detail: Schema.String }),
+  ),
+});
+export type NudgeResponse = typeof NudgeResponse.Type;
+export const decodeNudgeResponse = Schema.decodeUnknownOption(NudgeResponse);
+
 /** Body of every non-2xx response from these routes. */
 export const ForkRouteFailure = Schema.Struct({ error: Schema.String });
 
@@ -73,6 +91,7 @@ const failure = (status: number, error: string) =>
 const decodeClaudeImportRequest = Schema.decodeUnknownOption(ClaudeImportRequest);
 const decodeSessionResetRequest = Schema.decodeUnknownOption(SessionResetRequest);
 const decodeNoticeRequest = Schema.decodeUnknownOption(NoticeRequest);
+const decodeNudgeRequest = Schema.decodeUnknownOption(NudgeRequest);
 
 /** The JSON body, or `undefined` when it is missing or not JSON. */
 const readJsonBody = Effect.gen(function* () {
@@ -173,4 +192,64 @@ const noticeRoute = HttpRouter.add(
   ),
 );
 
-export const forkRouteLayer = Layer.mergeAll(claudeImportRoute, sessionResetRoute, noticeRoute);
+/**
+ * `POST /api/fork/thread/nudge` — body `NudgeRequest`. Queues `message` on each thread as a
+ * system notification, like the restart continuation does, so the agent reads it as the
+ * server talking rather than the user. A thread that cannot take it is reported, not fatal.
+ */
+const nudgeRoute = HttpRouter.add(
+  "POST",
+  FORK_NUDGE_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const body = decodeNudgeRequest(yield* readJsonBody);
+    const message = body._tag === "Some" ? body.value.message.trim() : "";
+    const nudgeId = body._tag === "Some" ? body.value.nudgeId.trim() : "";
+    if (body._tag === "None" || message.length === 0 || nudgeId.length === 0) {
+      return failure(400, "Invalid nudge request body.");
+    }
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const results = yield* Effect.forEach(body.value.threadIds, (rawId) => {
+      const threadId = ThreadId.make(rawId.trim());
+      return threads.getThreadRecords(threadId, []).pipe(
+        Effect.flatMap(() =>
+          threads.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`command:nudge:${nudgeId}:${threadId}`),
+            threadId,
+            messageId: MessageId.make(`message:nudge:${nudgeId}:${threadId}`),
+            text: message,
+            notification: {
+              source: { kind: "system" },
+              outcome: "updated",
+              summary: "T3 Code was restarted by another thread",
+              detail: message,
+            },
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "agent",
+            creationSource: "server",
+          }),
+        ),
+        Effect.map(() => ({ threadId, sent: true, detail: "queued" })),
+        Effect.catch((error: { readonly message: string }) =>
+          Effect.succeed({ threadId, sent: false, detail: error.message }),
+        ),
+      );
+    });
+    return HttpServerResponse.jsonUnsafe({ results } satisfies NudgeResponse);
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const forkRouteLayer = Layer.mergeAll(
+  claudeImportRoute,
+  sessionResetRoute,
+  noticeRoute,
+  nudgeRoute,
+);

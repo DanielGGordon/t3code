@@ -47,10 +47,11 @@ echo 200
   sleep: `#!/usr/bin/env bash
 exec /bin/sleep 0.05
 `,
-  // The idle gate: busy while a file named "busy" exists, idle otherwise.
+  // The idle gate: busy while a file named "busy" exists, idle otherwise. Also records nudges.
   mise: `#!/usr/bin/env bash
 case "$*" in
-  *deploy-idle-check.ts*) [ -e "$ROOT/busy" ] && { echo "busy some-thread"; exit 1; }; exit 0 ;;
+  *deploy-idle-check.ts*) [ -e "$ROOT/busy" ] && { echo 'busy thread-a running "Fix the thing"'; echo 'busy thread-b pending "Other"'; exit 1; }; exit 0 ;;
+  *bin.ts*nudge*) echo "$*" >>"$ROOT/nudge.log" ;;
 esac
 exit 0
 `,
@@ -95,6 +96,7 @@ beforeEach(() => {
   for (const [name, body] of Object.entries(FAKES)) {
     NodeFS.writeFileSync(NodePath.join(bin, name), body, { mode: 0o755 });
   }
+  NodeFS.mkdirSync(NodePath.join(deployDir, "apps/server"), { recursive: true });
   NodeFS.mkdirSync(NodePath.join(root, "caller-a"));
   NodeFS.mkdirSync(NodePath.join(root, "caller-b"));
   for (const caller of ["caller-a", "caller-b"]) git(NodePath.join(root, caller), "init", "-q");
@@ -205,4 +207,43 @@ it("a stopped deploy frees the lock and reports itself ended, not in progress", 
   const after = await redeploy("caller-b", "--status").done;
   expect(after.out).toContain("none in progress");
   expect(after.out).toContain("ended");
+});
+
+const nudgeLog = () => {
+  const file = NodePath.join(root, "nudge.log");
+  return NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8") : "";
+};
+
+it("--interrupt-running restarts without waiting and nudges the threads it cut off", async () => {
+  NodeFS.writeFileSync(NodePath.join(root, "busy"), "");
+  const result = await redeploy("caller-a", "--interrupt-running").done;
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("Interrupting 2 running thread(s)");
+  expect(builds()).toBe(1);
+  expect(deployed()).toBe(originMain());
+  expect(nudgeLog()).toContain("thread-a thread-b");
+  expect(nudgeLog()).toContain("Please continue where you left off");
+  expect(NodeFS.readFileSync(NodePath.join(root, "status.log"), "utf8")).toContain("nudged=sent");
+});
+
+it("a plain redeploy never nudges anyone", async () => {
+  expect((await redeploy("caller-a").done).code).toBe(0);
+  expect(nudgeLog()).toBe("");
+});
+
+it("--interrupt-running makes a deploy that is waiting for idle stop waiting", async () => {
+  NodeFS.writeFileSync(NodePath.join(root, "busy"), "");
+  const waiting = redeploy("caller-a");
+  await until(() => waiting.output().includes("busy:"));
+
+  const forced = await redeploy("caller-b", "--interrupt-running").done;
+  expect(forced.code).toBe(0);
+  expect(forced.out).toContain("stop waiting");
+
+  const result = await waiting.done;
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("interrupt requested");
+  expect(builds()).toBe(1);
+  expect(nudgeLog()).toContain("thread-a thread-b");
+  expect(NodeFS.existsSync(NodePath.join(stateDir, "interrupt"))).toBe(false);
 });
