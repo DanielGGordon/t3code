@@ -280,6 +280,7 @@ import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button, InlineButton } from "./ui/button";
+import { Switch } from "./ui/switch";
 import {
   Combobox,
   ComboboxEmpty,
@@ -3038,6 +3039,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive) || touchLayout;
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const hiddenProjectKeys = useClientSettings((settings) => settings.sidebarHiddenProjectKeys);
   const {
     settleThread,
     unsettleThread,
@@ -3130,6 +3132,7 @@ export default function Sidebar() {
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
   );
+  const [showHiddenProjects, setShowHiddenProjects] = useState(false);
   const projectScopeFilter = useComboboxFilter();
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
   const allProjectConfigsReady = useAtomValue(environmentProjects.projectConfigsReadyAtom);
@@ -3207,7 +3210,15 @@ export default function Sidebar() {
     projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
     projectScopeItems[0]!;
   const filteredProjectScopeItems = filterSidebarProjectScopeItems({
-    items: projectScopeItems,
+    items: projectScopeItems.filter((item) => {
+      if (item.value === "all" || showHiddenProjects || projectScopeMenuState.query.trim()) {
+        return true;
+      }
+      const group = projectGroupByScopeKey.get(item.value);
+      return !group?.memberProjects.every((member) =>
+        hiddenProjectKeys.includes(member.physicalProjectKey),
+      );
+    }),
     query: projectScopeMenuState.query,
     matches: (item, query) =>
       projectScopeFilter.contains(item, query, (candidate) => candidate.label),
@@ -5036,6 +5047,15 @@ export default function Sidebar() {
                         );
                       }}
                     </ComboboxList>
+                    <div className="flex items-center justify-between border-t border-border px-3 py-2.5">
+                      <span className="text-xs text-muted-foreground">Show hidden projects</span>
+                      <Switch
+                        aria-label="Show hidden projects"
+                        checked={showHiddenProjects}
+                        onCheckedChange={setShowHiddenProjects}
+                        size="sm"
+                      />
+                    </div>
                   </ComboboxPopup>
                 </Combobox>
               }

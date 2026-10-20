@@ -18,6 +18,7 @@ import { InfoIcon, Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
 import { readLocalApi } from "../../localApi";
 import {
@@ -31,6 +32,7 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -185,6 +187,10 @@ function ProjectDetail({
     reportFailure: false,
   });
   const projectNameEditedRef = useRef(false);
+  const hiddenProjectKeys = useClientSettings((settings) => settings.sidebarHiddenProjectKeys);
+  const isHiddenFromProjectList = group.memberProjects.every((member) =>
+    hiddenProjectKeys.includes(member.physicalProjectKey),
+  );
 
   const faviconPath = representative.faviconPath ?? null;
   const projectIcon = representative.projectIcon ?? null;
@@ -564,6 +570,24 @@ function ProjectDetail({
                   Choose file
                 </Button>
               </div>
+            }
+          />
+          <SettingsRow
+            title="Hide from project list"
+            description="Keep this project out of the default project selector. You can still find it by searching or show hidden projects in the selector."
+            control={
+              <Switch
+                aria-label="Hide from project list"
+                checked={isHiddenFromProjectList}
+                onCheckedChange={(hidden) => {
+                  const memberKeys = new Set(
+                    group.memberProjects.map((member) => member.physicalProjectKey),
+                  );
+                  const next = hiddenProjectKeys.filter((key) => !memberKeys.has(key));
+                  if (hidden) next.push(...memberKeys);
+                  void updateClientSettings({ sidebarHiddenProjectKeys: next });
+                }}
+              />
             }
           />
         </SettingsSection>
