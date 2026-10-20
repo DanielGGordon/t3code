@@ -11,6 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 
+import { NotificationService } from "../notifications/NotificationService.ts";
 import * as SecurityAlerts from "./SecurityAlerts.ts";
 
 const layerSecurityAlerts = (env: Record<string, string>) =>
@@ -153,5 +154,49 @@ it.layer(NodeServices.layer)("SecurityAlerts", (it) => {
         ),
       ),
     );
+  });
+
+  it.effect("raises a notification card for pairing and for each new IP", () => {
+    type UpsertInput = Parameters<NotificationService["Service"]["upsert"]>[0];
+    const upserts: Array<UpsertInput> = [];
+    const notifications = Layer.succeed(
+      NotificationService,
+      NotificationService.of({
+        upsert: (input: UpsertInput) =>
+          Effect.sync(() => {
+            upserts.push(input);
+            return { id: `${input.source}:${input.sourceId}` as never, state: "open" as const };
+          }),
+      } as never),
+    );
+    return Effect.gen(function* () {
+      const alerts = yield* SecurityAlerts.SecurityAlerts;
+      yield* Fiber.join(yield* alerts.notify(pairedAlert));
+      yield* Fiber.join(
+        yield* alerts.notify({
+          kind: "new-client-ip",
+          sessionId: pairedAlert.sessionId,
+          method: "bearer-access-token",
+          client: { deviceType: "unknown", ipAddress: "198.51.100.4" },
+          previousIp: "203.0.113.7",
+        }),
+      );
+
+      expect(upserts.map(({ source, sourceId }) => [source, sourceId.split("-")[0]])).toEqual([
+        ["security", "paired"],
+        ["security", "new"],
+      ]);
+      expect(upserts[0]?.sourceId).toBe(`paired-${pairedAlert.sessionId}`);
+      expect(upserts[0]?.request).toEqual({
+        kind: "security",
+        title: "New device connected to T3 Code",
+        body: expect.stringContaining(
+          'Device: "Dan\'s &lt;!channel&gt; phone" — mobile, iOS, Safari',
+        ),
+        bodyTrust: "external",
+      });
+      expect(upserts[1]?.request.title).toBe("T3 Code session connected from a new IP");
+      expect(upserts[1]?.request.body).toContain("IP: 198.51.100.4 (previously 203.0.113.7)");
+    }).pipe(Effect.provide(Layer.provideMerge(layerSecurityAlerts({}), notifications)));
   });
 });
