@@ -1240,7 +1240,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
 
 // Touch layout: the model picker is the first segment of the folded controls pill.
 const TOUCH_MODEL_PICKER_TRIGGER_CLASS_NAME =
-  "touch:h-14 touch:max-w-56 touch:rounded-full touch:px-4 touch:text-base short:h-11";
+  "touch:h-14 touch:max-w-56 touch:rounded-full touch:px-4 touch:text-base short:touch:h-11";
 
 type RuntimeModeOption = { mode: RuntimeMode } & (typeof runtimeModeConfig)[RuntimeMode];
 const runtimeModeOptions = runtimeModes.map((mode) => ({ mode, ...runtimeModeConfig[mode] }));
@@ -6612,11 +6612,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             {showProviderUnavailable ? (
               composerControls
             ) : (
-              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:contents">
-                <div className="min-w-0 max-md:invisible max-md:absolute max-md:top-0 max-md:left-0 max-md:size-0 max-md:overflow-hidden">
+              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:contents short:contents">
+                <div className="min-w-0 max-md:invisible max-md:absolute max-md:top-0 max-md:left-0 max-md:size-0 max-md:overflow-hidden short:invisible short:absolute short:top-0 short:left-0 short:size-0 short:overflow-hidden">
                   {composerModelPicker}
                 </div>
-                <ComposerControlSeparator className="mx-0 block h-8 max-md:hidden" />
+                <ComposerControlSeparator className="mx-0 block h-8 max-md:hidden short:hidden" />
                 <CompactComposerControlsMenu
                   touchLayout
                   summaryLabel={composerControlsSummary}
@@ -6921,7 +6921,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               data-chat-composer-body="true"
               className={cn(
                 "relative px-3 pb-2 sm:px-4",
-                "pt-3.5 sm:pt-4",
+                "pt-3.5 sm:pt-4 short:pt-2",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
                 isComposerResting && "py-2 sm:py-2",

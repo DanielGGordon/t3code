@@ -77,7 +77,8 @@ const messageActionPillClassName =
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-message-action font-medium text-base text-message-action-foreground shadow-xs shadow-message-action/24 outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none sm:text-sm";
 
 // Touch layout: the labelled pills grow to 56px targets.
-const touchPillClassName = "touch:h-14 touch:px-6 touch:text-base short:h-11 short:px-4";
+const touchPillClassName =
+  "touch:h-14 touch:px-6 touch:text-base short:touch:h-11 short:touch:px-4";
 
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
@@ -145,7 +146,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             className={cn(
               "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
               insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
-              "touch:size-14 short:size-11",
+              "touch:size-14 short:touch:size-11",
             )}
             {...pointerFocusProps}
             disabled={!canOperateThread}
@@ -342,7 +343,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 touch:size-14 max-md:touch:size-12 short:size-11 [&_svg]:pointer-events-none",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 touch:size-14 max-md:touch:size-12 short:touch:size-11 [&_svg]:pointer-events-none",
         stageBackdropVariant
           ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
