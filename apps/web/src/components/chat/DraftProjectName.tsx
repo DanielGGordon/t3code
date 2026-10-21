@@ -6,6 +6,7 @@ import { truncateProjectName } from "./DraftProjectName.logic";
 
 export function DraftProjectName({ value }: { value: string }) {
   const containerRef = useRef<HTMLSpanElement>(null);
+  const fullNameRef = useRef<HTMLSpanElement>(null);
   const [displayName, setDisplayName] = useState(value);
 
   useLayoutEffect(() => {
@@ -14,6 +15,14 @@ export function DraftProjectName({ value }: { value: string }) {
     if (!container || !context) return;
 
     const update = () => {
+      // Canvas text metrics can run a few pixels wider than the DOM's (kerning,
+      // font fallback), which truncated names that fit. The DOM says for sure
+      // whether the full name is being clipped.
+      const fullName = fullNameRef.current;
+      if (fullName && fullName.scrollWidth <= fullName.clientWidth) {
+        setDisplayName(value);
+        return;
+      }
       const style = getComputedStyle(container);
       context.font = style.font;
       context.letterSpacing = style.letterSpacing === "normal" ? "0px" : style.letterSpacing;
@@ -41,6 +50,7 @@ export function DraftProjectName({ value }: { value: string }) {
     >
       {/* Keep the full name's intrinsic width so fitting the visible text cannot shrink its budget. */}
       <span
+        ref={fullNameRef}
         aria-hidden="true"
         className="invisible col-start-1 row-start-1 min-w-0 overflow-hidden select-none"
       >
