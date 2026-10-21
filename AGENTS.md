@@ -65,6 +65,36 @@ Share-URL check (fork): before handing off a `vp run dev --share` URL, open its 
 controlled browser and confirm the app loads. A successful curl is insufficient because browsers
 reject some otherwise reachable ports.
 
+## Tesla in-car browser ("Tesla driving mode" / car mode / drive mode)
+
+If the user says anything like "my Tesla", "while I'm driving", "car layout", "FSD", "the driver
+window" or "the car screen", this section is the spec. The user works from a **2023 Model Y**
+(1920×1200 panel, `devicePixelRatio` 1.53, Chrome 148 on Linux, `pointer: fine` and
+`hover: true` despite the touchscreen, so `(pointer: coarse)` never matches the car). Measured on
+the car on 2026-10-21; the URL bar costs ~66 CSS px in both states and is already excluded below.
+
+| State | Viewport (CSS px) | Ratio | Device px |
+| ----- | ----------------- | ----- | --------- |
+| **Driving** (browser shrinks to a ~62%-wide card beside the car view; the one to design for) | **773 × 601** | **1.286 (9:7)** | 1183 × 920 |
+| Parked / full screen | 1256 × 706 | 1.779 (16:9) | 1922 × 1080 |
+
+- **Test at these numbers, never at a guessed size.** Playwright:
+  `node ~/projects/meta/visual-testing/screenshot.mjs <url> out.png --preset tesla-driving`
+  (or `tesla-parked`); by hand, viewport 773×601 with `deviceScaleFactor` 1.53 and no touch emulation.
+  Anything in drive mode must fit 601 px of height without scrolling the primary controls.
+- `100vh` = `100dvh` = `100svh` = the viewport height; the URL bar is not an extra shrinking inset.
+- In code this is the touch / car layout (Settings → Features) plus the automatic compact "drive"
+  density, `resolveDriveMode` in `apps/web/src/lib/driveMode.ts` (640 ≤ width < 1024, used by the
+  `drive:` CSS variant and `useDriveMode`). The identifiers say "drive" and "car"; the user's word
+  for the same thing is "Tesla driving mode".
+- Re-measure rather than trust this table if the car changes or a Tesla software update changes the
+  browser (the 1.53 `devicePixelRatio` itself arrived with a 2026 update). The probe page is
+  `~/projects/meta/visual-testing/viewport-probe.html`: serve it from a free test-deploy slot (see
+  `docs/test-deployments.md`), open it in the car once driving and once parked, press "Save
+  snapshot", then update this table, the presets, and the comment in `driveMode.ts`.
+- The car's IP range is on the Caddy allowlist (`/etc/caddy/t3-gate.caddy`); if the car gets a 403
+  the range moved and needs widening there.
+
 ## Claude Transcript Import (15-minute timer on the T3 Code host)
 
 A systemd **user** timer, `t3-claude-import.timer`, runs every 15 minutes on the host that serves

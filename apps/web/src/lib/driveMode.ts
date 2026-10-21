@@ -1,9 +1,10 @@
 /**
  * Viewport width below which the touch / car layout switches to its compact
- * "drive" density. A Tesla shrinks the browser to roughly half the screen
- * while driving (about 650–800 CSS px wide) and gives it the full ~1200px+
- * when parked, so the `lg` breakpoint sits between the two with margin on
- * either side. Height is ignored: it barely differs between the two states.
+ * "drive" density. Measured on a 2023 Model Y (devicePixelRatio 1.53, panel
+ * 1920×1200): driving shrinks the browser to a card 773×601 CSS px (1.29:1,
+ * ~62% of the screen width); parked it is 1256×706 (16:9). Both lose ~66 CSS
+ * px to the URL bar. The `lg` breakpoint sits between the two with margin on
+ * either side. Height is ignored here, but a drive layout must fit 601 px.
  */
 export const DRIVE_MODE_MAX_VIEWPORT_WIDTH = 1024;
 
