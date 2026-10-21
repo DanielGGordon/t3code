@@ -2,6 +2,7 @@ import type { NewThreadProjectSlot } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import { usePrimarySettings } from "../hooks/useSettings";
+import { useDriveMode } from "../hooks/useTouchLayout";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import {
@@ -28,6 +29,7 @@ function TouchGesturesDialog() {
   const slots = usePrimarySettings((settings) => settings.newThreadProjectSlots);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projects = useProjects();
+  const driveMode = useDriveMode();
 
   const newChatIn = (slot: NewThreadProjectSlot): string => {
     const project = projects.find(
@@ -43,6 +45,9 @@ function TouchGesturesDialog() {
     { gesture: "Two fingers swipe up", action: newChatIn("1") },
     { gesture: "Two fingers swipe down", action: newChatIn("2") },
     { gesture: "Three-finger tap", action: "Show or hide the project list" },
+    ...(driveMode
+      ? [{ gesture: "Four-finger tap", action: "Show or hide all projects, full screen" }]
+      : []),
     { gesture: "Swipe a chat left", action: "Snooze it" },
     {
       gesture: "Swipe a chat right",

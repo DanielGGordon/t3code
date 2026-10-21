@@ -26,6 +26,7 @@ const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
+const SIDEBAR_WIDTH_FULL_SCREEN = "100vw";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 // 44px: the minimum comfortable touch target for the phone's only top-left control.
@@ -40,7 +41,9 @@ type SidebarContextProps = {
   setMobileSheetElement: (element: HTMLDivElement | null) => void;
   setOpenMobile: (open: boolean) => void;
   isMobile: boolean;
+  fullScreen: boolean;
   toggleSidebar: () => void;
+  toggleFullScreenSidebar: () => void;
 };
 
 type SidebarResizableOptions = {
@@ -108,8 +111,15 @@ function SidebarProvider({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const isMobile = useIsMobile();
-  const [openMobile, setOpenMobile] = React.useState(false);
+  // Full screen reuses the mobile sheet at any viewport width, so every
+  // `isMobile` consumer (close-on-navigate included) behaves as on a phone.
+  const [fullScreen, setFullScreen] = React.useState(false);
+  const isMobile = useIsMobile() || fullScreen;
+  const [openMobile, setOpenMobileState] = React.useState(false);
+  const setOpenMobile = (value: boolean) => {
+    setOpenMobileState(value);
+    if (!value) setFullScreen(false);
+  };
   const [mobileSheetMounted, setMobileSheetMounted] = React.useState(false);
   const setMobileSheetElement = (element: HTMLDivElement | null) => {
     setMobileSheetMounted(element !== null);
@@ -134,13 +144,23 @@ function SidebarProvider({
   };
 
   const toggleSidebar = () => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
+    return isMobile ? setOpenMobile(!openMobile) : setOpen((open) => !open);
+  };
+
+  const toggleFullScreenSidebar = () => {
+    if (fullScreen && openMobile) {
+      setOpenMobile(false);
+      return;
+    }
+    setFullScreen(true);
+    setOpenMobileState(true);
   };
 
   const state = resolveSidebarState({ isMobile, open, openMobile });
 
   const contextValue: SidebarContextProps = {
     isMobile,
+    fullScreen,
     open,
     openMobile,
     mobileSheetMounted,
@@ -149,6 +169,7 @@ function SidebarProvider({
     setOpenMobile,
     state,
     toggleSidebar,
+    toggleFullScreenSidebar,
   };
 
   return (
@@ -215,7 +236,8 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
+  const { isMobile, fullScreen, state, openMobile, setOpenMobile, setMobileSheetElement } =
+    useSidebar();
   // The rail's width restore and drag refresh key on this value.
   const resolvedResizable = resolveSidebarResizable({ collapsible, isMobile, resizable });
   const instanceContextValue: SidebarInstanceContextProps = { side, resizable: resolvedResizable };
@@ -254,7 +276,7 @@ function Sidebar({
             side={side}
             style={
               {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                "--sidebar-width": fullScreen ? SIDEBAR_WIDTH_FULL_SCREEN : SIDEBAR_WIDTH_MOBILE,
               } as React.CSSProperties
             }
           >
