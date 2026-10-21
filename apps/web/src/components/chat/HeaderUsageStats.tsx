@@ -246,7 +246,19 @@ function stockColorClass(quote: StockQuote | null): string {
   return quote.changePercent >= 0 ? "text-accent-green" : "text-accent-red";
 }
 
-/** Hover tooltip: the percent change for the day, or a muted caveat. */
+const STOCK_SESSION_LABELS = {
+  pre: "Pre-market",
+  regular: "Regular session",
+  post: "After hours",
+  overnight: "Overnight",
+} as const;
+
+/**
+ * Hover tooltip: the percent change, or a muted caveat. Quotes that know their
+ * session (the 24/5 feed) also name it and carry the close it is measured
+ * against, the bid/ask and when the last trade printed — detail that would be
+ * too much text inline.
+ */
 function formatStockChangeTooltip(quote: StockQuote | null): string {
   if (!quote) {
     return "Quote unavailable";
@@ -255,7 +267,27 @@ function formatStockChangeTooltip(quote: StockQuote | null): string {
     return "Change unavailable";
   }
   const sign = quote.changePercent >= 0 ? "+" : "";
-  return `${sign}${quote.changePercent.toFixed(2)}% today`;
+  const change = `${sign}${quote.changePercent.toFixed(2)}%`;
+  if (!quote.session) {
+    return `${change} today`;
+  }
+  const money = (value: number) => formatStockPrice({ ...quote, price: value });
+  const extended = quote.session !== "regular";
+  const parts = [
+    `${STOCK_SESSION_LABELS[quote.session]} ${change}${extended ? " vs close" : " today"}${
+      quote.referenceClose ? ` ${money(quote.referenceClose)}` : ""
+    }`,
+  ];
+  if (quote.bid != null && quote.ask != null) {
+    parts.push(`Bid ${money(quote.bid)} · Ask ${money(quote.ask)}`);
+  }
+  if (quote.tradedAt != null) {
+    const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(
+      quote.tradedAt * 1000,
+    );
+    parts.push(`Last trade ${time}`);
+  }
+  return parts.join(" · ");
 }
 
 /**
