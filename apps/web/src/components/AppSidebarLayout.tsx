@@ -32,8 +32,9 @@ import {
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
-import { useThreeFingerTap } from "../hooks/useThreeFingerTap";
-import { useTouchLayout } from "../hooks/useTouchLayout";
+import { useMultiFingerTap } from "../hooks/useMultiFingerTap";
+import { useDriveMode, useTouchLayout } from "../hooks/useTouchLayout";
+import { useUiStateStore } from "../uiStateStore";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -123,9 +124,17 @@ function readInitialThreadSidebarWidth(): number {
 function SidebarControl() {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
+  const { toggleSidebar, toggleFullScreenSidebar, fullScreen, isMobile, mobileSheetMounted } =
+    useSidebar();
   const touchLayout = useTouchLayout();
-  useThreeFingerTap(touchLayout, toggleSidebar);
+  const driveMode = useDriveMode();
+  useMultiFingerTap(3, touchLayout, toggleSidebar);
+  // Car only: a one-tap jump to every project's chats, full screen. Closing
+  // keeps whatever scope the sidebar had, so the reset is on open only.
+  useMultiFingerTap(4, driveMode, () => {
+    if (!fullScreen) useUiStateStore.getState().setSidebarProjectScopeKey(null);
+    toggleFullScreenSidebar();
+  });
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(

@@ -6,14 +6,14 @@ import {
   type TouchPoint,
 } from "./touchGestures";
 
-const FINGERS = 3;
-
 /**
- * App-wide three-finger tap: exactly three fingers down together, briefly,
- * without moving. A fourth finger, a drag, or a long press cancels it so
- * scrolling, pinching and holding stay inert.
+ * App-wide multi-finger tap: exactly `fingers` fingers down together, briefly,
+ * without moving. An extra finger, a drag, or a long press cancels it so
+ * scrolling, pinching and holding stay inert. Taps with different finger
+ * counts never fire together: the extra finger of a four-finger tap cancels
+ * the three-finger one that was armed a moment earlier.
  */
-export function useThreeFingerTap(enabled: boolean, onTap: () => void): void {
+export function useMultiFingerTap(fingers: number, enabled: boolean, onTap: () => void): void {
   useEffect(() => {
     if (!enabled) return;
     let startMs: number | null = null;
@@ -26,16 +26,16 @@ export function useThreeFingerTap(enabled: boolean, onTap: () => void): void {
       isTap = false;
     };
     const onTouchStart = (event: TouchEvent) => {
-      if (event.touches.length > FINGERS) {
+      if (event.touches.length > fingers) {
         reset();
         return;
       }
       for (const touch of Array.from(event.touches)) {
         origins.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
       }
-      // Only a touch that reaches three fingers arms a tap; a 2-finger swipe
-      // that never gets a third finger stays an ordinary touch.
-      if (event.touches.length === FINGERS && startMs === null) {
+      // Only a touch that reaches `fingers` arms a tap; a 2-finger swipe
+      // that never gets that many stays an ordinary touch.
+      if (event.touches.length === fingers && startMs === null) {
         startMs = performance.now();
         isTap = true;
       }
@@ -74,5 +74,5 @@ export function useThreeFingerTap(enabled: boolean, onTap: () => void): void {
       document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("touchcancel", reset);
     };
-  }, [enabled, onTap]);
+  }, [fingers, enabled, onTap]);
 }
