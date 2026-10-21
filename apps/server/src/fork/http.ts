@@ -25,12 +25,15 @@ import { authenticateRawRouteWithScope } from "../http.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as Freeze from "./freeze.ts";
 import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 
 export const FORK_CLAUDE_IMPORT_ROUTE_PATH = "/api/fork/import/claude-sync";
 export const FORK_SESSION_RESET_ROUTE_PATH = "/api/fork/session/reset";
 export const FORK_NOTICE_ROUTE_PATH = "/api/fork/notice";
 export const FORK_NUDGE_ROUTE_PATH = "/api/fork/thread/nudge";
+export const FORK_FREEZE_ROUTE_PATH = "/api/fork/freeze";
+export const FORK_THAW_ROUTE_PATH = "/api/fork/thaw";
 
 export const ClaudeImportRequest = Schema.Struct({
   ...ClaudeTranscriptSync.ClaudeImportOptions.fields,
@@ -82,6 +85,49 @@ export const NudgeResponse = Schema.Struct({
 export type NudgeResponse = typeof NudgeResponse.Type;
 export const decodeNudgeResponse = Schema.decodeUnknownOption(NudgeResponse);
 
+const BusyThread = Schema.Struct({
+  threadId: Schema.String,
+  title: Schema.String,
+  reasons: Schema.Array(Schema.String),
+});
+
+export const FreezeRequest = Schema.Struct({
+  /** `check` only reads what is busy; `freeze` stops it and disables scheduled tasks. */
+  action: Schema.Literals(["check", "freeze"]),
+  freezeId: Schema.String,
+  keepThreads: Schema.Array(Schema.String),
+  keepWorktrees: Schema.Array(Schema.String),
+  waitSecs: Schema.Number,
+});
+export type FreezeRequest = typeof FreezeRequest.Type;
+
+export const FreezeResponse = Schema.Struct({
+  stopped: Schema.Array(Schema.Struct({ threadId: Schema.String, title: Schema.String })),
+  scheduledTasksDisabled: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+  remaining: Schema.Array(BusyThread),
+  errors: Schema.Array(Schema.String),
+});
+export type FreezeResponse = typeof FreezeResponse.Type;
+export const decodeFreezeResponse = Schema.decodeUnknownOption(FreezeResponse);
+
+export const ThawRequest = Schema.Struct({
+  scheduledTaskIds: Schema.Array(Schema.String),
+  threadIds: Schema.Array(Schema.String),
+  /** Empty sends no nudge. */
+  message: Schema.String,
+  nudgeId: Schema.String,
+});
+export type ThawRequest = typeof ThawRequest.Type;
+
+export const ThawResponse = Schema.Struct({
+  scheduledTasks: Schema.Array(
+    Schema.Struct({ id: Schema.String, enabled: Schema.Boolean, detail: Schema.String }),
+  ),
+  nudges: NudgeResponse.fields.results,
+});
+export type ThawResponse = typeof ThawResponse.Type;
+export const decodeThawResponse = Schema.decodeUnknownOption(ThawResponse);
+
 /** Body of every non-2xx response from these routes. */
 export const ForkRouteFailure = Schema.Struct({ error: Schema.String });
 
@@ -92,6 +138,8 @@ const decodeClaudeImportRequest = Schema.decodeUnknownOption(ClaudeImportRequest
 const decodeSessionResetRequest = Schema.decodeUnknownOption(SessionResetRequest);
 const decodeNoticeRequest = Schema.decodeUnknownOption(NoticeRequest);
 const decodeNudgeRequest = Schema.decodeUnknownOption(NudgeRequest);
+const decodeFreezeRequest = Schema.decodeUnknownOption(FreezeRequest);
+const decodeThawRequest = Schema.decodeUnknownOption(ThawRequest);
 
 /** The JSON body, or `undefined` when it is missing or not JSON. */
 const readJsonBody = Effect.gen(function* () {
@@ -192,6 +240,45 @@ const noticeRoute = HttpRouter.add(
   ),
 );
 
+/** Queue `message` on each thread as a system notification; a thread that cannot take it is reported. */
+const nudgeThreads = (input: {
+  readonly threadIds: ReadonlyArray<string>;
+  readonly message: string;
+  readonly nudgeId: string;
+  readonly summary: string;
+}) =>
+  Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    return yield* Effect.forEach(input.threadIds, (rawId) => {
+      const threadId = ThreadId.make(rawId.trim());
+      return threads.getThreadRecords(threadId, []).pipe(
+        Effect.flatMap(() =>
+          threads.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`command:nudge:${input.nudgeId}:${threadId}`),
+            threadId,
+            messageId: MessageId.make(`message:nudge:${input.nudgeId}:${threadId}`),
+            text: input.message,
+            notification: {
+              source: { kind: "system" },
+              outcome: "updated",
+              summary: input.summary,
+              detail: input.message,
+            },
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "agent",
+            creationSource: "server",
+          }),
+        ),
+        Effect.map(() => ({ threadId, sent: true, detail: "queued" })),
+        Effect.catch((error: { readonly message: string }) =>
+          Effect.succeed({ threadId, sent: false, detail: error.message }),
+        ),
+      );
+    });
+  });
+
 /**
  * `POST /api/fork/thread/nudge` — body `NudgeRequest`. Queues `message` on each thread as a
  * system notification, like the restart continuation does, so the agent reads it as the
@@ -208,36 +295,82 @@ const nudgeRoute = HttpRouter.add(
     if (body._tag === "None" || message.length === 0 || nudgeId.length === 0) {
       return failure(400, "Invalid nudge request body.");
     }
-    const threads = yield* ThreadManagementService.ThreadManagementService;
-    const results = yield* Effect.forEach(body.value.threadIds, (rawId) => {
-      const threadId = ThreadId.make(rawId.trim());
-      return threads.getThreadRecords(threadId, []).pipe(
-        Effect.flatMap(() =>
-          threads.dispatch({
-            type: "message.dispatch",
-            commandId: CommandId.make(`command:nudge:${nudgeId}:${threadId}`),
-            threadId,
-            messageId: MessageId.make(`message:nudge:${nudgeId}:${threadId}`),
-            text: message,
-            notification: {
-              source: { kind: "system" },
-              outcome: "updated",
-              summary: "T3 Code was restarted by another thread",
-              detail: message,
-            },
-            attachments: [],
-            dispatchMode: { type: "queue_after_active" },
-            createdBy: "agent",
-            creationSource: "server",
-          }),
-        ),
-        Effect.map(() => ({ threadId, sent: true, detail: "queued" })),
-        Effect.catch((error: { readonly message: string }) =>
-          Effect.succeed({ threadId, sent: false, detail: error.message }),
-        ),
-      );
+    const results = yield* nudgeThreads({
+      ...body.value,
+      message,
+      summary: "T3 Code was restarted by another thread",
     });
     return HttpServerResponse.jsonUnsafe({ results } satisfies NudgeResponse);
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+/**
+ * `POST /api/fork/freeze` — body `FreezeRequest`. `check` lists the threads working right now;
+ * `freeze` disables scheduled tasks and stops every working thread until the server is quiet.
+ */
+const freezeRoute = HttpRouter.add(
+  "POST",
+  FORK_FREEZE_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const body = decodeFreezeRequest(yield* readJsonBody);
+    if (body._tag === "None" || body.value.freezeId.trim().length === 0) {
+      return failure(400, "Invalid freeze request body.");
+    }
+    const filter = { keepThreads: body.value.keepThreads, keepWorktrees: body.value.keepWorktrees };
+    if (body.value.action === "check") {
+      const remaining = yield* Freeze.findBusyThreads(filter);
+      return HttpServerResponse.jsonUnsafe({
+        stopped: [],
+        scheduledTasksDisabled: [],
+        remaining,
+        errors: [],
+      } satisfies FreezeResponse);
+    }
+    const result = yield* Freeze.freezeThreads({
+      freezeId: body.value.freezeId.trim(),
+      filter,
+      waitSecs: Math.max(0, body.value.waitSecs),
+      reason: "Frozen by t3 freeze so usage can be measured in isolation.",
+    });
+    return HttpServerResponse.jsonUnsafe(result satisfies FreezeResponse);
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+/** `POST /api/fork/thaw` — body `ThawRequest`; re-enables scheduled tasks and nudges stopped threads. */
+const thawRoute = HttpRouter.add(
+  "POST",
+  FORK_THAW_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const body = decodeThawRequest(yield* readJsonBody);
+    if (body._tag === "None" || body.value.nudgeId.trim().length === 0) {
+      return failure(400, "Invalid thaw request body.");
+    }
+    const message = body.value.message.trim();
+    const scheduledTasks = yield* Freeze.enableScheduledTasks(body.value.scheduledTaskIds);
+    const nudges =
+      message.length === 0
+        ? []
+        : yield* nudgeThreads({
+            threadIds: body.value.threadIds,
+            message,
+            nudgeId: body.value.nudgeId.trim(),
+            summary: "T3 Code was thawed after a freeze",
+          });
+    return HttpServerResponse.jsonUnsafe({ scheduledTasks, nudges } satisfies ThawResponse);
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
@@ -252,4 +385,6 @@ export const forkRouteLayer = Layer.mergeAll(
   sessionResetRoute,
   noticeRoute,
   nudgeRoute,
+  freezeRoute,
+  thawRoute,
 );

@@ -27,6 +27,7 @@ import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
 import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { noticeCommand } from "./cli/notice.ts";
+import { freezeCommand, thawCommand } from "./cli/freeze.ts";
 import { nudgeCommand } from "./cli/nudge.ts";
 import { sessionCommand } from "./cli/session.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
@@ -88,6 +89,9 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       noticeCommand,
       // Fork: `t3 nudge` (queue a message on threads a force redeploy cut off).
       nudgeCommand,
+      // Fork: `t3 freeze` / `t3 thaw` (silence every other thread to measure usage in isolation).
+      freezeCommand,
+      thawCommand,
       serviceCommand,
       updateCommand,
       uninstallCommand,

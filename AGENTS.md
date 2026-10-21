@@ -107,6 +107,20 @@ running server when there is one) so its next send starts a fresh Claude session
 T3 history handed over as context (`apps/server/src/cli/session.ts`,
 `apps/server/src/import/ClaudeResumeBindings.ts`).
 
+## Measuring Claude usage in isolation (`t3 freeze` / `t3 thaw`)
+
+`t3 freeze` silences every other conversation on the running server so one long task is the only
+thing drawing on the Claude subscription. It stops each working thread like the Stop button
+(interrupt, background agents/commands and delegated tasks included, queue held), then disables
+scheduled tasks, which would otherwise launch new runs mid-measurement. `--keep-thread <id>` /
+`--keep-worktree <path>` exempt the chat doing the measured work. "Working" is read from the
+projection tables (`apps/server/src/fork/freeze.ts`); exit 1 and a `busy` list mean something
+ignored the stop within `--wait`. `--check` only reports. The manifest at `/tmp/t3-freeze.json`
+records what was stopped/disabled so `t3 thaw` re-enables exactly those tasks and nudges the
+stopped threads (`--no-nudge` skips that). It only covers T3: Claude Code outside T3, the
+claude.ai app, and other callers of the same subscription still count. The global `/freeze` skill
+in the dotfiles repo wraps both commands.
+
 ## External notifications
 
 Outside services push notification cards over `/api/notifications` with a `notifications:write`
