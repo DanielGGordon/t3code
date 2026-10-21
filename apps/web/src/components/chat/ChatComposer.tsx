@@ -6597,7 +6597,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <div className="relative flex min-w-max flex-auto items-center gap-3 max-md:gap-2">
             {composerVoiceInput}
             {composerKeyboardToggle}
-            {showComposerAttachAction ? (
+            {showComposerAttachAction && !driveMode ? (
               <ComposerTouchButton
                 tone="outline"
                 size="icon"
@@ -6629,7 +6629,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   showInteractionModeToggle={planModeUiEnabled}
                   traitsMenuContent={providerTraitsMenuContent}
                   attachDisabled={isConnecting || isComposerApprovalState}
-                  onAttach={showComposerAttachAction ? openComposerAttachmentPicker : undefined}
+                  onAttach={
+                    showComposerAttachAction && !driveMode
+                      ? openComposerAttachmentPicker
+                      : undefined
+                  }
                   onToggleInteractionMode={toggleInteractionMode}
                   onRuntimeModeChange={handleRuntimeModeChange}
                 />
