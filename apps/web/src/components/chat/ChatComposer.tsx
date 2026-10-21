@@ -6580,7 +6580,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-footer-compact="true"
       data-chat-composer-footer-touch="true"
       className={cn(
-        "flex min-w-0 flex-wrap items-center gap-3 px-3 pb-3 max-md:gap-2 short:pb-2",
+        "flex min-w-0 flex-wrap items-center gap-3 px-3 pb-3 max-md:gap-2 short:pb-2 drive:flex-nowrap",
         pendingUserInputs.length > 0 && "pt-2",
         showMobilePendingAnswerActions && "hidden sm:flex",
       )}
@@ -6591,10 +6591,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         <>
           {/* One row on a phone: Speak, keyboard, attach and the folded controls
               as icon buttons, then send (wrapping to its own line, with the
-              compact toggle, when the row is too narrow for both). Model and thinking level live in the
+              compact toggle, when the row is too narrow for both; drive mode never wraps and
+              drops the toggle's label instead). Model and thinking level live in the
               folded controls menu; the picker stays mounted, out of sight, so
               that menu can open it. */}
-          <div className="relative flex min-w-max flex-auto items-center gap-3 max-md:gap-2">
+          <div className="relative flex min-w-max flex-auto items-center gap-3 max-md:gap-2 drive:min-w-0">
             {composerVoiceInput}
             {composerKeyboardToggle}
             {showComposerAttachAction && !driveMode ? (

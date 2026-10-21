@@ -423,7 +423,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           }
         >
           <Minimize2Icon aria-hidden="true" />
-          {keepFullHistory ? "Full" : "Compact"}
+          <span className="drive:hidden">{keepFullHistory ? "Full" : "Compact"}</span>
           <span>{compactTokens}</span>
         </TooltipTrigger>
         <TooltipPopup>
