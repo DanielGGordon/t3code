@@ -459,6 +459,17 @@ export const StockQuote = Schema.Struct({
   currency: Schema.NullOr(Schema.String),
   // Unix epoch seconds when this quote was fetched (data freshness).
   capturedAt: Schema.Number,
+  // Trading session the price was printed in. Only set by sources that can
+  // tell (Robinhood's 24/5 feed); "overnight" is the 8pm-4am ET Blue Ocean
+  // session that no free exchange-fed source covers.
+  session: Schema.optional(Schema.Literals(["pre", "regular", "post", "overnight"])),
+  // Close that `changePercent` is measured against: the previous close during
+  // the regular session, today's regular close during extended sessions.
+  referenceClose: Schema.optional(Schema.NullOr(Schema.Number)),
+  bid: Schema.optional(Schema.NullOr(Schema.Number)),
+  ask: Schema.optional(Schema.NullOr(Schema.Number)),
+  // Unix epoch seconds of the last trade behind `price`.
+  tradedAt: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 export type StockQuote = typeof StockQuote.Type;
 

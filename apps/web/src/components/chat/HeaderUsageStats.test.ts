@@ -326,6 +326,33 @@ describe("selectHeaderUsageStats", () => {
     expect(stock?.tooltip).toBe("+0.42% today");
   });
 
+  it("names the session and adds bid/ask and trade time in the tooltip for 24/5 quotes", () => {
+    const tradedAt = Date.parse("2026-10-21T03:25:19Z") / 1000;
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      stockSymbol: "tsla",
+      stockQuote: {
+        symbol: "TSLA",
+        price: 379.7,
+        changePercent: 1.6,
+        currency: "USD",
+        capturedAt: tradedAt,
+        session: "overnight",
+        referenceClose: 373.78,
+        bid: 379.69,
+        ask: 379.7,
+        tradedAt,
+      },
+    });
+    const stock = stats.find((stat) => stat.id === "stock");
+    expect(stock?.value).toBe("$379.70");
+    expect(stock?.tooltip).toMatch(
+      /^Overnight \+1\.60% vs close \$373\.78 · Bid \$379\.69 · Ask \$379\.70 · Last trade /,
+    );
+  });
+
   it("tints the stock stat red when the change is negative", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,

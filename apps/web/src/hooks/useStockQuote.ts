@@ -5,8 +5,8 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 
-// Never poll the server (and thus the upstream) faster than its 15s cache TTL.
-const REFRESH_INTERVAL_MS = 15_000;
+// Once a minute; the server caches upstream for 15s so this always sees a fresh quote.
+const REFRESH_INTERVAL_MS = 60_000;
 
 /**
  * A single delayed stock quote for the header ticker, fetched server-side from

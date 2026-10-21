@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { normalizeSymbol, parseCboe, parseStooqCsv, parseYahooChart } from "./StockQuote.ts";
+import {
+  normalizeSymbol,
+  parseCboe,
+  parseRobinhood,
+  parseStooqCsv,
+  parseYahooChart,
+  sessionAt,
+} from "./StockQuote.ts";
 
 const CAPTURED_AT = 1_783_610_399;
 
@@ -26,6 +33,78 @@ describe("StockQuote", () => {
       expect(normalizeSymbol("A B")).toBeNull();
       expect(normalizeSymbol("drop/table")).toBeNull();
       expect(normalizeSymbol("A".repeat(16))).toBeNull();
+    });
+  });
+
+  describe("sessionAt", () => {
+    // October is EDT (UTC-4).
+    it("classifies Eastern wall-clock time into the four sessions", () => {
+      expect(sessionAt(Date.parse("2026-10-20T08:00:00Z"))).toBe("pre"); // 4:00 ET
+      expect(sessionAt(Date.parse("2026-10-20T13:30:00Z"))).toBe("regular"); // 9:30 ET
+      expect(sessionAt(Date.parse("2026-10-20T20:00:00Z"))).toBe("post"); // 16:00 ET
+      expect(sessionAt(Date.parse("2026-10-21T00:00:00Z"))).toBe("overnight"); // 20:00 ET
+      expect(sessionAt(Date.parse("2026-10-21T07:59:00Z"))).toBe("overnight"); // 3:59 ET
+    });
+
+    it("follows daylight saving (EST in winter)", () => {
+      expect(sessionAt(Date.parse("2026-12-15T14:30:00Z"))).toBe("regular"); // 9:30 EST
+    });
+  });
+
+  describe("parseRobinhood", () => {
+    const row = (fields: Record<string, unknown>) => ({
+      results: [
+        {
+          symbol: "TSLA",
+          last_trade_price: "373.775000",
+          venue_last_trade_time: "2026-10-20T19:59:59.907567936Z",
+          previous_close: "368.060000",
+          adjusted_previous_close: "368.060000",
+          bid_price: "379.690000",
+          ask_price: "379.700000",
+          ...fields,
+        },
+      ],
+    });
+
+    it("prefers a newer overnight print and measures change against the regular close", () => {
+      const quote = parseRobinhood(
+        row({
+          last_non_reg_trade_price: "379.700000",
+          venue_last_non_reg_trade_time: "2026-10-21T03:25:19.494345912Z",
+        }),
+        CAPTURED_AT,
+      );
+      expect(quote?.price).toBe(379.7);
+      expect(quote?.session).toBe("overnight");
+      expect(quote?.referenceClose).toBe(373.775);
+      expect(quote?.changePercent).toBeCloseTo(((379.7 - 373.775) / 373.775) * 100, 5);
+      expect(quote?.bid).toBe(379.69);
+      expect(quote?.ask).toBe(379.7);
+      expect(quote?.tradedAt).toBe(Math.floor(Date.parse("2026-10-21T03:25:19.494Z") / 1000));
+    });
+
+    it("uses the regular price against the previous close when it is the latest print", () => {
+      const quote = parseRobinhood(
+        row({
+          last_trade_price: "373.775000",
+          venue_last_trade_time: "2026-10-20T19:59:59Z",
+          last_non_reg_trade_price: "370.000000",
+          venue_last_non_reg_trade_time: "2026-10-20T11:00:00Z",
+        }),
+        CAPTURED_AT,
+      );
+      expect(quote?.price).toBe(373.775);
+      expect(quote?.session).toBe("regular");
+      expect(quote?.referenceClose).toBe(368.06);
+      expect(quote?.changePercent).toBeCloseTo(((373.775 - 368.06) / 368.06) * 100, 5);
+    });
+
+    it("returns null when there is no result or no price", () => {
+      expect(parseRobinhood({ results: [null] }, CAPTURED_AT)).toBeNull();
+      expect(parseRobinhood({ results: [] }, CAPTURED_AT)).toBeNull();
+      expect(parseRobinhood({ results: [{ symbol: "TSLA" }] }, CAPTURED_AT)).toBeNull();
+      expect(parseRobinhood("nonsense", CAPTURED_AT)).toBeNull();
     });
   });
 

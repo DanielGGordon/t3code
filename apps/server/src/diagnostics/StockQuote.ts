@@ -4,8 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
-// Free, keyless quote sources, tried in order. Cboe's delayed-quotes endpoint
-// is first because Yahoo and Stooq are IP-blocked from datacenter ranges: from
+// Free, keyless quote sources, tried in order. Robinhood leads for its overnight
+// coverage (below); after it, Cboe's delayed-quotes endpoint is preferred because Yahoo and Stooq are IP-blocked from datacenter ranges: from
 // the deployed VPS (an OVH datacenter IP) Yahoo returns HTTP 429 on every
 // request (query1/query2 and the crumb flow) and Stooq returns HTTP 404 for
 // every symbol variant, so both always degraded to "—" in production. Cboe
@@ -13,6 +13,11 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 // directly. Yahoo (price + derived change) and Stooq (price only) remain as
 // fallbacks — they still work from residential/desktop IPs and cover indices,
 // crypto and FX symbols that Cboe (US equities/ETFs) does not.
+// Robinhood's own quote endpoint answers without auth and, with `bounds=24_5`,
+// includes the 8pm-4am ET overnight (Blue Ocean) session — the one stretch
+// every exchange-fed source above goes blind for. It is undocumented, so it is
+// tried first but any failure just falls through to the sources below.
+const ROBINHOOD_QUOTE_BASE = "https://api.robinhood.com/marketdata/quotes/";
 const CBOE_QUOTE_BASE = "https://cdn.cboe.com/api/global/delayed_quotes/quotes/";
 const YAHOO_CHART_BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
 const STOOQ_CSV_BASE = "https://stooq.com/q/l/";
@@ -50,6 +55,81 @@ const SYMBOL_PATTERN = /^[A-Z0-9.^=-]{1,15}$/;
 export function normalizeSymbol(symbol: string): string | null {
   const trimmed = symbol.trim().toUpperCase();
   return SYMBOL_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+type QuoteSession = NonNullable<StockQuote["session"]>;
+
+const NEW_YORK_CLOCK = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  hour: "numeric",
+  minute: "numeric",
+});
+
+/** Which US session an instant falls in, by Eastern wall-clock time. */
+export function sessionAt(epochMs: number): QuoteSession {
+  const parts = NEW_YORK_CLOCK.formatToParts(epochMs);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const minutes = read("hour") * 60 + read("minute");
+  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre";
+  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return "regular";
+  if (minutes >= 16 * 60 && minutes < 20 * 60) return "post";
+  return "overnight";
+}
+
+function asNumericString(value: unknown): number | null {
+  return typeof value === "string" ? asFiniteNumber(Number(value)) : null;
+}
+
+function percentChange(price: number, reference: number | null): number | null {
+  return reference !== null && reference !== 0 ? ((price - reference) / reference) * 100 : null;
+}
+
+/**
+ * Parse Robinhood's `marketdata/quotes` payload (string-typed numbers). The
+ * latest print wins: when the newest non-regular trade is more recent than the
+ * last regular-session trade the price is that extended/overnight print and
+ * the change is measured against the regular close (as Robinhood shows it);
+ * otherwise it is the regular price against the previous close. Returns null
+ * on anything unexpected.
+ */
+export function parseRobinhood(body: unknown, capturedAt: number): StockQuote | null {
+  const results = asRecord(body)?.results;
+  const quote = Array.isArray(results) ? asRecord(results[0]) : null;
+  if (quote === null) {
+    return null;
+  }
+  const regularPrice = asNumericString(quote.last_trade_price);
+  const regularTime = Date.parse(asString(quote.venue_last_trade_time) ?? "");
+  const extendedPrice =
+    asNumericString(quote.last_non_reg_trade_price) ??
+    asNumericString(quote.last_extended_hours_trade_price);
+  const extendedTime = Date.parse(asString(quote.venue_last_non_reg_trade_time) ?? "");
+
+  const extendedIsNewer =
+    extendedPrice !== null &&
+    Number.isFinite(extendedTime) &&
+    (!Number.isFinite(regularTime) || extendedTime > regularTime);
+  const price = extendedIsNewer ? extendedPrice : regularPrice;
+  const tradeTime = extendedIsNewer ? extendedTime : regularTime;
+  if (price === null) {
+    return null;
+  }
+  const referenceClose = extendedIsNewer
+    ? regularPrice
+    : (asNumericString(quote.adjusted_previous_close) ?? asNumericString(quote.previous_close));
+  return {
+    symbol: asString(quote.symbol) ?? "",
+    price,
+    changePercent: percentChange(price, referenceClose),
+    currency: "USD",
+    capturedAt,
+    session: Number.isFinite(tradeTime) ? sessionAt(tradeTime) : "regular",
+    referenceClose,
+    bid: asNumericString(quote.bid_price),
+    ask: asNumericString(quote.ask_price),
+    tradedAt: Number.isFinite(tradeTime) ? Math.floor(tradeTime / 1000) : null,
+  };
 }
 
 /**
@@ -148,6 +228,31 @@ export function parseStooqCsv(csv: string, capturedAt: number): StockQuote | nul
 function toStooqSymbol(symbol: string): string {
   return symbol.includes(".") ? symbol.toLowerCase() : `${symbol.toLowerCase()}.us`;
 }
+
+const fetchFromRobinhood = (
+  symbol: string,
+  capturedAt: number,
+): Effect.Effect<StockQuote | null, never, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+    const body = yield* HttpClientRequest.get(
+      `${ROBINHOOD_QUOTE_BASE}?symbols=${encodeURIComponent(symbol)}&bounds=24_5`,
+    ).pipe(
+      HttpClientRequest.setHeaders({ "User-Agent": USER_AGENT, Accept: "application/json" }),
+      httpClient.execute,
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Unknown)),
+      Effect.timeout(QUOTE_FETCH_TIMEOUT),
+    );
+    const quote = parseRobinhood(body, capturedAt);
+    return quote === null ? null : { ...quote, symbol: quote.symbol || symbol };
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logDebug("stock quote fetch failed", { symbol, source: "robinhood", cause }).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
 
 const fetchFromCboe = (
   symbol: string,
@@ -254,7 +359,7 @@ function writeCache(symbol: string, entry: CacheEntry): void {
 
 /**
  * Fetch a delayed quote for `symbol`, cached process-wide for
- * {@link QUOTE_CACHE_TTL_MS}. Tries Cboe, then Yahoo, then Stooq. Never fails:
+ * {@link QUOTE_CACHE_TTL_MS}. Tries Robinhood, Cboe, Yahoo, then Stooq. Never fails:
  * returns null (rendered as a muted dash) when the symbol is empty/malformed or
  * every source is unavailable. The read is best-effort telemetry.
  *
@@ -287,11 +392,17 @@ export const readStockQuote = (
     // ──────────────────────────────────────────────────────────────
 
     const capturedAt = Math.floor(nowMs / 1000);
-    // Cboe first (works from datacenter IPs and gives price + percent change);
-    // then Yahoo (price + derived change), then Stooq (price only). Each source
+    // Robinhood first (the only source with overnight prices); then Cboe (works
+    // from datacenter IPs, price + percent change), Yahoo (price + derived
+    // change), then Stooq (price only). Each source
     // self-recovers errors/empty parses to null, so a failing source always
     // falls through to the next one.
-    const freshQuote = yield* fetchFromCboe(normalized, capturedAt).pipe(
+    const freshQuote = yield* fetchFromRobinhood(normalized, capturedAt).pipe(
+      Effect.flatMap((quote) =>
+        quote !== null
+          ? Effect.succeed<StockQuote | null>(quote)
+          : fetchFromCboe(normalized, capturedAt),
+      ),
       Effect.flatMap((quote) =>
         quote !== null
           ? Effect.succeed<StockQuote | null>(quote)
