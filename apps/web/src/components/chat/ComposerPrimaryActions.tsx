@@ -68,10 +68,26 @@ const formatPendingPrimaryActionLabel = (input: {
     return input.isLastQuestion ? "Submit" : "Next";
   }
   if (!input.isLastQuestion) {
-    return "Next question";
+    return <PendingLabel full="Next question" short="Next" />;
   }
-  return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
+  return (
+    <PendingLabel
+      full={input.questionIndex > 0 ? "Submit answers" : "Submit answer"}
+      short="Submit"
+    />
+  );
 };
+
+// Drive mode (the Tesla's half-width browser) has no room for the long label
+// beside the 56px stop button and the big Speak pill, so the row would wrap.
+function PendingLabel(props: { full: string; short: string }) {
+  return (
+    <>
+      <span className="drive:hidden">{props.full}</span>
+      <span className="hidden drive:inline">{props.short}</span>
+    </>
+  );
+}
 
 const messageActionPillClassName =
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-message-action font-medium text-base text-message-action-foreground shadow-xs shadow-message-action/24 outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none sm:text-sm";
@@ -199,8 +215,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
+              aria-label="Previous question"
             >
-              Previous
+              <ChevronLeftIcon className="hidden drive:block drive:size-6" aria-hidden="true" />
+              <span className="drive:hidden">Previous</span>
             </Button>
           )
         ) : null}
