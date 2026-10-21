@@ -6601,7 +6601,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerTouchButton
                 tone="outline"
                 size="icon"
-                className="max-md:size-11 short:size-11"
+                className="max-md:size-11 drive:size-11 short:size-11"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={openComposerAttachmentPicker}
                 disabled={isConnecting || isComposerApprovalState}
@@ -6613,11 +6613,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             {showProviderUnavailable ? (
               composerControls
             ) : (
-              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:contents short:contents">
-                <div className="min-w-0 max-md:invisible max-md:absolute max-md:top-0 max-md:left-0 max-md:size-0 max-md:overflow-hidden short:invisible short:absolute short:top-0 short:left-0 short:size-0 short:overflow-hidden">
+              <div className="flex min-w-0 items-center rounded-full border border-border/70 bg-muted/30 max-md:contents drive:contents short:contents">
+                <div className="min-w-0 max-md:invisible max-md:absolute max-md:top-0 max-md:left-0 max-md:size-0 max-md:overflow-hidden drive:invisible drive:absolute drive:top-0 drive:left-0 drive:size-0 drive:overflow-hidden short:invisible short:absolute short:top-0 short:left-0 short:size-0 short:overflow-hidden">
                   {composerModelPicker}
                 </div>
-                <ComposerControlSeparator className="mx-0 block h-8 max-md:hidden short:hidden" />
+                <ComposerControlSeparator className="mx-0 block h-8 max-md:hidden drive:hidden short:hidden" />
                 <CompactComposerControlsMenu
                   touchLayout
                   summaryLabel={composerControlsSummary}

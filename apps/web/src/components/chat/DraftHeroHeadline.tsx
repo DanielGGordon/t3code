@@ -411,7 +411,9 @@ export function DraftHeroHeadline({
           <>What should we work on?</>
         ) : hasResolvedProject ? (
           <>
-            What should we build in <span className="whitespace-nowrap">{projectSelector}?</span>
+            What should we build in{" "}
+            {/* Drive density: the pill drops to its own line so a project name gets the full width instead of the sentence's leftover. */}
+            <span className="whitespace-nowrap drive:mt-1 drive:block">{projectSelector}?</span>
           </>
         ) : canChooseProject ? (
           <>{projectSelector} to start</>
