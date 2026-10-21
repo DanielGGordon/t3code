@@ -15,9 +15,13 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 import {
   FORK_CLAUDE_IMPORT_ROUTE_PATH,
+  FORK_FREEZE_ROUTE_PATH,
+  FORK_THAW_ROUTE_PATH,
   FORK_NOTICE_ROUTE_PATH,
   FORK_NUDGE_ROUTE_PATH,
   FORK_SESSION_RESET_ROUTE_PATH,
@@ -105,6 +109,17 @@ function run(request: Request, calls: Array<unknown>) {
         return {};
       }),
   } as unknown as ThreadManagementService.ThreadManagementService["Service"];
+  const scheduledTasks = {
+    setEnabled: (input: { id: string; enabled: boolean }) =>
+      input.id === "gone"
+        ? Effect.fail({ message: "no such task" })
+        : Effect.sync(() => {
+            calls.push({ setEnabled: input });
+            return {};
+          }),
+  } as unknown as ScheduledTaskService.ScheduledTaskService["Service"];
+  // Nothing is busy: the freeze route only needs a query that returns no rows here.
+  const sql = (() => Effect.succeed([])) as unknown as SqlClient.SqlClient;
   return Effect.acquireUseRelease(
     Effect.sync(() =>
       HttpRouter.toWebHandler(forkRouteLayer.pipe(Layer.provide(NodeServices.layer)), {
@@ -120,6 +135,8 @@ function run(request: Request, calls: Array<unknown>) {
             Context.add(ClaudeResumeBindings.ClaudeResumeBindings, bindings),
             Context.add(ServerLifecycleEvents.ServerLifecycleEvents, lifecycleEvents),
             Context.add(ThreadManagementService.ThreadManagementService, threads),
+            Context.add(ScheduledTaskService.ScheduledTaskService, scheduledTasks),
+            Context.add(SqlClient.SqlClient, sql),
           ),
         ),
       ),
@@ -261,5 +278,81 @@ it.effect("queues the nudge as a system notification and reports threads that ca
     );
     expect(unauthorized.status).toBe(403);
     expect(calls).toHaveLength(1);
+  }),
+);
+
+it.effect("reports what is busy on freeze check and rejects malformed requests", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const ok = yield* run(
+      post(
+        FORK_FREEZE_ROUTE_PATH,
+        { action: "check", freezeId: "f", keepThreads: ["t"], keepWorktrees: [], waitSecs: 0 },
+        OPERATE_TOKEN,
+      ),
+      calls,
+    );
+    expect(ok.status).toBe(200);
+    expect(yield* Effect.promise(() => ok.json())).toEqual({
+      stopped: [],
+      scheduledTasksDisabled: [],
+      remaining: [],
+      errors: [],
+    });
+    const invalid = yield* run(
+      post(FORK_FREEZE_ROUTE_PATH, { action: "explode", freezeId: "f" }, OPERATE_TOKEN),
+      calls,
+    );
+    expect(invalid.status).toBe(400);
+    const unauthorized = yield* run(
+      post(
+        FORK_FREEZE_ROUTE_PATH,
+        { action: "check", freezeId: "f", keepThreads: [], keepWorktrees: [], waitSecs: 0 },
+        READ_ONLY_TOKEN,
+      ),
+      calls,
+    );
+    expect(unauthorized.status).toBe(403);
+    expect(calls).toEqual([]);
+  }),
+);
+
+it.effect("thaw re-enables tasks, nudges stopped threads, and skips the nudge when blank", () =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const ok = yield* run(
+      post(
+        FORK_THAW_ROUTE_PATH,
+        {
+          scheduledTaskIds: ["task-1", "gone"],
+          threadIds: ["thread-1"],
+          message: "Please continue.",
+          nudgeId: "thaw-1",
+        },
+        OPERATE_TOKEN,
+      ),
+      calls,
+    );
+    expect(ok.status).toBe(200);
+    expect(yield* Effect.promise(() => ok.json())).toEqual({
+      scheduledTasks: [
+        { id: "task-1", enabled: true, detail: "enabled" },
+        { id: "gone", enabled: false, detail: "no such task" },
+      ],
+      nudges: [{ threadId: "thread-1", sent: true, detail: "queued" }],
+    });
+    expect(calls[0]).toEqual({ setEnabled: { id: "task-1", enabled: true } });
+    expect(calls[1]).toMatchObject({ dispatch: { threadId: "thread-1" } });
+
+    const silent = yield* run(
+      post(
+        FORK_THAW_ROUTE_PATH,
+        { scheduledTaskIds: [], threadIds: ["thread-1"], message: "", nudgeId: "thaw-2" },
+        OPERATE_TOKEN,
+      ),
+      calls,
+    );
+    expect(yield* Effect.promise(() => silent.json())).toEqual({ scheduledTasks: [], nudges: [] });
+    expect(calls).toHaveLength(2);
   }),
 );
