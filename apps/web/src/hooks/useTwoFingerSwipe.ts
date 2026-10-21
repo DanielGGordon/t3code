@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { classifyTwoFingerSwipe, type TouchPoint } from "./touchGestures";
+import { classifyTwoFingerSwipe, couldBeTwoFingerSwipe, type TouchPoint } from "./touchGestures";
 
 interface TwoFingerSwipeHandlers {
   readonly onSwipeUp: () => void;
@@ -47,8 +47,10 @@ export function useTwoFingerSwipe(enabled: boolean, handlers: TwoFingerSwipeHand
       const b = Array.from(event.touches).find((t) => t.identifier === ids?.[1]);
       if (!a || !b) return;
       last = [pointOf(a), pointOf(b)];
-      // A deliberate vertical two-finger drag must not also scroll the page.
-      if (classifyTwoFingerSwipe(start, last) !== null && event.cancelable) event.preventDefault();
+      // The page begins scrolling on the first moves, well before the swipe
+      // is long enough to classify, and a scroll in progress can't be
+      // cancelled. Claim the touch from the start while it can still be a swipe.
+      if (couldBeTwoFingerSwipe(start, last) && event.cancelable) event.preventDefault();
     };
     const onTouchEnd = () => {
       const gesture = start && last ? classifyTwoFingerSwipe(start, last) : null;

@@ -4,6 +4,7 @@ import {
   GESTURE_CLICK_SUPPRESSION_MS,
   GestureClickSuppressor,
   classifyTwoFingerSwipe,
+  couldBeTwoFingerSwipe,
   composePointerHandlers,
   isGesturePointer,
 } from "./touchGestures";
@@ -89,5 +90,28 @@ describe("classifyTwoFingerSwipe", () => {
       { x: 320, y: 300 },
     ] as const;
     expect(classifyTwoFingerSwipe(down(400, 400), diagonal)).toBeNull();
+  });
+});
+
+describe("couldBeTwoFingerSwipe", () => {
+  const at = (...ys: [number, number]) =>
+    [
+      { x: 100, y: ys[0] },
+      { x: 200, y: ys[1] },
+    ] as const;
+
+  it("claims the touch before the swipe is long enough to classify", () => {
+    expect(couldBeTwoFingerSwipe(at(400, 400), at(400, 400))).toBe(true);
+    expect(couldBeTwoFingerSwipe(at(400, 400), at(390, 392))).toBe(true);
+    expect(couldBeTwoFingerSwipe(at(400, 400), at(340, 345))).toBe(true);
+  });
+
+  it("lets go once it turns into a pinch or a sideways drag", () => {
+    expect(couldBeTwoFingerSwipe(at(400, 400), at(380, 420))).toBe(false);
+    const sideways = [
+      { x: 140, y: 390 },
+      { x: 240, y: 390 },
+    ] as const;
+    expect(couldBeTwoFingerSwipe(at(400, 400), sideways)).toBe(false);
   });
 });

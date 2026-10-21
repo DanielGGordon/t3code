@@ -81,6 +81,31 @@ export function classifyTwoFingerSwipe(
   return dy < 0 ? "up" : "down";
 }
 
+/** Travel (px) below which a two-finger drag hasn't picked a direction yet. */
+const TWO_FINGER_SWIPE_UNDECIDED_PX = 12;
+
+/**
+ * Whether a two-finger drag is still compatible with a vertical swipe. The
+ * swipe only classifies after TWO_FINGER_SWIPE_MIN_TRAVEL_PX, but the page
+ * starts scrolling long before that, so the recognizer claims the touch from
+ * the first move for as long as this holds and lets go once it turns into a
+ * pinch or a sideways drag.
+ */
+export function couldBeTwoFingerSwipe(
+  start: readonly [TouchPoint, TouchPoint],
+  end: readonly [TouchPoint, TouchPoint],
+): boolean {
+  const dy0 = end[0].y - start[0].y;
+  const dy1 = end[1].y - start[1].y;
+  const dy = (dy0 + dy1) / 2;
+  const dx = (end[0].x - start[0].x + end[1].x - start[1].x) / 2;
+  if (Math.min(Math.abs(dy0), Math.abs(dy1)) >= TWO_FINGER_SWIPE_UNDECIDED_PX) {
+    if (Math.sign(dy0) !== Math.sign(dy1)) return false;
+  }
+  if (Math.hypot(dx, dy) < TWO_FINGER_SWIPE_UNDECIDED_PX) return true;
+  return Math.abs(dx) <= Math.abs(dy) * TWO_FINGER_SWIPE_MAX_DRIFT_RATIO;
+}
+
 /** Longest a multi-finger touch may stay down and still count as a tap. */
 export const MULTI_FINGER_TAP_MAX_DURATION_MS = 350;
 /** Travel (px) any finger may drift before the touch stops being a tap. */
