@@ -1,4 +1,8 @@
-import type { ServerProvider, ServerProviderUsageWindow } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  ServerProvider,
+  ServerProviderUsageWindow,
+} from "@t3tools/contracts";
 
 /**
  * Header-readout view of the subscription windows providers publish on their
@@ -42,12 +46,21 @@ export interface HeaderGeminiUsage {
 
 const SCOPED_LABEL_PREFIX = /^weekly\s*[·:-]\s*/i;
 
+/**
+ * Windows for `driver`. When the thread runs on a specific instance of that
+ * driver (a second Claude subscription, say) only that instance's windows
+ * count; borrowing another account's numbers would show the wrong plan. Any
+ * other thread falls back to the first enabled instance that reports windows.
+ */
 function findUsageWindows(
   providers: ReadonlyArray<ServerProvider>,
   driver: string,
+  instanceId?: ProviderInstanceId | null,
 ): ReadonlyArray<ServerProviderUsageWindow> | null {
-  for (const provider of providers) {
-    if (provider.driver !== driver || !provider.enabled) continue;
+  const matching = providers.filter((provider) => provider.driver === driver && provider.enabled);
+  const own = instanceId ? matching.find((provider) => provider.instanceId === instanceId) : null;
+  if (own) return own.usageLimits?.windows?.length ? own.usageLimits.windows : null;
+  for (const provider of matching) {
     const windows = provider.usageLimits?.windows;
     if (windows && windows.length > 0) return windows;
   }
@@ -61,8 +74,9 @@ function resetsAtField(window: ServerProviderUsageWindow): { resetsAt?: string }
 /** Claude plan windows from the first enabled Claude provider that reports any. */
 export function selectClaudeUsage(
   providers: ReadonlyArray<ServerProvider>,
+  instanceId?: ProviderInstanceId | null,
 ): HeaderClaudeUsage | null {
-  const windows = findUsageWindows(providers, "claudeAgent");
+  const windows = findUsageWindows(providers, "claudeAgent", instanceId);
   if (windows === null) return null;
   const limits: HeaderUsageLimit[] = [];
   for (const window of windows) {
@@ -88,8 +102,9 @@ export function selectClaudeUsage(
 /** Codex session/weekly windows from the first enabled Codex provider that reports any. */
 export function selectCodexUsage(
   providers: ReadonlyArray<ServerProvider>,
+  instanceId?: ProviderInstanceId | null,
 ): HeaderCodexUsage | null {
-  const windows = findUsageWindows(providers, "codex");
+  const windows = findUsageWindows(providers, "codex", instanceId);
   if (windows === null) return null;
   const toWindow = (window: ServerProviderUsageWindow | undefined): HeaderCodexWindow | null =>
     window ? { usedPercent: window.usedPercent, ...resetsAtField(window) } : null;
@@ -107,8 +122,9 @@ export function selectCodexUsage(
  */
 export function selectGeminiUsage(
   providers: ReadonlyArray<ServerProvider>,
+  instanceId?: ProviderInstanceId | null,
 ): HeaderGeminiUsage | null {
-  const windows = findUsageWindows(providers, "antigravity");
+  const windows = findUsageWindows(providers, "antigravity", instanceId);
   if (windows === null) return null;
   const fullest = (kind: ServerProviderUsageWindow["kind"]): HeaderCodexWindow | null => {
     let best: ServerProviderUsageWindow | undefined;

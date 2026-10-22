@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ProviderInstanceId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -58,6 +59,7 @@ interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   activeThreadTitle: string;
+  providerInstanceId: ProviderInstanceId | null;
   isServerThread: boolean;
   contextWindow: ContextWindowSnapshot | null;
   restartRequested: boolean;
@@ -89,6 +91,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
   activeThreadTitle,
+  providerInstanceId,
   isServerThread,
   contextWindow,
   restartRequested,
@@ -112,7 +115,7 @@ export const ChatHeader = memo(function ChatHeader({
     claude: claudeAccountUsage,
     codex: codexUsage,
     gemini: geminiUsage,
-  } = useProviderUsage(activeThreadEnvironmentId);
+  } = useProviderUsage(activeThreadEnvironmentId, providerInstanceId);
   const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
   const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
   const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
