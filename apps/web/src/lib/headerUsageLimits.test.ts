@@ -1,7 +1,7 @@
 import type { ServerProvider, ServerProviderUsageWindow } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { selectGeminiUsage } from "./headerUsageLimits";
+import { selectClaudeUsage, selectGeminiUsage } from "./headerUsageLimits";
 
 function antigravity(
   windows: ReadonlyArray<ServerProviderUsageWindow>,
@@ -67,5 +67,36 @@ describe("selectGeminiUsage", () => {
         antigravity([window("3p-5h", "Claude & GPT (shared) · 5-hour", "session", 5)]),
       ]),
     ).toBeNull();
+  });
+});
+
+describe("selectClaudeUsage", () => {
+  const claude = (instanceId: string, sessionPercent: number | null): ServerProvider =>
+    ({
+      driver: "claudeAgent",
+      instanceId,
+      enabled: true,
+      usageLimits: {
+        checkedAt: "2026-03-23T00:00:00.000Z",
+        windows:
+          sessionPercent === null ? [] : [window("five_hour", "Session", "session", sessionPercent)],
+      },
+    }) as unknown as ServerProvider;
+
+  it("reads the instance the thread runs on, not the first Claude account", () => {
+    const providers = [claude("claudeAgent", 10), claude("claude_work", 70)];
+    expect(selectClaudeUsage(providers, "claude_work" as never)?.limits[0]?.percent).toBe(70);
+    expect(selectClaudeUsage(providers, "claudeAgent" as never)?.limits[0]?.percent).toBe(10);
+  });
+
+  it("never borrows another account's numbers when the thread's instance reports none", () => {
+    const providers = [claude("claudeAgent", 10), claude("claude_work", null)];
+    expect(selectClaudeUsage(providers, "claude_work" as never)).toBeNull();
+  });
+
+  it("falls back to the first reporting Claude instance for non-Claude threads", () => {
+    const providers = [claude("claudeAgent", 10), claude("claude_work", 70)];
+    expect(selectClaudeUsage(providers, "codex" as never)?.limits[0]?.percent).toBe(10);
+    expect(selectClaudeUsage(providers)?.limits[0]?.percent).toBe(10);
   });
 });

@@ -7949,6 +7949,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadId={activeThread.id}
             isServerThread={isServerThread}
             activeThreadTitle={activeThread.title}
+            providerInstanceId={activeProviderInstanceId}
             activeProject={activeProject ?? null}
             contextWindow={activeContextWindow}
             restartRequested={activeThreadRestartRequested}
