@@ -108,6 +108,25 @@ function makeWindow(
   };
 }
 
+// 0.58 * 100 is 57.99999999999999; one decimal is all the readouts show.
+const fractionToPercent = (fraction: number): number => Math.round(fraction * 1000) / 10;
+
+/**
+ * `unifiedWindows` rides on every streamed event (newer CLIs) with both the
+ * session and weekly utilization, while the top-level `utilization` appears
+ * only near a threshold. Reading it keeps both rows current between probes;
+ * the pinned SDK typings do not know it yet.
+ */
+interface UnifiedWindow {
+  readonly utilization?: unknown;
+  readonly resetsAt?: unknown;
+}
+
+function readUnifiedWindows(info: object): Partial<Record<string, UnifiedWindow>> {
+  const raw = (info as { readonly unifiedWindows?: unknown }).unifiedWindows;
+  return typeof raw === "object" && raw !== null ? raw : {};
+}
+
 /**
  * Utilization is a 0–1 fraction on the streamed event. An overage-included
  * event before any probe has named the bucket is dropped: guessing a name
@@ -117,19 +136,32 @@ export function claudeRateLimitEventToUpdate(
   info: SDKRateLimitInfo,
   names: ClaudeScopedLimitNames,
 ): ProviderUsageLimitsUpdate | undefined {
+  const windows = new Map<string, ServerProviderUsageWindow>();
+  const unified = readUnifiedWindows(info);
+  for (const id of Object.keys(WINDOWS)) {
+    const window = unified[id];
+    if (typeof window?.utilization !== "number") continue;
+    windows.set(
+      id,
+      makeWindow(
+        id,
+        fractionToPercent(window.utilization),
+        isoFromEpochSeconds(typeof window.resetsAt === "number" ? window.resetsAt : undefined),
+      ),
+    );
+  }
   const type: string | undefined = info.rateLimitType;
-  if (!type || typeof info.utilization !== "number") {
-    return undefined;
+  if (type && typeof info.utilization === "number") {
+    const usedPercent = fractionToPercent(info.utilization);
+    const resetsAt = isoFromEpochSeconds(info.resetsAt);
+    if (type in WINDOWS) {
+      windows.set(type, makeWindow(type, usedPercent, resetsAt));
+    } else if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded) {
+      const scoped = scopedWindow(names.overageIncluded, usedPercent, resetsAt);
+      windows.set(scoped.id, scoped);
+    }
   }
-  const usedPercent = info.utilization * 100;
-  const resetsAt = isoFromEpochSeconds(info.resetsAt);
-  if (type in WINDOWS) {
-    return { windows: [makeWindow(type, usedPercent, resetsAt)] };
-  }
-  if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded) {
-    return { windows: [scopedWindow(names.overageIncluded, usedPercent, resetsAt)] };
-  }
-  return undefined;
+  return windows.size > 0 ? { windows: [...windows.values()] } : undefined;
 }
 
 /**

@@ -317,12 +317,16 @@ export function selectHeaderUsageStats(input: {
     }
     switch (definition.id) {
       case "codex": {
+        // Some plans (ChatGPT prolite) publish only a weekly window and no 5h
+        // one; show that instead of hiding Codex, labelled so it is not read as 5h.
         const primary = codexUsage?.primary ?? null;
-        if (primary) {
+        const shown = primary ?? codexUsage?.secondary ?? null;
+        if (shown) {
           stats.push({
             id: definition.id,
-            label: "Codex",
-            value: `${Math.round(primary.usedPercent)}%`,
+            label: primary ? "Codex" : "Codex Weekly",
+            ...(primary ? {} : { shortLabel: "CxWk" }),
+            value: `${Math.round(shown.usedPercent)}%`,
             colorClass: definition.colorClass,
             tooltip: formatCodexUsageTooltip(codexUsage),
           });

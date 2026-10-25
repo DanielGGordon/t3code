@@ -56,13 +56,22 @@ function findUsageWindows(
   providers: ReadonlyArray<ServerProvider>,
   driver: string,
   instanceId?: ProviderInstanceId | null,
+  now: number = Date.now(),
 ): ReadonlyArray<ServerProviderUsageWindow> | null {
   const matching = providers.filter((provider) => provider.driver === driver && provider.enabled);
   const own = instanceId ? matching.find((provider) => provider.instanceId === instanceId) : null;
-  if (own) return own.usageLimits?.windows?.length ? own.usageLimits.windows : null;
+  // A window past its reset time describes the previous period, so its
+  // percentage is stale; show nothing until the next reading arrives.
+  const live = (provider: ServerProvider): ReadonlyArray<ServerProviderUsageWindow> | null => {
+    const windows = provider.usageLimits?.windows?.filter(
+      (window) => !window.resetsAt || Date.parse(String(window.resetsAt)) > now,
+    );
+    return windows && windows.length > 0 ? windows : null;
+  };
+  if (own) return live(own);
   for (const provider of matching) {
-    const windows = provider.usageLimits?.windows;
-    if (windows && windows.length > 0) return windows;
+    const windows = live(provider);
+    if (windows) return windows;
   }
   return null;
 }
