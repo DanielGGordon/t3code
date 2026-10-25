@@ -264,6 +264,20 @@ describe("selectHeaderUsageStats", () => {
     expect(codex?.tooltip).toBe("5h 11% · Weekly 2%");
   });
 
+  it("falls back to the weekly window for plans that publish no 5h window", () => {
+    const stats = selectHeaderUsageStats({
+      visibility: allVisible,
+      contextWindow: null,
+      claudeUsage: null,
+      codexUsage: { primary: null, secondary: { usedPercent: 47 } },
+    });
+
+    const codex = stats.find((stat) => stat.id === "codex");
+    expect(codex?.label).toBe("Codex Weekly");
+    expect(codex?.value).toBe("47%");
+    expect(codex?.tooltip).toBe("Weekly 47%");
+  });
+
   it("omits the Codex stat when no snapshot is available", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,

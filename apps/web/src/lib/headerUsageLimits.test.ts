@@ -1,7 +1,7 @@
 import type { ServerProvider, ServerProviderUsageWindow } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { selectClaudeUsage, selectGeminiUsage } from "./headerUsageLimits";
+import { selectClaudeUsage, selectCodexUsage, selectGeminiUsage } from "./headerUsageLimits";
 
 function antigravity(
   windows: ReadonlyArray<ServerProviderUsageWindow>,
@@ -33,15 +33,15 @@ describe("selectGeminiUsage", () => {
   it("reads the Gemini 5-hour and weekly buckets and ignores the shared Claude & GPT allowance", () => {
     const usage = selectGeminiUsage([
       antigravity([
-        window("gemini-5h", "Gemini · 5-hour", "session", 40, "2026-03-23T04:00:00.000Z"),
-        window("gemini-weekly", "Gemini · Weekly", "weekly", 12, "2026-03-26T00:00:00.000Z"),
+        window("gemini-5h", "Gemini · 5-hour", "session", 40, "2099-03-23T04:00:00.000Z"),
+        window("gemini-weekly", "Gemini · Weekly", "weekly", 12, "2099-03-26T00:00:00.000Z"),
         window("3p-5h", "Claude & GPT (shared) · 5-hour", "session", 99),
       ]),
     ]);
 
     expect(usage).toEqual({
-      session: { usedPercent: 40, resetsAt: "2026-03-23T04:00:00.000Z" },
-      weekly: { usedPercent: 12, resetsAt: "2026-03-26T00:00:00.000Z" },
+      session: { usedPercent: 40, resetsAt: "2099-03-23T04:00:00.000Z" },
+      weekly: { usedPercent: 12, resetsAt: "2099-03-26T00:00:00.000Z" },
     });
   });
 
@@ -79,7 +79,9 @@ describe("selectClaudeUsage", () => {
       usageLimits: {
         checkedAt: "2026-03-23T00:00:00.000Z",
         windows:
-          sessionPercent === null ? [] : [window("five_hour", "Session", "session", sessionPercent)],
+          sessionPercent === null
+            ? []
+            : [window("five_hour", "Session", "session", sessionPercent)],
       },
     }) as unknown as ServerProvider;
 
@@ -98,5 +100,42 @@ describe("selectClaudeUsage", () => {
     const providers = [claude("claudeAgent", 10), claude("claude_work", 70)];
     expect(selectClaudeUsage(providers, "codex" as never)?.limits[0]?.percent).toBe(10);
     expect(selectClaudeUsage(providers)?.limits[0]?.percent).toBe(10);
+  });
+});
+
+describe("expired windows", () => {
+  const claude = (windows: ReadonlyArray<ServerProviderUsageWindow>) =>
+    ({
+      driver: "claudeAgent",
+      enabled: true,
+      usageLimits: { checkedAt: "2026-03-23T00:00:00.000Z", windows },
+    }) as ServerProvider;
+
+  it("drops a window whose reset time has passed but keeps the live ones", () => {
+    const usage = selectClaudeUsage([
+      claude([
+        window("five_hour", "Session", "session", 99, "2020-01-01T00:00:00.000Z"),
+        window("seven_day", "Weekly", "weekly", 39, "2099-01-01T00:00:00.000Z"),
+      ]),
+    ]);
+
+    expect(usage?.limits).toEqual([
+      { kind: "weekly_all", percent: 39, resetsAt: "2099-01-01T00:00:00.000Z" },
+    ]);
+  });
+
+  it("is null when every window has reset", () => {
+    expect(
+      selectCodexUsage([
+        {
+          driver: "codex",
+          enabled: true,
+          usageLimits: {
+            checkedAt: "x",
+            windows: [window("primary", "Weekly", "weekly", 47, "2020-01-01T00:00:00.000Z")],
+          },
+        } as ServerProvider,
+      ]),
+    ).toBeNull();
   });
 });

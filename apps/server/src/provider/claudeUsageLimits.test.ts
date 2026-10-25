@@ -165,6 +165,22 @@ describe("claudeRateLimitEventToUpdate", () => {
     });
   });
 
+  it("refreshes both windows from unifiedWindows on events with no top-level utilization", () => {
+    const event = {
+      status: "allowed",
+      rateLimitType: "five_hour",
+      resetsAt: 1_792_796_400,
+      unifiedWindows: {
+        five_hour: { utilization: 0.58, resetsAt: 1_792_796_400 },
+        seven_day: { utilization: 0.39, resetsAt: 1_793_055_600 },
+      },
+    } as never;
+    expect(claudeRateLimitEventToUpdate(event, noNames)?.windows).toEqual([
+      expect.objectContaining({ id: "five_hour", kind: "session", usedPercent: 58 }),
+      expect.objectContaining({ id: "seven_day", kind: "weekly", usedPercent: 39 }),
+    ]);
+  });
+
   it("ignores windows the page does not render and events without a utilization", () => {
     expect(
       claudeRateLimitEventToUpdate(
