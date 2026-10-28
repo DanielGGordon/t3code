@@ -125,9 +125,8 @@ export function TwoFactorGate({ children, enabled }: { children: ReactNode; enab
   if (!enabled) return children;
   if (status === null || status.required || error)
     return (
-      <StandalonePage tone="pairing">
+      <StandalonePage>
         <StandalonePageHeader
-          eyebrow="T3 Code"
           title={status?.required ? "Verify your session" : "Checking session security"}
           description={
             status?.required

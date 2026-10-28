@@ -7,29 +7,10 @@ import { migrationEntries, runMigrations } from "../Migrations.ts";
 
 const freshDatabase = () => NodeSqliteClient.layer({ filename: ":memory:" });
 
-/**
- * Guards the fork's migration-id offset against the production database.
- *
- * This fork owns id 33 (`ProjectionThreadRestartRequest`); it has been recorded
- * in production's `effect_sql_migrations` since 2026-07-09. Every upstream
- * migration with id >= 33 therefore runs one id higher here: upstream's
- * settled/snoozed pair as 34/35 (2026-07 sync), upstream 35..58 as 36..59
- * (2026-10-06 sync, incl. OrchestrationV2 at 56) and upstream 59..61 as 60..62
- * (2026-10-13 sync). The fork's later own migrations are 63 (AuthSessionClientIps),
- * 64 (TwoFactor) and 65 (Notifications), so upstream 062..064 run as 66..68
- * (2026-10-19 sync).
- *
- * This matters because Effect's Migrator run loop is purely ordinal —
- * `if (currentId <= latestMigrationId) continue` — with no name or checksum
- * comparison. Had the fork's migration been renumbered upward instead, an
- * upstream migration reusing an already-recorded id would be silently skipped
- * on production, its schema would never be created, and every query touching
- * it would fail.
- *
- * A fresh-database test cannot catch that: it runs every migration from zero.
- * The regression only reproduces when the ledger already carries a high-water
- * mark, which is exactly the state of the production database.
- */
+// Fork-owned ids (33, 63..65) shift every later upstream migration up (offset
+// table: Migrations.ts). Effect's Migrator skips ids <= the ledger max with no
+// name check, so these tests start from production's high-water mark: a fresh
+// database runs everything from zero and would hide a renumbering mistake.
 describe("034_035 fork migration offset", () => {
   it.effect("applies the settled and snoozed migrations over a ledger already at 33", () =>
     Effect.gen(function* () {
@@ -90,21 +71,23 @@ describe("034_035 fork migration offset", () => {
 
       const executed = yield* runMigrations();
       // Every upstream migration from upstream-35 (TitleRegeneration) on runs,
-      // none is skipped, and the ids are contiguous 36..68.
+      // none is skipped, and the ids are contiguous 36..76.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        Array.from({ length: 68 - 35 }, (_, index) => 36 + index),
+        Array.from({ length: 76 - 35 }, (_, index) => 36 + index),
       );
       assert.deepStrictEqual(executed[0], [36, "ProjectionThreadTitleRegeneration"]);
       assert.deepStrictEqual(
         executed.find(([, name]) => name === "OrchestrationV2"),
         [56, "OrchestrationV2"],
       );
-      assert.deepStrictEqual(executed.at(-7), [62, "PullRequestReviewGuides"]);
-      assert.deepStrictEqual(executed.at(-6), [63, "AuthSessionClientIps"]);
-      assert.deepStrictEqual(executed.at(-4), [65, "Notifications"]);
-      assert.deepStrictEqual(executed.at(-3), [66, "ThreadFailureLookupIndex"]);
-      assert.deepStrictEqual(executed.at(-1), [68, "CanonicalizeThreadPullRequestLinks"]);
+      assert.deepStrictEqual(executed.at(-15), [62, "PullRequestReviewGuides"]);
+      assert.deepStrictEqual(executed.at(-14), [63, "AuthSessionClientIps"]);
+      assert.deepStrictEqual(executed.at(-12), [65, "Notifications"]);
+      assert.deepStrictEqual(executed.at(-11), [66, "ThreadFailureLookupIndex"]);
+      assert.deepStrictEqual(executed.at(-9), [68, "CanonicalizeThreadPullRequestLinks"]);
+      assert.deepStrictEqual(executed.at(-8), [69, "CodexUsageNativeTurnIndex"]);
+      assert.deepStrictEqual(executed.at(-1), [76, "WaitingLinkRequestIndex"]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       // The recorded ledger equals this build's manifest (no divergence warning).

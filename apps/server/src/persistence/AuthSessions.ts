@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -223,7 +224,7 @@ function toPersistenceSqlOrDecodeError(
         });
 }
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -474,6 +475,7 @@ export const make = Effect.gen(function* () {
 
   const getById: AuthSessionRepository["Service"]["getById"] = (input) =>
     getSessionRowById(input).pipe(
+      NodeSqliteClient.readOnly,
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "AuthSessionRepository.getById:query",
@@ -501,6 +503,7 @@ export const make = Effect.gen(function* () {
 
   const listActive: AuthSessionRepository["Service"]["listActive"] = (input) =>
     listActiveSessionRows(input).pipe(
+      NodeSqliteClient.readOnly,
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "AuthSessionRepository.listActive:query",
@@ -569,8 +572,10 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const recordClientIp: AuthSessionRepository["Service"]["recordClientIp"] = (input) =>
-    Effect.gen(function* () {
+  const recordClientIp: AuthSessionRepository["Service"]["recordClientIp"] = Effect.fn(
+    "AuthSessionRepository.recordClientIp",
+  )(
+    function* (input) {
       const latest = yield* findLatestClientIpRow(input);
       const inserted = yield* insertClientIpRow(input);
       if (inserted.length === 0) {
@@ -580,15 +585,18 @@ export const make = Effect.gen(function* () {
         isNew: inserted.length > 0,
         previousIp: Option.isSome(latest) ? latest.value.ipAddress : null,
       } satisfies AuthSessionClientIpObservation;
-    }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthSessionRepository.recordClientIp:query",
-          "AuthSessionRepository.recordClientIp:encodeRequest",
-          { sessionId: input.sessionId },
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "AuthSessionRepository.recordClientIp:query",
+            "AuthSessionRepository.recordClientIp:encodeRequest",
+            { sessionId: input.sessionId },
+          ),
         ),
       ),
-    );
+  );
 
   return {
     create,

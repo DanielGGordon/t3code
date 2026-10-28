@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { resolveDriveMode } from "~/lib/driveMode";
-import { useIsMobile, useMediaQuery } from "./useMediaQuery";
+import { useMediaQuery } from "./useMediaQuery";
 import { useClientSettings } from "./useSettings";
 
 /** A finger-driven phone viewport: narrow and touch-primary. */
@@ -50,11 +50,9 @@ function subscribeToViewportResize(callback: () => void): () => void {
 }
 
 /**
- * Compact "drive" density: the touch layout in a car-sized browser (a Tesla
- * halves the browser while driving). Automatic in both directions as the
- * viewport resizes. For structural changes only; for sizing prefer the
- * `drive:` CSS variant. The snapshot is the resolved boolean, so a resize
- * only re-renders subscribers when the mode actually flips.
+ * Compact "drive" density: the touch layout in a car-sized browser (a Tesla halves the browser
+ * while driving). For structural changes only; size with the `drive:` CSS variant. The snapshot
+ * is the resolved boolean, so a resize re-renders subscribers only when the mode flips.
  */
 export function useDriveMode(): boolean {
   // Explicit opt-in only: a phone's default touch layout never turns into
@@ -87,7 +85,7 @@ export function resolveCondensedChrome(input: {
 }
 
 export function useCondensedChrome(): boolean {
-  const isMobile = useIsMobile();
+  const isMobile = useMediaQuery("max-md");
   const touchLayout = useTouchLayout();
   return resolveCondensedChrome({ isMobile, touchLayout });
 }

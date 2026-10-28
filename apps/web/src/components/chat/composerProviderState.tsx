@@ -7,6 +7,7 @@ import {
   type ScopedThreadRef,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import type { EffortDisplay } from "@t3tools/contracts/settings";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentValue,
@@ -25,9 +26,10 @@ import {
   shouldRenderTraitsControls,
   TraitsMenuContent,
   TraitsPicker,
+  type PromptUltrathink,
 } from "./TraitsPicker";
 
-export type ComposerProviderStateInput = {
+type ComposerProviderStateInput = {
   provider: ProviderDriverKind;
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
@@ -36,9 +38,9 @@ export type ComposerProviderStateInput = {
   planModeEnabled: boolean;
 };
 
-export type ComposerPromptInjectionState = "none" | "ultrathink";
+type ComposerPromptInjectionState = "none" | "ultrathink";
 
-export type ComposerProviderState = {
+type ComposerProviderState = {
   provider: ProviderDriverKind;
   promptEffort: string | null;
   modelOptionsForDispatch: ReadonlyArray<ProviderOptionSelection> | undefined;
@@ -56,23 +58,24 @@ type TraitsRenderInput = {
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
-  prompt: string;
-  onPromptChange: (prompt: string) => void;
+  promptUltrathink: PromptUltrathink;
+  onPromptEdit: (edit: (prompt: string) => string) => void;
   planModeEnabled: boolean;
   size?: ComposerControlSize;
   hidden?: boolean;
   triggerClassName?: string;
   isComposerOwned?: boolean;
+  effortDisplay?: EffortDisplay;
+  extraMenuContent?: ReactNode;
+  extraMenuOwnsModeShortcut?: boolean;
+  extraMenuHint?: string;
 };
 
 export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
   return isClaudeUltrathinkPrompt(prompt) ? "ultrathink" : "none";
 }
 
-/**
- * Cursor ACP can report `fastMode: true` as the provider default. T3 only
- * treats Fast as selected when the user chose it (draft/sticky/settings).
- */
+/** Cursor ACP can default Fast to true; T3 requires a user selection. */
 export function withImplicitFastModeDefault(
   caps: ModelCapabilities,
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
@@ -163,10 +166,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   };
 }
 
-/**
- * `cursor` is an expanded caret in `prompt`; the result's `cursor` keeps it on
- * the same character when the Ultrathink prefix is added or removed.
- */
+/** Expanded caret positions stay on the same character across Ultrathink prefix changes. */
 export function getComposerReasoningStep(input: {
   provider: ProviderDriverKind;
   instanceId: ProviderInstanceId;
@@ -205,7 +205,7 @@ export function getComposerReasoningStep(input: {
   if (!step) return null;
   const modelOptions = "modelOptions" in step ? { modelOptions: step.modelOptions } : {};
   if (step.prompt === prompt) return { prompt, cursor, ...modelOptions };
-  // Adding the prefix also trims the prompt, so the kept text starts right after the prefix.
+  // Adding the prefix also trims the prompt.
   const keptStart = "modelOptions" in step ? 0 : step.prompt.length - prompt.trim().length;
   const offset =
     "modelOptions" in step
@@ -231,13 +231,17 @@ function renderTraitsControl(
     models,
     modelOptions,
     reportedModelSelection,
-    prompt,
-    onPromptChange,
+    promptUltrathink,
+    onPromptEdit,
     planModeEnabled,
     size,
     hidden,
     triggerClassName,
     isComposerOwned,
+    effortDisplay,
+    extraMenuContent,
+    extraMenuOwnsModeShortcut,
+    extraMenuHint,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   const { selections: resolvedModelOptions } = resolveComposerOptionSelections(
@@ -254,7 +258,7 @@ function renderTraitsControl(
       models,
       model,
       modelOptions: resolvedModelOptions,
-      prompt,
+      promptUltrathink,
       planModeEnabled,
     })
   ) {
@@ -270,13 +274,17 @@ function renderTraitsControl(
       model={model}
       modelOptions={resolvedModelOptions}
       reportedModelSelection={reportedModelSelection}
-      prompt={prompt}
-      onPromptChange={onPromptChange}
+      promptUltrathink={promptUltrathink}
+      onPromptEdit={onPromptEdit}
       planModeEnabled={planModeEnabled}
       {...(size !== undefined ? { size } : {})}
       {...(hidden !== undefined ? { hidden } : {})}
       {...(triggerClassName !== undefined ? { triggerClassName } : {})}
       {...(isComposerOwned ? { isComposerOwned } : {})}
+      {...(effortDisplay ? { effortDisplay } : {})}
+      {...(extraMenuContent ? { extraMenuContent } : {})}
+      {...(extraMenuOwnsModeShortcut ? { extraMenuOwnsModeShortcut } : {})}
+      {...(extraMenuHint ? { extraMenuHint } : {})}
     />
   );
 }
@@ -313,7 +321,7 @@ export function resolveProviderTraitsLabel(input: TraitsRenderInput): string | n
       instanceId,
       models,
       model,
-      prompt: input.prompt,
+      promptUltrathink: input.promptUltrathink,
       modelOptions: selections,
       reportedModelSelection: input.reportedModelSelection,
       planModeEnabled,

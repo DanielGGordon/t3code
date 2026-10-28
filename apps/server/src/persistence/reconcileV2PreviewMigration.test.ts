@@ -27,13 +27,11 @@ const seedPreview = Effect.gen(function* () {
   `;
 });
 
-// FORK: the preview-upgrade scenarios below seed upstream's ledger numbering
-// (V2 at 53/54, AutoSettleDisabledAt at 54). This fork runs every upstream
-// migration >= 33 one id higher (fork-owned 033), and fork databases never ran
-// a published V2 preview, so the reconciler is a no-op here (asserted by the
-// fork test at the end). The two scenarios that assert upstream-numbered
-// executed lists stay skipped; the ledger-only one runs (see below).
+// Fork: these scenarios seed upstream's ledger numbering, but this fork runs
+// upstream migrations >= 33 at shifted ids and never shipped a V2 preview, so
+// the two that assert upstream-numbered executed lists stay skipped.
 describe("V2 preview upgrade", () => {
+  // quarantine: #61 asserts upstream migration ids; the fork's are offset.
   it.effect.skip(
     "upgrades a published preview without replaying V2 or losing import progress",
     () =>
@@ -53,6 +51,14 @@ describe("V2 preview upgrade", () => {
           [62, "ThreadFailureLookupIndex"],
           [63, "DropUnusedV1Projections"],
           [64, "CanonicalizeThreadPullRequestLinks"],
+          [65, "CodexUsageNativeTurnIndex"],
+          [66, "RepairClientSettlementTimestamps"],
+          [67, "WebhookDedupe"],
+          [68, "ShellStopRequestIndex"],
+          [69, "ThreadMessageSearch"],
+          [70, "PeerLinks"],
+          [71, "PeerLinkFence"],
+          [72, "WaitingLinkRequestIndex"],
         ]);
         assert.deepStrictEqual(yield* runMigrations(), []);
         assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -76,11 +82,10 @@ describe("V2 preview upgrade", () => {
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  // Re-enabled with reconcileMigrationLedger: the seed is a fork ledger through
-  // 52 topped with upstream-numbered preview rows. The preview reconcile repairs
-  // it into upstream numbering, then the name-aware reconcile maps it onto this
-  // fork's ids and runs the skipped fork-53 (TitleState) gap — so the final
-  // ledger equals the manifest, which also pins the ordering of the two.
+  // A fork ledger through 52 topped with upstream-numbered preview rows: the
+  // preview reconcile restores upstream numbering, then reconcileMigrationLedger
+  // maps it onto fork ids and runs the skipped gap, so the ledger ends equal to
+  // the manifest (which pins the order of the two reconciles).
   describe("upstream preview ledger over a fork ledger", () => {
     it.effect.each([false, true])(
       "upgrades preview migration 54 with index cleanup %s",
@@ -115,6 +120,7 @@ describe("V2 preview upgrade", () => {
     );
   });
 
+  // quarantine: #61 asserts upstream migration ids; the fork's are offset.
   it.effect.skip("rolls back schema and ledger together on failure and can retry", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -147,6 +153,14 @@ describe("V2 preview upgrade", () => {
         [62, "ThreadFailureLookupIndex"],
         [63, "DropUnusedV1Projections"],
         [64, "CanonicalizeThreadPullRequestLinks"],
+        [65, "CodexUsageNativeTurnIndex"],
+        [66, "RepairClientSettlementTimestamps"],
+        [67, "WebhookDedupe"],
+        [68, "ShellStopRequestIndex"],
+        [69, "ThreadMessageSearch"],
+        [70, "PeerLinks"],
+        [71, "PeerLinkFence"],
+        [72, "WaitingLinkRequestIndex"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

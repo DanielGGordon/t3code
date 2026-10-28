@@ -23,6 +23,48 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-10-28 — True merge of upstream through `5211acfe9` (2026-10-28)
+
+1517 upstream commits since `f0fb0e852` (React Compiler/lint-rule sweep, test pruning #22557, peer
+links and guest sharing, thread message search, timeline-row approvals, configurable snooze presets,
+idle compaction). 122 files conflicted (about 300 hunks); `apps/mobile` taken as upstream's.
+
+### Migration numbering (offset +4 continues)
+
+Upstream's 065 `CodexUsageNativeTurnIndex` … 072 `WaitingLinkRequestIndex` run at fork ids
+**69–76**. `migrationEntries` stays exported (the fork-id ledger tests import it).
+`reconcileMigrationLedger.test.ts` and `034_035_ForkMigrationOffset.test.ts` list through 76.
+
+### Resolutions worth knowing
+
+- **Pruned tests:** upstream deleted 11k low-signal tests; conflicting fork tests were dropped when
+  the whole upstream test went, and only fork-specific cases were kept.
+- **Approvals:** `ComposerPendingApprovalPanel` is gone upstream; the touch approve/decline layout
+  now lives on the timeline row (`TimelinePendingApprovalRow.tsx`).
+- **Composer:** the access-mode select no longer exists upstream (permissions are in the effort menu).
+  The keep-cache-warm toggle moved to the footer's left cluster; "hide access mode" now hides the
+  permissions chip.
+- **Snooze:** upstream's configurable presets win. The fork's 55-minute wake for the "after 60
+  minutes" preset is kept (`HOUR_PRESET_WAKE_MINUTES`); the touch picker still offers fixed times.
+  Upstream also stopped treating a completed run as ending a snooze.
+- **Sessions:** upstream deleted `recordClientConnection`; the fork's new-IP alert still calls it
+  (`ws.ts`, `SessionStore.ts`). The 2FA gate also runs on upstream's new WebSocket-ticket upgrade.
+- **Settings/routes:** Features moved to `routes/_chat.settings.features.tsx`; two-factor settings
+  live on Sharing & access; cache-expiry banner settings are under General → Notifications.
+- **Dropped:** `ProjectionStore.layerMemory` (upstream removed it), the fork's `ScrollToEndButton`
+  (upstream's overlay carries the touch size), the terminal Ctrl+V paste test (helper went private).
+
+### Known leftovers
+
+- Upstream's new Effect language-service rules and `t3code/*` lint rules flag untouched fork files
+  (about 30 `TS377xxx` diagnostics under `tsc` in `apps/server`, plus `no-unreasoned-state-sync` in
+  `TwoFactor.tsx`). Plain type errors are fixed; the style diagnostics are not.
+- Upstream's "compact before the cache expires" may overlap the fork's keep-cache-warm pings.
+- The touch approval row and touch composer footer were only linted/typechecked; they need a pass at
+  the Tesla preset (773×601).
+
+---
+
 ## 2026-10-19 — True merge of upstream through `f0fb0e852` (2026-10-19)
 
 1149 upstream commits since `98a6246d0` (mostly React Compiler perf work, server/web fixes,

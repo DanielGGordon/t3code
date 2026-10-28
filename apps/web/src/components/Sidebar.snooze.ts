@@ -1,68 +1,81 @@
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { EnvironmentId } from "@t3tools/contracts";
+import type { SnoozePresetSetting, TimestampFormat } from "@t3tools/contracts/settings";
 import {
+  pickSnoozePreset as pickSharedSnoozePreset,
+  resolveSnoozePreset as resolveSharedSnoozePreset,
   resolveSnoozePresets as resolveSharedSnoozePresets,
   snoozeWakeLabel,
   type SnoozePreset,
 } from "@t3tools/client-runtime/state/thread-settled";
 
-import { formatShortTimestamp, parseTimestampDate } from "../timestampFormat";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
+import { formatShortTimestamp } from "../timestampFormat";
+import { toastManager } from "./ui/toast";
 
 export { snoozeWakeLabel, type SnoozePreset };
 
-const DAY_MS = 24 * 60 * 60 * 1_000;
-
-function timeOfDayLabel(date: Date, timestampFormat: TimestampFormat): string {
-  return formatShortTimestamp(date.toISOString(), timestampFormat);
-}
-
+/** The snooze menu for a thread, from its environment's presets, read when the menu opens. */
 export function resolveSnoozePresets(
   now: Date,
   timestampFormat: TimestampFormat,
+  environmentId: EnvironmentId,
 ): ReadonlyArray<SnoozePreset> {
-  return resolveSharedSnoozePresets(now).map((preset) => {
-    const wake = parseTimestampDate(preset.snoozedUntil);
-    if (wake === null) return preset;
-    const time = timeOfDayLabel(wake, timestampFormat);
-    return {
-      ...preset,
-      whenLabel:
-        preset.id === "next-week"
-          ? `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`
-          : time,
-    };
+  return resolveSharedSnoozePresets(now, snoozeOptions(timestampFormat, environmentId));
+}
+
+/** A shown menu choice as picked; see the shared `pickSnoozePreset`. */
+export function pickSnoozePreset(
+  shown: ReadonlyArray<SnoozePreset>,
+  id: string,
+  timestampFormat: TimestampFormat,
+  environmentId: EnvironmentId,
+): SnoozePreset | undefined {
+  const picked = pickSharedSnoozePreset({
+    shown,
+    id,
+    now: new Date(),
+    ...snoozeOptions(timestampFormat, environmentId),
   });
+  if (!picked) {
+    toastManager.add({
+      type: "warning",
+      title: "Could not snooze thread",
+      description: "That snooze time has passed. Choose another time.",
+    });
+  }
+  return picked;
 }
 
 /**
- * The touch-layout swipe picker: always exactly four presets in a fixed
- * order, so the targets never shift position between uses (muscle memory on
- * a car screen beats the time-of-day-aware evening slot).
+ * The touch-layout swipe picker: always exactly these four wakes in a fixed
+ * order, regardless of the configurable menu, so the targets never shift
+ * position between uses (muscle memory on a car screen beats the
+ * time-of-day-aware evening slot).
  */
-const TOUCH_SNOOZE_PRESET_IDS = ["hour", "three-hours", "tomorrow", "next-week"] as const;
+const TOUCH_SNOOZE_PRESETS: ReadonlyArray<SnoozePresetSetting> = [
+  { kind: "after", minutes: 60 },
+  { kind: "after", minutes: 180 },
+  { kind: "at", day: "tomorrow", time: "09:00" },
+  { kind: "at", day: "monday", time: "09:00" },
+];
 
 export function resolveTouchSnoozePresets(
   now: Date,
   timestampFormat: TimestampFormat,
 ): ReadonlyArray<SnoozePreset> {
-  const presets = resolveSnoozePresets(now, timestampFormat);
-  return TOUCH_SNOOZE_PRESET_IDS.flatMap((id) => presets.filter((preset) => preset.id === id));
+  const formatTime = (date: Date) => formatShortTimestamp(date.toISOString(), timestampFormat);
+  return TOUCH_SNOOZE_PRESETS.flatMap(
+    (setting) => resolveSharedSnoozePreset(setting, now, formatTime) ?? [],
+  );
 }
 
-export function snoozeWakeDescription(
-  snoozedUntil: string,
-  now: Date,
-  timestampFormat: TimestampFormat,
-): string {
-  const wake = parseTimestampDate(snoozedUntil);
-  if (wake === null) return "";
-  const time = timeOfDayLabel(wake, timestampFormat);
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const dayDelta = Math.floor((wake.getTime() - startOfToday.getTime()) / DAY_MS);
-  if (dayDelta === 0) return time;
-  if (dayDelta === 1) return `tomorrow ${time}`;
-  const weekday = wake.toLocaleDateString(undefined, { weekday: "short" });
-  if (dayDelta < 7) return `${weekday} ${time}`;
-  const date = wake.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${date}, ${time}`;
+function snoozeOptions(timestampFormat: TimestampFormat, environmentId: EnvironmentId) {
+  const presets = appAtomRegistry.get(
+    serverEnvironment.settingsValueAtom(environmentId),
+  )?.snoozePresets;
+  return {
+    ...(presets ? { presets } : {}),
+    formatTime: (date: Date) => formatShortTimestamp(date.toISOString(), timestampFormat),
+  };
 }

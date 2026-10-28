@@ -134,7 +134,7 @@ describe("expired windows", () => {
             checkedAt: "x",
             windows: [window("primary", "Weekly", "weekly", 47, "2020-01-01T00:00:00.000Z")],
           },
-        } as ServerProvider,
+        } as unknown as ServerProvider,
       ]),
     ).toBeNull();
   });

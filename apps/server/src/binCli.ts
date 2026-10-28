@@ -10,6 +10,7 @@ import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { acpMcpBridgeCommand, acpMcpCallCommand } from "./cli/acpMcpBridge.ts";
 import { authCommand } from "./cli/auth.ts";
+import { environmentCommand } from "./cli/environment.ts";
 import { appCommand } from "./cli/app.ts";
 import { browserCommand } from "./cli/browser.ts";
 import { connectCommand } from "./cli/connect.ts";
@@ -19,6 +20,7 @@ import { extendConnectionAttemptTimeout, keepOutboundFetchOnHttp1 } from "./outb
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { importCommand } from "./cli/import.ts";
 import { projectCommand } from "./cli/project.ts";
+import { threadCommand } from "./cli/thread.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { updateCommand } from "./cli/update.ts";
 import { uninstallCommand } from "./cli/uninstall.ts";
@@ -79,8 +81,10 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       appCommand,
       pairCommand,
       authCommand,
+      environmentCommand,
       browserCommand,
       projectCommand,
+      threadCommand,
       // Fork: `t3 import sync|claude` (15-min Claude transcript mirror) and
       // `t3 session audit|reset` (dangling Claude resume cursors).
       importCommand,

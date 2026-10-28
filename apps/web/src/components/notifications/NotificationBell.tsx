@@ -120,23 +120,19 @@ function NotificationItem(props: { readonly notification: Notification }) {
     request: () => ReturnType<typeof act> | ReturnType<typeof dismiss>,
   ): Promise<void> => {
     setBusy(true);
-    try {
-      const result = await request();
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add({
-            type: "error",
-            title: error instanceof Error ? error.message : "Could not update the notification.",
-          });
-        }
-        return;
+    const result = await request().finally(() => setBusy(false));
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: error instanceof Error ? error.message : "Could not update the notification.",
+        });
       }
-      if (result.value.resolution === "external") {
-        toastManager.add({ type: "info", title: "Already handled elsewhere" });
-      }
-    } finally {
-      setBusy(false);
+      return;
+    }
+    if (result.value.resolution === "external") {
+      toastManager.add({ type: "info", title: "Already handled elsewhere" });
     }
   };
 

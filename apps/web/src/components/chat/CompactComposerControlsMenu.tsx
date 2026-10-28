@@ -1,5 +1,5 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode } from "react";
+import { memo, type ReactNode, useRef } from "react";
 import { ChevronUpIcon, EllipsisIcon, HandIcon, PaperclipIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { openTouchGestures } from "../TouchGesturesDialog";
@@ -14,9 +14,10 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
-import { useComposerMenuProps } from "./composerEventScope";
+import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 import { formatComposerInteractionModeLabel } from "./composerTouchLayout";
+import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFooterControls";
 
 // Touch layout: every row in the popup (including the traits rows rendered by
 // TraitsMenuContent) becomes a >=48px target.
@@ -26,28 +27,19 @@ const SECTION_LABEL_CLASS_NAME =
   "px-2 py-1.5 font-medium text-muted-foreground text-xs touch:text-sm";
 
 /**
- * The composer's folded controls: traits, interaction mode and access. Used
- * for whichever blocks the footer has no room for, and in the touch layout for
- * all of them, where it also takes "Attach files" and its trigger spells out
- * the current state (`summaryLabel`) instead of an ellipsis (on a phone it is
- * an ellipsis again, to keep the footer to one row). Access changes
- * stay two taps deep (open, then pick).
+ * Touch layout folds every control in here, plus "Attach files"; the trigger spells out
+ * the state (`summaryLabel`), or is an ellipsis on a phone to keep the footer one row.
+ * Permission changes stay two taps deep (open, then pick).
  */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
-  runtimeModeOptions: ReadonlyArray<{
-    readonly mode: RuntimeMode;
-    readonly label: string;
-  }>;
+  runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
+  showPermissions?: boolean;
   size?: "sm" | "xs";
-  /**
-   * The resting strip keeps this menu mounted out of flow while every block
-   * fits inline. Its portaled popup would outlive that transition, so an
-   * open menu closes when its trigger hides.
-   */
+  /** Close the portaled popup when its trigger hides. */
   hidden?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
@@ -63,14 +55,26 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
-  const shortcut = props.traitsMenuContent ? "composer.mode composer.effort" : "composer.mode";
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const shortcut =
+    [
+      props.showPermissions !== false ? "composer.mode" : null,
+      props.traitsMenuContent ? "composer.effort" : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   return (
-    <Menu open={open} onOpenChange={setOpen}>
+    <Menu
+      open={open}
+      onOpenChange={setOpen}
+      onOpenChangeComplete={(isOpen) => focusRequestedPermission(isOpen, triggerRef.current)}
+    >
       <MenuTrigger
         render={
           props.touchLayout ? (
             <ComposerTouchButton
+              ref={triggerRef}
               className="min-w-0 shrink justify-start px-4 text-base short:size-11 short:justify-center short:border short:border-input short:bg-popover short:px-0 drive:size-11 drive:justify-center drive:border drive:border-input drive:bg-popover drive:px-0 max-md:size-11 max-md:justify-center max-md:border max-md:border-input max-md:bg-popover max-md:px-0"
               aria-label={
                 props.summaryLabel
@@ -81,6 +85,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             />
           ) : (
             <ComposerControl
+              ref={triggerRef}
               size={size}
               className="shrink-0"
               aria-label="More composer controls"
@@ -130,7 +135,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         {props.traitsMenuContent ? (
           <>
             {props.traitsMenuContent}
-            <MenuDivider />
+            {props.showInteractionModeToggle || props.showPermissions !== false ? (
+              <MenuDivider />
+            ) : null}
           </>
         ) : null}
         {props.showInteractionModeToggle ? (
@@ -148,23 +155,16 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               </MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
             </MenuRadioGroup>
-            <MenuDivider />
+            {props.showPermissions !== false ? <MenuDivider /> : null}
           </>
         ) : null}
-        <div className={SECTION_LABEL_CLASS_NAME}>Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          {props.runtimeModeOptions.map((option) => (
-            <MenuRadioItem key={option.mode} value={option.mode}>
-              {option.label}
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
+        {props.showPermissions === false ? null : (
+          <ComposerPermissionsSection
+            runtimeMode={props.runtimeMode}
+            runtimeModeOptions={props.runtimeModeOptions}
+            onRuntimeModeChange={props.onRuntimeModeChange}
+          />
+        )}
         {props.onAttach ? (
           <>
             <MenuDivider />

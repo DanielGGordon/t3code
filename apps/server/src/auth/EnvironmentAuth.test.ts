@@ -1,31 +1,34 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no generateKeyPairSync or sign.
+import * as NodeCrypto from "node:crypto";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { authScopeResponse, AuthStandardClientScopes } from "@t3tools/contracts";
+import {
+  computeDpopAccessTokenHash,
+  computeDpopJwkThumbprint,
+  type DpopPublicJwk,
+} from "@t3tools/shared/dpop";
 import { expect, it } from "@effect/vitest";
 import { totp } from "./totp.ts";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
-import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as PersistenceErrors from "../persistence/Errors.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import * as SessionStore from "./SessionStore.ts";
 
 const TEST_SERVER_PORT = 13_773;
-const isPairingCredentialIssueError = Schema.is(PairingGrantStore.PairingCredentialIssueError);
-const isPersistenceSqlError = Schema.is(PersistenceErrors.PersistenceSqlError);
 
 const layerServerConfig = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   Layer.effect(
@@ -106,6 +109,36 @@ const enrollTwoFactor = (
     const code = totp(secret, Math.floor((yield* Clock.currentTimeMillis) / 30_000));
     return (yield* sessions.twoFactor.confirm(sessionId, code)).recoveryCodes;
   });
+
+const makeDpopKey = () => {
+  const { privateKey, publicKey } = NodeCrypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const publicJwk = publicKey.export({ format: "jwk" }) as DpopPublicJwk;
+  let proofCount = 0;
+  return {
+    thumbprint: computeDpopJwkThumbprint(publicJwk),
+    sign: (input: {
+      readonly method: string;
+      readonly url: string;
+      readonly token: string;
+      readonly iat: number;
+    }) => {
+      const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      const header = encode({ typ: "dpop+jwt", alg: "ES256", jwk: publicJwk });
+      const payload = encode({
+        htm: input.method,
+        htu: input.url,
+        jti: `proof-${++proofCount}`,
+        iat: input.iat,
+        ath: computeDpopAccessTokenHash(input.token),
+      });
+      const signature = NodeCrypto.sign("sha256", Buffer.from(`${header}.${payload}`), {
+        key: privateKey,
+        dsaEncoding: "ieee-p1363",
+      }).toString("base64url");
+      return `${header}.${payload}.${signature}`;
+    },
+  };
+};
 
 it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
   it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
@@ -292,86 +325,6 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         }),
       ),
     ),
-  );
-
-  it.effect("keeps the pairing issue error as the immediate recovery failure", () =>
-    Effect.gen(function* () {
-      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      const sessions = yield* SessionStore.SessionStore;
-      const sql = yield* SqlClient.SqlClient;
-      const token = "reusable-dev-auth-token-that-is-long-enough";
-      const seeded = yield* sessions.verify(token);
-
-      yield* sessions.revoke(seeded.sessionId);
-      yield* sql`
-        CREATE TRIGGER reject_startup_pairing_link
-        BEFORE INSERT ON auth_pairing_links
-        BEGIN
-          SELECT RAISE(ABORT, 'startup pairing insert rejected');
-        END
-      `;
-
-      const error = yield* Effect.flip(serverAuth.issueStartupPairingCredential());
-
-      expect(error._tag).toBe("ServerAuthPairingLinkCreationError");
-      expect(isPairingCredentialIssueError(error.cause)).toBe(true);
-      if (isPairingCredentialIssueError(error.cause)) {
-        expect(isPersistenceSqlError(error.cause.cause)).toBe(true);
-      }
-    }).pipe(
-      Effect.provide(
-        layerEnvironmentAuth({
-          mode: "web",
-          devUrl: new URL("http://127.0.0.1:5173"),
-          devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
-        }),
-      ),
-    ),
-  );
-
-  it.effect("classifies invalid bootstrap credential failures for the HTTP boundary", () =>
-    Effect.sync(() => {
-      const error = EnvironmentAuth.toBootstrapExchangeError(
-        new PairingGrantStore.UnknownBootstrapCredentialError({}),
-      );
-
-      expect(error._tag).toBe("ServerAuthInvalidCredentialError");
-    }),
-  );
-
-  it.effect("maps unexpected bootstrap failures to 500", () =>
-    Effect.sync(() => {
-      const cause = new PairingGrantStore.BootstrapCredentialConsumeError({
-        cause: new Error("sqlite is unavailable"),
-      });
-      const error = EnvironmentAuth.toBootstrapExchangeError(cause);
-
-      expect(error._tag).toBe("ServerAuthBootstrapCredentialValidationError");
-      expect(error.message).toBe("Failed to validate bootstrap credential.");
-      if (error._tag === "ServerAuthBootstrapCredentialValidationError") {
-        expect(error.cause).toBe(cause);
-      }
-    }),
-  );
-
-  it.effect("issues standard pairing credentials by default", () =>
-    Effect.gen(function* () {
-      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      const sessions = yield* SessionStore.SessionStore;
-
-      const pairingCredential = yield* serverAuth.issuePairingCredential();
-      const exchanged = yield* serverAuth.createBrowserSession(
-        pairingCredential.credential,
-        requestMetadata,
-      );
-      const verified = yield* serverAuth.authenticateHttpRequest(
-        makeCookieRequest(sessions.cookieName, exchanged.sessionToken),
-      );
-
-      expect(verified.sessionId.length).toBeGreaterThan(0);
-      expect(verified.scopes).toEqual(AuthStandardClientScopes);
-      expect(verified.subject).toBe("one-time-token");
-    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("prefers a bearer token over a stale legacy cookie", () =>
@@ -622,20 +575,6 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     ),
   );
 
-  it.effect("keeps user-issued administrative pairing links manageable", () =>
-    Effect.gen(function* () {
-      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      const pairingCredential = yield* serverAuth.issuePairingCredential({
-        scopes: AuthStandardClientScopes,
-      });
-      const listedPairingLinks = yield* serverAuth.listPairingLinks();
-
-      expect(
-        listedPairingLinks.find((pairingLink) => pairingLink.id === pairingCredential.id)?.subject,
-      ).toBe("one-time-token");
-    }).pipe(Effect.provide(layerEnvironmentAuth())),
-  );
-
   it.effect("issues startup pairing URLs that bootstrap administrative sessions", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -761,26 +700,31 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
 
       const sameOrigin = yield* serverAuth.authenticateWebSocketUpgrade(
         upgrade("https://203.0.113.7:7443"),
+        "rpc",
       );
-      const noOrigin = yield* serverAuth.authenticateWebSocketUpgrade(upgrade(undefined));
+      const noOrigin = yield* serverAuth.authenticateWebSocketUpgrade(upgrade(undefined), "rpc");
       const otherPort = yield* Effect.flip(
-        serverAuth.authenticateWebSocketUpgrade(upgrade("https://203.0.113.7:8443")),
+        serverAuth.authenticateWebSocketUpgrade(upgrade("https://203.0.113.7:8443"), "rpc"),
       );
       // Sibling subdomains share the cookie's site but are other apps.
       const siblingSubdomain = yield* Effect.flip(
-        serverAuth.authenticateWebSocketUpgrade({
-          url: "/ws",
-          cookies: { [sessions.cookieName]: exchanged.sessionToken },
-          headers: {
-            host: "t3.example.dev",
-            "x-forwarded-proto": "https",
-            origin: "https://alfred.example.dev",
-          },
-        } as never),
+        serverAuth.authenticateWebSocketUpgrade(
+          {
+            url: "/ws",
+            cookies: { [sessions.cookieName]: exchanged.sessionToken },
+            headers: {
+              host: "t3.example.dev",
+              "x-forwarded-proto": "https",
+              origin: "https://alfred.example.dev",
+            },
+          } as never,
+          "rpc",
+        ),
       );
       const ticket = yield* serverAuth.issueWebSocketTicket(sameOrigin);
       const ticketFromOtherOrigin = yield* serverAuth.authenticateWebSocketUpgrade(
         upgrade("https://app.example.test", `/ws?wsTicket=${ticket.ticket}`),
+        "rpc",
       );
 
       expect(sameOrigin.sessionId.length).toBeGreaterThan(0);
@@ -798,11 +742,14 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       const pairing = yield* serverAuth.issuePairingCredential();
       const exchanged = yield* serverAuth.createBrowserSession(pairing.credential, requestMetadata);
       const upgrade = (headers: Record<string, string>) =>
-        serverAuth.authenticateWebSocketUpgrade({
-          url: "/ws",
-          cookies: { [sessions.cookieName]: exchanged.sessionToken },
-          headers: { host: "192.168.1.50:3773", ...headers },
-        } as never);
+        serverAuth.authenticateWebSocketUpgrade(
+          {
+            url: "/ws",
+            cookies: { [sessions.cookieName]: exchanged.sessionToken },
+            headers: { host: "192.168.1.50:3773", ...headers },
+          } as never,
+          "rpc",
+        );
 
       yield* upgrade({ origin: "http://192.168.1.50:3773" });
       yield* upgrade({
@@ -859,15 +806,18 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
       const bearer = yield* serverAuth.issueSession();
-      const verified = yield* serverAuth.authenticateWebSocketUpgrade({
-        url: "/ws",
-        cookies: {},
-        headers: {
-          host: "192.168.1.50:3773",
-          origin: "http://192.168.1.50:8080",
-          authorization: `Bearer ${bearer.token}`,
-        },
-      } as never);
+      const verified = yield* serverAuth.authenticateWebSocketUpgrade(
+        {
+          url: "/ws",
+          cookies: {},
+          headers: {
+            host: "192.168.1.50:3773",
+            origin: "http://192.168.1.50:8080",
+            authorization: `Bearer ${bearer.token}`,
+          },
+        } as never,
+        "rpc",
+      );
       expect(verified.sessionId).toBe(bearer.sessionId);
     }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
   );
@@ -888,6 +838,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       const mcp = yield* auth.issueMcpClientSession({
         label: "External agent",
         access: "read-only",
+        peerLink: false,
         client: { deviceType: "unknown" },
       });
       yield* Effect.flip(auth.authenticateMcpClient(makeBearerRequest(mcp.token)));
@@ -910,10 +861,10 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         cookies: {},
         headers: { host: "localhost" },
       } as never;
-      yield* Effect.flip(auth.authenticateWebSocketUpgrade(socketRequest));
+      yield* Effect.flip(auth.authenticateWebSocketUpgrade(socketRequest, "rpc"));
       yield* sessions.twoFactor.verifyCode(secondSession.sessionId, recoveryCodes[0]!, false);
       yield* auth.authenticateHttpRequest(makeBearerRequest(second.token));
-      yield* auth.authenticateWebSocketUpgrade(socketRequest);
+      yield* auth.authenticateWebSocketUpgrade(socketRequest, "rpc");
       yield* TestClock.adjust("48 hours");
       const expired = yield* Effect.flip(
         auth.authenticateHttpRequest(makeBearerRequest(second.token)),
@@ -942,11 +893,14 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       const state = yield* auth.getSessionState(makeBearerRequest(service.token));
       expect(state.twoFactor).toMatchObject({ enabled: true, required: false });
       const ticket = yield* auth.issueWebSocketTicket(authenticated);
-      const socket = yield* auth.authenticateWebSocketUpgrade({
-        url: `/ws?wsTicket=${ticket.ticket}`,
-        cookies: {},
-        headers: { host: "localhost" },
-      } as never);
+      const socket = yield* auth.authenticateWebSocketUpgrade(
+        {
+          url: `/ws?wsTicket=${ticket.ticket}`,
+          cookies: {},
+          headers: { host: "localhost" },
+        } as never,
+        "rpc",
+      );
       // The WebSocket RPC middleware re-checks every call against this session.
       yield* sessions.twoFactor.requireVerified(socket);
       yield* TestClock.adjust("72 hours");
@@ -998,5 +952,108 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(forged).toMatchObject({ _tag: "ServerAuthInvalidCredentialError" });
       expect(forged).not.toMatchObject({ twoFactorRequired: true });
     }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect("binds a DPoP session's RPC socket ticket to its proof key", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const key = makeDpopKey();
+      const other = makeDpopKey();
+      const exchanged = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+        "desktop-bootstrap-token",
+        ["orchestration:read"],
+        requestMetadata,
+        { proofKeyThumbprint: key.thumbprint },
+      );
+      const session = yield* sessions.verify(exchanged.access_token);
+      const host = "192.168.1.50:3773";
+      const socketUrl = `http://${host}/ws`;
+      const iat = Math.floor((yield* DateTime.now).epochMilliseconds / 1_000);
+      const upgrade = (ticket: string, use: "rpc" | "media", proof?: string) =>
+        serverAuth.authenticateWebSocketUpgrade(
+          {
+            method: "GET",
+            url: `/ws?orchestrationProtocol=2&wsTicket=${ticket}${proof ? `&dpop=${proof}` : ""}`,
+            cookies: {},
+            headers: { host },
+          } as never,
+          use,
+        );
+
+      const rpc = yield* serverAuth.issueWebSocketTicket(session, { use: "rpc" });
+      const bare = yield* Effect.flip(upgrade(rpc.ticket, "rpc"));
+      expect(bare._tag).toBe("ServerAuthInvalidCredentialError");
+      const signed = yield* upgrade(
+        rpc.ticket,
+        "rpc",
+        key.sign({ method: "GET", url: socketUrl, token: rpc.ticket, iat }),
+      );
+      expect(signed.sessionId).toBe(session.sessionId);
+
+      const wrongKey = yield* Effect.flip(
+        upgrade(
+          rpc.ticket,
+          "rpc",
+          other.sign({ method: "GET", url: socketUrl, token: rpc.ticket, iat }),
+        ),
+      );
+      expect(wrongKey._tag).toBe("ServerAuthInvalidCredentialError");
+      const onMedia = yield* Effect.flip(
+        upgrade(
+          rpc.ticket,
+          "media",
+          key.sign({ method: "GET", url: socketUrl, token: rpc.ticket, iat }),
+        ),
+      );
+      expect(onMedia._tag).toBe("ServerAuthInvalidCredentialError");
+
+      const media = yield* serverAuth.issueWebSocketTicket(session, { use: "media" });
+      expect((yield* upgrade(media.ticket, "media")).sessionId).toBe(session.sessionId);
+      const mediaOnRpc = yield* Effect.flip(upgrade(media.ticket, "rpc"));
+      expect(mediaOnRpc._tag).toBe("ServerAuthInvalidCredentialError");
+
+      // Clients that predate ticket binding still connect with the unbound ticket they mint.
+      const legacy = yield* serverAuth.issueWebSocketTicket(session);
+      expect((yield* upgrade(legacy.ticket, "rpc")).sessionId).toBe(session.sessionId);
+    }).pipe(
+      Effect.provide(layerEnvironmentAuth({ desktopBootstrapToken: "desktop-bootstrap-token" })),
+    ),
+  );
+
+  it.effect("rejects a replayed proof on a bound RPC socket ticket", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const key = makeDpopKey();
+      const exchanged = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+        "desktop-bootstrap-token",
+        ["orchestration:read"],
+        requestMetadata,
+        { proofKeyThumbprint: key.thumbprint },
+      );
+      const session = yield* sessions.verify(exchanged.access_token);
+      const rpc = yield* serverAuth.issueWebSocketTicket(session, { use: "rpc" });
+      const request = {
+        method: "GET",
+        url: `/ws?wsTicket=${rpc.ticket}&dpop=${key.sign({
+          method: "GET",
+          url: "http://192.168.1.50:3773/ws",
+          token: rpc.ticket,
+          iat: Math.floor((yield* DateTime.now).epochMilliseconds / 1_000),
+        })}`,
+        cookies: {},
+        headers: { host: "192.168.1.50:3773" },
+      } as never;
+
+      yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc");
+      const replayed = yield* Effect.flip(serverAuth.authenticateWebSocketUpgrade(request, "rpc"));
+      expect(replayed._tag).toBe("ServerAuthInvalidCredentialError");
+      if (replayed._tag === "ServerAuthInvalidCredentialError") {
+        expect(replayed.dpopFailureReason).toBe("replay");
+      }
+    }).pipe(
+      Effect.provide(layerEnvironmentAuth({ desktopBootstrapToken: "desktop-bootstrap-token" })),
+    ),
   );
 });

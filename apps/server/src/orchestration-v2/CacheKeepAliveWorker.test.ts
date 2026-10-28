@@ -66,7 +66,11 @@ const layerTest = Layer.mergeAll(
   ProviderReplayHarness.layerWithRegistry(
     { name: "cache-keep-alive" },
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
-    { databaseLayer: layerDatabase, runEffectWorker: false },
+    {
+      databaseLayer: layerDatabase,
+      runEffectWorker: false,
+      providerInstances: { [instanceId]: { driver, enabled: true } },
+    },
   ),
 );
 
@@ -780,7 +784,7 @@ it.effect("the toggle, count and pause rebuild from the event log", () =>
       const fresh = yield* ProjectionStore.ProjectionStoreV2;
       for (const { event } of stored) yield* fresh.apply(event);
       return (yield* fresh.getThread(threadId)).cacheKeepAlive;
-    }).pipe(Effect.provide(ProjectionStore.layerMemory));
+    }).pipe(Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))));
     assert.deepEqual(rebuilt, live);
   }).pipe(Effect.provide(layerTest)),
 );
