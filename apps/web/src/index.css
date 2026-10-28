@@ -2787,6 +2787,7 @@ code {
     /* Solarized Dark base palette. */
     --background: #002b36; /* base03 */
     --foreground: #839496; /* base0 — body text */
+    --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
     --card: #073642; /* base02 — panel */
     --card-foreground: #93a1a1; /* base1 — emphasis on panels */
     --popover: #073642;
