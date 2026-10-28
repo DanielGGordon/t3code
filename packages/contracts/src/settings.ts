@@ -451,6 +451,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // which stays tied to the explicit `touchLayout` switch.
   touchLayoutOnPhones: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   fileExplorerShowDotfiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // The editor button (VS Code, Zed, ...) in the file viewer's header.
+  fileViewerOpenInEditorVisible: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
   diffLayout: DiffLayout.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_LAYOUT))),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE)),
@@ -1703,6 +1707,7 @@ export const ClientSettingsPatch = Schema.Struct({
   touchLayout: Schema.optionalKey(Schema.Boolean),
   touchLayoutOnPhones: Schema.optionalKey(Schema.Boolean),
   fileExplorerShowDotfiles: Schema.optionalKey(Schema.Boolean),
+  fileViewerOpenInEditorVisible: Schema.optionalKey(Schema.Boolean),
   diffLayout: Schema.optionalKey(DiffLayout),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   glassOpacity: Schema.optionalKey(GlassOpacity),

@@ -95,6 +95,7 @@ export function FeaturesSettingsPanel() {
     headerProjectScriptsVisibility: s.headerProjectScriptsVisibility,
     headerNotificationsVisibility: s.headerNotificationsVisibility,
     fileExplorerShowDotfiles: s.fileExplorerShowDotfiles,
+    fileViewerOpenInEditorVisible: s.fileViewerOpenInEditorVisible,
     composerAutoRuntimeModeVisible: s.composerAutoRuntimeModeVisible,
     composerRuntimeModeVisible: s.composerRuntimeModeVisible,
     composerKeyboardOnDemand: s.composerKeyboardOnDemand,
@@ -237,6 +238,24 @@ export function FeaturesSettingsPanel() {
               checked={settings.fileExplorerShowDotfiles}
               onCheckedChange={(checked) => updateSettings({ fileExplorerShowDotfiles: checked })}
               aria-label="Show dotfiles in the file explorer"
+            />
+          }
+        />
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <SquareArrowOutUpRightIcon className="size-3.5" />
+              Open in editor button
+            </span>
+          }
+          description="Show the button that opens the file you are viewing in a local editor such as VS Code or Zed. Turn it off if you never use it."
+          control={
+            <Switch
+              checked={settings.fileViewerOpenInEditorVisible}
+              onCheckedChange={(checked) =>
+                updateSettings({ fileViewerOpenInEditorVisible: checked })
+              }
+              aria-label="Show the open in editor button in the file viewer"
             />
           }
         />
