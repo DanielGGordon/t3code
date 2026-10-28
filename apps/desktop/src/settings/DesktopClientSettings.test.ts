@@ -43,6 +43,7 @@ const clientSettings: ClientSettings = {
   favorites: [],
   composerAutoRuntimeModeVisible: false,
   fileExplorerShowDotfiles: true,
+  fileViewerOpenInEditorVisible: true,
   fontFamilyCode: "",
   fontFamilyComposer: "",
   fontFamilySans: "",

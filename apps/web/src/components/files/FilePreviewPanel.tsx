@@ -1059,6 +1059,9 @@ function FilePreviewPanelContent({
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const openInEditorVisible = useClientSettings(
+    (settings) => settings.fileViewerOpenInEditorVisible,
+  );
   const [invertViewerTheme, setInvertViewerTheme] = useState(initialInvertViewerTheme);
   /* Theme applied to the file content viewport: matches the app theme by
    * default, or the opposite Solarized mode when inversion is toggled on. */
@@ -1326,7 +1329,8 @@ function FilePreviewPanelContent({
               />
             </div>
           </ScrollArea>
-          {absolutePath &&
+          {openInEditorVisible &&
+          absolutePath &&
           (environmentId === primaryEnvironmentId || remoteOpenState.mode !== "local-exec") ? (
             <OpenInPicker
               environmentId={environmentId}
