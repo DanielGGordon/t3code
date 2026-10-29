@@ -92,8 +92,8 @@ the car on 2026-10-21; the URL bar costs ~66 CSS px in both states and is alread
   `~/projects/meta/visual-testing/viewport-probe.html`: serve it from a free test-deploy slot (see
   `docs/test-deployments.md`), open it in the car once driving and once parked, press "Save
   snapshot", then update this table, the presets, and the comment in `driveMode.ts`.
-- The car's IP range is on the Caddy allowlist (`/etc/caddy/t3-gate.caddy`); if the car gets a 403
-  the range moved and needs widening there.
+- The car's IP range is on the box's global Caddy allowlist (`/etc/caddy/trusted-ips.caddy`); if the
+  car gets a 403 the range moved: widen it with `~/dotfiles/claude/bin/trusted-ips.sh add <cidr> <note>`.
 
 ## Claude Transcript Import (15-minute timer on the T3 Code host)
 
