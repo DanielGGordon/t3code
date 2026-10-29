@@ -1061,6 +1061,9 @@ function FilePreviewPanelContent({
   const defaultWordWrap = useClientSettings((settings) => settings.wordWrap);
   const [wordWrapOverride, setWordWrapOverride] = useState<boolean | null>(null);
   const wordWrap = wordWrapOverride ?? defaultWordWrap;
+  const openInEditorVisible = useClientSettings(
+    (settings) => settings.fileViewerOpenInEditorVisible,
+  );
   const [invertViewerTheme, setInvertViewerTheme] = useState(initialInvertViewerTheme);
   /* Theme applied to the file content viewport: matches the app theme by
    * default, or the opposite Solarized mode when inversion is toggled on. */
@@ -1345,7 +1348,8 @@ function FilePreviewPanelContent({
               />
             </div>
           </ScrollArea>
-          {absolutePath &&
+          {openInEditorVisible &&
+          absolutePath &&
           (environmentId === primaryEnvironmentId || remoteOpenState.mode !== "local-exec") ? (
             <OpenInPicker
               environmentId={environmentId}
