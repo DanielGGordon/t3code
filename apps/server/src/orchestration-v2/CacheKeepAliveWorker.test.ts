@@ -258,13 +258,18 @@ const createIdleThread = (threadId: ThreadId, options?: { readonly bindClaude?: 
     return run;
   });
 
-const setKeepAlive = (threadId: ThreadId, enabled: boolean) =>
+const setKeepAlive = (
+  threadId: ThreadId,
+  enabled: boolean,
+  mode?: "warm" | "compact" | "warm-then-compact",
+) =>
   Effect.gen(function* () {
     yield* (yield* Orchestrator.OrchestratorV2).dispatch({
       type: "thread.cache-keep-alive.set",
       commandId: CommandId.make(nextId(`keep-alive:${threadId}:${enabled}`)),
       threadId,
       enabled,
+      ...(mode === undefined ? {} : { mode }),
     });
   });
 
@@ -765,6 +770,116 @@ it.effect("pauses after the ping budget; the user's next message or the toggle r
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect(
+  "compact mode sends /compact shortly before the cache lapses, once, and never pings",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:keep-alive-compact");
+      const userRun = yield* createIdleThread(threadId);
+      yield* setKeepAlive(threadId, true, "compact");
+      expect(yield* keepAliveOf(threadId)).toMatchObject({ mode: "compact", nudgeCount: 0 });
+
+      yield* TestClock.adjust("30 minutes");
+      assert.isNull(yield* pingCommand(threadId));
+      yield* TestClock.adjust("28 minutes");
+      assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [threadId]);
+      // The ping the mode replaced is refused even though the cache is nearly out.
+      assert.isTrue(yield* refused(forcedPing(threadId, userRun.id)));
+      const compaction = yield* pingCommand(threadId);
+      expect(compaction).toMatchObject({
+        cacheKeepAliveOfRunId: userRun.id,
+        cacheKeepAliveAction: "compact",
+        idleCompaction: "beforeCacheExpires",
+        text: "/compact",
+        createdBy: "system",
+        creationSource: "server",
+      });
+      yield* orchestrator.dispatch(compaction!);
+
+      const projection = yield* projections.getThreadProjection(threadId);
+      const compactRun = projection.runs.find((run) => run.userMessageId === compaction!.messageId);
+      assert.isDefined(compactRun);
+      // Not the user writing, and not a ping: the ping budget is untouched.
+      expect(projection.thread.cacheKeepAlive).toMatchObject({
+        nudgeCount: 0,
+        lastCompactRunId: compactRun!.id,
+      });
+      assert.isNull((yield* shellOf(threadId)).latestUserAuthoredMessageAt ?? null);
+
+      // Once it has run, the idle period is done: nothing more until the user writes.
+      yield* recordRun(compactRun!, { lastRequestAt: yield* DateTime.now });
+      yield* TestClock.adjust("58 minutes");
+      assert.isNull(yield* pingCommand(threadId));
+      assert.isTrue(yield* refused({ ...compaction!, commandId: CommandId.make(nextId("again")) }));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
+  "warm-then-compact pings through the budget, then compacts before the last cache lapses",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:keep-alive-warm-then-compact");
+      yield* createIdleThread(threadId);
+      yield* setKeepAlive(threadId, true, "warm-then-compact");
+      for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
+        yield* TestClock.adjust("55 minutes");
+        yield* pingAndFinish(threadId);
+      }
+      assert.isNotNull((yield* keepAliveOf(threadId))?.pausedAt ?? null);
+
+      // Spent pings do not drop the thread from the sweep: the compaction is next.
+      assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [threadId]);
+      assert.isNull(yield* pingCommand(threadId));
+      yield* TestClock.adjust("55 minutes");
+      const compaction = yield* pingCommand(threadId);
+      expect(compaction).toMatchObject({ cacheKeepAliveAction: "compact", text: "/compact" });
+      yield* orchestrator.dispatch(compaction!);
+      const projection = yield* projections.getThreadProjection(threadId);
+      expect(projection.thread.cacheKeepAlive).toMatchObject({
+        nudgeCount: CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
+        lastCompactRunId: projection.runs.at(-1)!.id,
+      });
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("does not compact a thread whose last turn already was a /compact", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:keep-alive-compact-after-compact");
+    const run = yield* createIdleThread(threadId);
+    yield* write([
+      {
+        id: EventId.make(`event:${nextId("manual-compact")}`),
+        type: "message.updated",
+        threadId,
+        occurredAt: yield* DateTime.now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: run.userMessageId,
+          threadId,
+          runId: run.id,
+          nodeId: run.rootNodeId,
+          role: "user",
+          text: "/compact",
+          attachments: [],
+          streaming: false,
+          createdAt: run.requestedAt,
+          updatedAt: run.requestedAt,
+        },
+      },
+    ]);
+    yield* setKeepAlive(threadId, true, "compact");
+    yield* TestClock.adjust("58 minutes");
+    const compaction = yield* pingCommand(threadId);
+    assert.isNotNull(compaction);
+    assert.isTrue(yield* refused(compaction!));
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("the toggle, count and pause rebuild from the event log", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:keep-alive-rebuild");
@@ -784,7 +899,9 @@ it.effect("the toggle, count and pause rebuild from the event log", () =>
       const fresh = yield* ProjectionStore.ProjectionStoreV2;
       for (const { event } of stored) yield* fresh.apply(event);
       return (yield* fresh.getThread(threadId)).cacheKeepAlive;
-    }).pipe(Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))));
+    }).pipe(
+      Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+    );
     assert.deepEqual(rebuilt, live);
   }).pipe(Effect.provide(layerTest)),
 );

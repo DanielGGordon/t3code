@@ -432,11 +432,28 @@ export const OrchestrationV2ThreadRestartRequestJson =
   }));
 
 /**
+ * What the keep-alive toggle does for an idle thread: `warm` pings it, `compact`
+ * sends `/compact` shortly before the cache lapses, and `warm-then-compact`
+ * pings until the budget runs out and then compacts before the last cache lapses.
+ */
+export const OrchestrationV2CacheKeepAliveMode = Schema.Literals([
+  "warm",
+  "compact",
+  "warm-then-compact",
+]);
+export type OrchestrationV2CacheKeepAliveMode = typeof OrchestrationV2CacheKeepAliveMode.Type;
+
+/**
  * Fork: the thread's prompt-cache keep-alive toggle, present while it is on.
  * The server pings an idle Claude thread shortly before its one-hour prompt
- * cache lapses (`@t3tools/shared/cacheKeepAlive`). UI state, not activity.
+ * cache lapses, or compacts it instead (`@t3tools/shared/cacheKeepAlive`).
+ * UI state, not activity.
  */
 export const OrchestrationV2ThreadCacheKeepAlive = Schema.Struct({
+  /** Absent on toggles saved before modes existed, which means `warm`. */
+  mode: Schema.optional(OrchestrationV2CacheKeepAliveMode),
+  /** Run the latest compaction started; it leaves nothing more to do until the user writes. */
+  lastCompactRunId: Schema.optional(Schema.NullOr(RunId)),
   enabledAt: Schema.DateTimeUtc,
   /** Pings sent since the user last wrote to the thread. */
   nudgeCount: NonNegativeInt,
@@ -3081,13 +3098,15 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   /**
    * Fork: turn the prompt-cache keep-alive on or off. Turning it on while it
-   * is paused resumes it with a fresh ping budget.
+   * is paused resumes it with a fresh ping budget. `mode` picks what it does
+   * (default `warm`, or the mode it already has).
    */
   Schema.Struct({
     type: Schema.Literal("thread.cache-keep-alive.set"),
     commandId: CommandId,
     threadId: ThreadId,
     enabled: Schema.Boolean,
+    mode: Schema.optional(OrchestrationV2CacheKeepAliveMode),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pin"),
@@ -3255,6 +3274,8 @@ export const OrchestrationV2Command = Schema.Union([
      * run. Rejected unless the thread is still idle and eligible.
      */
     cacheKeepAliveOfRunId: Schema.optional(RunId),
+    /** With `cacheKeepAliveOfRunId`: `compact` sends `/compact` instead of a ping. */
+    cacheKeepAliveAction: Schema.optional(Schema.Literals(["ping", "compact"])),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(
       Schema.Struct({
