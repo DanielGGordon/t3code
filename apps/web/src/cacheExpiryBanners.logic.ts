@@ -1,5 +1,6 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { cacheKeepAliveActive } from "@t3tools/shared/cacheKeepAlive";
 
 // Fork: which idle conversations are about to lose their provider prompt cache.
 // Claude keeps a conversation's cache for an hour after its last request (the
@@ -32,10 +33,9 @@ export function dueCacheExpiryBanners(input: {
   for (const thread of input.threads) {
     if (thread.deletedAt || thread.archivedAt || thread.settledAt) continue;
     if (timeOf(thread.snoozedUntil) > input.nowMs) continue;
-    // Keep-alive is pinging this thread, so its cache is not about to lapse. A
-    // paused one has run out of pings and gets the banner back.
-    const keepAlive = thread.source.cacheKeepAlive ?? null;
-    if (keepAlive !== null && keepAlive.pausedAt === null) continue;
+    // Keep-alive is pinging this thread, or will compact it before the cache
+    // lapses. A warm toggle that has run out of pings gets the banner back.
+    if (cacheKeepAliveActive(thread.source.cacheKeepAlive)) continue;
     // Null while a run is active (and from servers that predate the field).
     const tokens = thread.idleContextTokens;
     if (tokens == null || tokens < input.minTokens) continue;

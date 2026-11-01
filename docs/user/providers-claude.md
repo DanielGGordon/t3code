@@ -95,6 +95,21 @@ pings in a row with no message from you (about 8 hours), keep-warm pauses; your 
 message, or clicking the button again, resumes it. Each ping is a small turn: it
 reads the whole context from the cache, so it uses some of your limits.
 
+Clicking the button again steps through two more modes, each in its own colour, that compact
+the conversation instead of letting its cache lapse. Compacting while the cache is still warm
+reads the old context cheaply once, and your next message starts from the small summary.
+
+- **Compact before the cache expires** (blue) sends `/compact` about five minutes before the
+  cache would expire, unless you write first. It compacts once per idle stretch; your next message
+  starts a new one.
+- **Keep cache warm, then compact** (violet) pings like keep-warm, and once the 8 pings are spent
+  compacts before the last cache expires, instead of letting it lapse.
+
+The compaction appears in the thread as a `/compact` turn sent by T3 Code, and skips a thread
+whose last turn already was a compaction. Agents pick the mode with `t3_thread_organize`
+(`compact_before_cache_expires`, `keep_cache_warm_then_compact`). On your phone, the cache-expiry
+notification from Alfred has a **Compact** button beside **Nudge**.
+
 While the agent is babysitting background subagents with the subagent heartbeat (a
 background check-in every 15 minutes), the button shows on even if you never turned it on:
 each check-in refreshes the cache. That stops by itself once the subagents finish, so

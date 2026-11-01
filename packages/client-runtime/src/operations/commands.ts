@@ -11,6 +11,7 @@ import {
   MessageId,
   type ModelSelection,
   type NodeId,
+  type OrchestrationV2CacheKeepAliveMode,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
   type PlanId,
@@ -526,6 +527,7 @@ export const setRestartRequest = Effect.fn("EnvironmentCommands.setRestartReques
 /** Fork: turn a thread's prompt-cache keep-alive on (or resume it) or off. */
 export interface SetCacheKeepAliveInput extends ThreadCommandInput {
   readonly enabled: boolean;
+  readonly mode?: OrchestrationV2CacheKeepAliveMode;
 }
 export const setCacheKeepAlive = Effect.fn("EnvironmentCommands.setCacheKeepAlive")(function* (
   input: SetCacheKeepAliveInput,
@@ -535,6 +537,7 @@ export const setCacheKeepAlive = Effect.fn("EnvironmentCommands.setCacheKeepAliv
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
     enabled: input.enabled,
+    ...(input.mode === undefined ? {} : { mode: input.mode }),
   });
 });
 

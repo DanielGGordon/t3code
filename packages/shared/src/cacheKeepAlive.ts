@@ -1,4 +1,6 @@
 import type {
+  OrchestrationV2CacheKeepAliveMode,
+  OrchestrationV2ThreadCacheKeepAlive,
   OrchestrationV2ThreadCacheKeepAliveContext,
   OrchestrationV2ThreadShell,
   RunId,
@@ -12,6 +14,7 @@ import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroun
 // message re-reads the whole context uncached. With the toggle on, the server
 // sends a short ping shortly before that hour is up, which resets the clock.
 // Codex and the other providers cache for minutes, too short to keep warm.
+// Its other modes send `/compact` in that window instead of (or after) pinging.
 // The server's sweep, the orchestrator's guard and the chat header all judge
 // a thread with `cacheKeepAliveState` over the server-computed
 // `cacheKeepAliveContext` on its shell, so they cannot disagree.
@@ -92,6 +95,57 @@ export type CacheKeepAliveThread = Pick<
   | "pendingBackgroundTasks"
 >;
 
+export type CacheKeepAliveMode = OrchestrationV2CacheKeepAliveMode;
+
+/** What the toggle does; toggles saved before modes existed only ping. */
+export function cacheKeepAliveMode(
+  keepAlive: Pick<OrchestrationV2ThreadCacheKeepAlive, "mode"> | null | undefined,
+): CacheKeepAliveMode {
+  return keepAlive?.mode ?? "warm";
+}
+
+const cacheKeepAlivePings = (mode: CacheKeepAliveMode) => mode !== "compact";
+const cacheKeepAliveCompacts = (mode: CacheKeepAliveMode) => mode !== "warm";
+
+/**
+ * Whether the toggle still has work to do. A spent ping budget only ends a mode
+ * that never compacts; the others still compact before the last cache lapses.
+ */
+export function cacheKeepAliveActive(
+  keepAlive: Pick<OrchestrationV2ThreadCacheKeepAlive, "mode" | "pausedAt"> | null | undefined,
+): boolean {
+  return (
+    keepAlive != null &&
+    (keepAlive.pausedAt === null || cacheKeepAliveCompacts(cacheKeepAliveMode(keepAlive)))
+  );
+}
+
+/**
+ * The toggle after a `thread.cache-keep-alive.set`, for the server and the
+ * clients' optimistic copy. Turning it on keeps a running budget (and switching
+ * the mode keeps it too) but starts a fresh one when the budget had run out.
+ */
+export function nextCacheKeepAlive(
+  current: OrchestrationV2ThreadCacheKeepAlive | null,
+  input: { readonly enabled: boolean; readonly mode?: CacheKeepAliveMode | undefined },
+  now: OrchestrationV2ThreadCacheKeepAlive["enabledAt"],
+): OrchestrationV2ThreadCacheKeepAlive | null {
+  if (!input.enabled) return null;
+  const mode = input.mode ?? cacheKeepAliveMode(current);
+  if (current !== null && current.pausedAt === null) {
+    return cacheKeepAliveMode(current) === mode ? current : { ...current, mode };
+  }
+  return {
+    mode,
+    lastCompactRunId: current?.lastCompactRunId ?? null,
+    enabledAt: current?.enabledAt ?? now,
+    nudgeCount: 0,
+    pausedAt: null,
+    lastNudgeRunId: current?.lastNudgeRunId ?? null,
+    lastNudgeAfterRead: current?.lastNudgeAfterRead ?? false,
+  };
+}
+
 export type CacheKeepAliveState =
   /** The toggle is off. */
   | { readonly kind: "off" }
@@ -113,7 +167,16 @@ export type CacheKeepAliveState =
       readonly nudgeAtMs: number;
       readonly expiresAtMs: number;
       readonly nudgeCount: number;
-    };
+    }
+  | {
+      /** `compact-scheduled` until `compactAtMs`, then `compact-due` until the cache expires. */
+      readonly kind: "compact-scheduled" | "compact-due";
+      readonly runId: RunId;
+      readonly compactAtMs: number;
+      readonly expiresAtMs: number;
+    }
+  /** The compaction ran; nothing more happens until the user writes again. */
+  | { readonly kind: "compacted" };
 
 /**
  * When a run's cache clock started, or null when it cannot be dated safely.
@@ -182,7 +245,8 @@ export function cacheKeepAliveState(input: {
   const { thread, nowMs } = input;
   const keepAlive = thread.cacheKeepAlive ?? null;
   if (keepAlive === null) return { kind: "off" };
-  if (keepAlive.pausedAt !== null) return { kind: "paused", nudgeCount: keepAlive.nudgeCount };
+  const mode = cacheKeepAliveMode(keepAlive);
+  if (!cacheKeepAliveActive(keepAlive)) return { kind: "paused", nudgeCount: keepAlive.nudgeCount };
   // The server adds the context with the toggle; until a client sees it, wait.
   const context = thread.cacheKeepAliveContext ?? null;
   if (context === null) return { kind: "cold" };
@@ -213,6 +277,19 @@ export function cacheKeepAliveState(input: {
   const expiresAtMs = anchorMs + PROMPT_CACHE_TTL_MS;
   // A lapsed cache is gone; a ping would only pay to rebuild it.
   if (nowMs >= expiresAtMs) return { kind: "cold" };
+  if (cacheKeepAliveCompacts(mode)) {
+    if (context.run.id === keepAlive.lastCompactRunId) return { kind: "compacted" };
+    // Pings come first while the budget lasts; the compaction takes the cache the last one left.
+    if (!cacheKeepAlivePings(mode) || keepAlive.pausedAt !== null) {
+      const compactAtMs = expiresAtMs - CACHE_KEEP_ALIVE_LEAD_MS;
+      return {
+        kind: nowMs >= compactAtMs ? "compact-due" : "compact-scheduled",
+        runId: context.run.id,
+        compactAtMs,
+        expiresAtMs,
+      };
+    }
+  }
   const nudgeAtMs = expiresAtMs - CACHE_KEEP_ALIVE_LEAD_MS;
   return {
     kind: nowMs >= nudgeAtMs ? "due" : "scheduled",

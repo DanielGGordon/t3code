@@ -68,12 +68,16 @@ describe("dueCacheExpiryBanners", () => {
   });
 
   it("stays quiet while keep-alive is pinging the thread", () => {
-    const withKeepAlive = (pausedAt: string | null) => {
+    const withKeepAlive = (
+      pausedAt: string | null,
+      mode?: "warm" | "compact" | "warm-then-compact",
+    ) => {
       const { source } = idleThread();
       return idleThread({
         source: {
           ...source,
           cacheKeepAlive: {
+            ...(mode === undefined ? {} : { mode }),
             enabledAt: DateTime.makeUnsafe(COMPLETED),
             nudgeCount: 0,
             pausedAt: pausedAt === null ? null : DateTime.makeUnsafe(pausedAt),
@@ -86,6 +90,9 @@ describe("dueCacheExpiryBanners", () => {
     expect(due([withKeepAlive(null)])).toHaveLength(0);
     // Out of pings: the cache will lapse after all, so the banner returns.
     expect(due([withKeepAlive(COMPLETED)])).toHaveLength(1);
+    // A compacting toggle handles the expiry itself, even once its pings are spent.
+    expect(due([withKeepAlive(null, "compact")])).toHaveLength(0);
+    expect(due([withKeepAlive(COMPLETED, "warm-then-compact")])).toHaveLength(0);
   });
 
   it("formats context sizes", () => {

@@ -113,6 +113,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Fork: server understands thread.cache-keep-alive.set and pings idle
       Claude threads to keep their prompt cache warm. */
   threadCacheKeepAlive: Schema.optionalKey(Schema.Boolean),
+  /** Fork: the keep-alive toggle also takes the `compact` and `warm-then-compact` modes. */
+  threadCacheKeepAliveCompact: Schema.optionalKey(Schema.Boolean),
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
   threadVisitedTracking: Schema.optionalKey(Schema.Boolean),
   threadPullRequestLinking: Schema.optionalKey(Schema.Boolean),

@@ -9,6 +9,8 @@ import {
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
 
+import { nextCacheKeepAlive } from "@t3tools/shared/cacheKeepAlive";
+
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
 import * as DateTime from "effect/DateTime";
 
@@ -439,23 +441,10 @@ export function createThreadEnvironmentAtoms<R, E>(
         : null,
     })),
     // Mirrors the server: on keeps a running budget, resumes a paused one.
-    setCacheKeepAlive: optimistic.wrap(commands.setCacheKeepAlive, (thread, input, now) => {
-      const current = thread.cacheKeepAlive ?? null;
-      return {
-        ...thread,
-        cacheKeepAlive: !input.enabled
-          ? null
-          : current !== null && current.pausedAt === null
-            ? current
-            : {
-                enabledAt: current?.enabledAt ?? now,
-                nudgeCount: 0,
-                pausedAt: null,
-                lastNudgeRunId: current?.lastNudgeRunId ?? null,
-                lastNudgeAfterRead: current?.lastNudgeAfterRead ?? false,
-              },
-      };
-    }),
+    setCacheKeepAlive: optimistic.wrap(commands.setCacheKeepAlive, (thread, input, now) => ({
+      ...thread,
+      cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, input, now),
+    })),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
       pinnedAt: thread.pinnedAt ?? now,

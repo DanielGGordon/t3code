@@ -485,7 +485,8 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
   /**
-   * Fork: idle threads with keep-alive on and not paused. A cheap pre-filter
+   * Fork: idle threads with keep-alive on and not out of work (a spent ping
+   * budget only ends the modes that never compact). A cheap pre-filter
    * (few threads have it on); the caller judges each one by its shell's
    * `cacheKeepAliveContext` with `cacheKeepAliveState`.
    */
@@ -3847,7 +3848,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           WHERE t.deleted_at IS NULL
             AND t.archived_at IS NULL
             AND json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
-            AND json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+            -- A spent ping budget still leaves the compaction before the last cache lapses.
+            AND (
+              json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+              OR json_extract(t.payload_json, '$.cacheKeepAlive.mode') = 'warm-then-compact'
+            )
             AND NOT EXISTS (
               SELECT 1 FROM orchestration_v2_projection_runs active
               WHERE active.thread_id = t.thread_id

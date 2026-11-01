@@ -6,6 +6,7 @@ import {
 } from "@t3tools/shared/cacheKeepAlive";
 import {
   CommandId,
+  IDLE_COMPACTION_TEXT,
   MessageId,
   type OrchestrationV2Command,
   type RunId,
@@ -39,10 +40,10 @@ const isDispatchError = Schema.is(Orchestrator.OrchestratorDispatchError);
 type CacheKeepAliveCommand = Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
 
 /**
- * Fork: the keep-alive ping for a thread that is due one, else null. The
- * command and message ids name the executed run being kept warm and the
- * attempt, so repeated sweeps of one idle period never send the same attempt
- * twice.
+ * Fork: the keep-alive ping, or the compaction that replaces it in the
+ * toggle's compact modes, for a thread that is due one, else null. The command
+ * and message ids name the executed run being kept warm and the attempt, so
+ * repeated sweeps of one idle period never send the same attempt twice.
  */
 export function cacheKeepAliveCommand(
   thread: CacheKeepAliveThread & { readonly id: ThreadId },
@@ -50,15 +51,19 @@ export function cacheKeepAliveCommand(
   attempt = 1,
 ): CacheKeepAliveCommand | null {
   const state = cacheKeepAliveState({ thread, nowMs });
-  if (state.kind !== "due") return null;
-  const identity = `${thread.id}:${state.runId}:${attempt}`;
+  if (state.kind !== "due" && state.kind !== "compact-due") return null;
+  const compact = state.kind === "compact-due";
+  const identity = `${compact ? "compact:" : ""}${thread.id}:${state.runId}:${attempt}`;
   return {
     type: "message.dispatch",
     commandId: CommandId.make(`cache-keep-alive:${identity}`),
     messageId: MessageId.make(`${CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX}${identity}`),
     threadId: thread.id,
     cacheKeepAliveOfRunId: state.runId,
-    text: CACHE_KEEP_ALIVE_NUDGE_TEXT,
+    ...(compact
+      ? { cacheKeepAliveAction: "compact" as const, idleCompaction: "beforeCacheExpires" as const }
+      : {}),
+    text: compact ? IDLE_COMPACTION_TEXT : CACHE_KEEP_ALIVE_NUDGE_TEXT,
     attachments: [],
     dispatchMode: { type: "start_immediately" },
     createdBy: "system",
@@ -66,7 +71,7 @@ export function cacheKeepAliveCommand(
   };
 }
 
-/** Each thread's ping for its current idle period. */
+/** Each thread's ping (or compaction) for its current idle period. */
 interface PingAttempts {
   readonly runId: RunId;
   readonly attempts: number;

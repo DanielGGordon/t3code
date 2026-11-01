@@ -14,6 +14,7 @@ import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-defin
 import {
   CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
   cacheKeepAliveState,
+  nextCacheKeepAlive,
 } from "@t3tools/shared/cacheKeepAlive";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
@@ -3399,23 +3400,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // Fork: the prompt-cache keep-alive toggle. UI state like the restart
         // flag below, so it does not bump updatedAt. Turning it on while it
         // runs keeps its count; while paused (or off) it starts a fresh budget.
-        case "thread.cache-keep-alive.set": {
-          const current = thread.cacheKeepAlive ?? null;
+        case "thread.cache-keep-alive.set":
           return {
             ...thread,
-            cacheKeepAlive: !command.enabled
-              ? null
-              : current !== null && current.pausedAt === null
-                ? current
-                : {
-                    enabledAt: current?.enabledAt ?? now,
-                    nudgeCount: 0,
-                    pausedAt: null,
-                    lastNudgeRunId: current?.lastNudgeRunId ?? null,
-                    lastNudgeAfterRead: current?.lastNudgeAfterRead ?? false,
-                  },
+            cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, command, now),
           };
-        }
         // Fork: transient "agent asked for a server restart" flag. Does not
         // bump updatedAt — it is UI state, not thread activity, and must not
         // defeat automatic settlement or reorder the sidebar.
@@ -5169,6 +5158,38 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
+  /**
+   * Fork: remember the run a keep-alive compaction started, so the toggle knows
+   * the idle period is done (a compaction's own cache is not compacted again).
+   */
+  const recordCacheKeepAliveCompaction = Effect.fn("Orchestrator.recordCacheKeepAliveCompaction")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const keepAlive = projection.thread.cacheKeepAlive ?? null;
+      const run = projection.runs.find(
+        (candidate) => candidate.userMessageId === command.messageId,
+      );
+      if (keepAlive === null || run === undefined) return;
+      const thread: OrchestrationV2AppThread = {
+        ...projection.thread,
+        cacheKeepAlive: { ...keepAlive, lastCompactRunId: run.id },
+      };
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.cache-keep-alive-updated",
+        threadId: command.threadId,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: yield* DateTime.now,
+        payload: thread,
+      });
+    },
+  );
+
   const dispatchMessage = Effect.fn("Orchestrator.dispatchMessage")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -5191,12 +5212,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               thread: shell,
               nowMs: DateTime.toEpochMillis(yield* DateTime.now),
             });
+      const compacting = command.cacheKeepAliveAction === "compact";
+      const dueRunId =
+        state?.kind === (compacting ? "compact-due" : "due") ? state.runId : undefined;
+      // Compacting a thread whose last request was already a compaction (the
+      // user's own, say) would only rebuild a small context for nothing.
+      const lastRunWasCompaction =
+        compacting &&
+        projection.messages.some(
+          (message) =>
+            message.id ===
+              projection.runs.find((run) => run.id === command.cacheKeepAliveOfRunId)
+                ?.userMessageId && isCompactionCommandMessage(message),
+        );
       if (
         command.createdBy !== "system" ||
         command.creationSource !== "server" ||
         command.dispatchMode.type !== "start_immediately" ||
-        state?.kind !== "due" ||
-        state.runId !== command.cacheKeepAliveOfRunId
+        lastRunWasCompaction ||
+        dueRunId !== command.cacheKeepAliveOfRunId
       ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -12855,7 +12889,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cancelUnsettledEffects = yield* dispatchMessage(dispatched, events, effects);
         yield* recordSubagentFollowup(dispatched, events).pipe(mapDispatchError(command));
         if (dispatched.cacheKeepAliveOfRunId !== undefined) {
-          yield* recordCacheKeepAliveNudge(dispatched, events);
+          yield* dispatched.cacheKeepAliveAction === "compact"
+            ? recordCacheKeepAliveCompaction(dispatched, events)
+            : recordCacheKeepAliveNudge(dispatched, events);
         }
         break;
       }
