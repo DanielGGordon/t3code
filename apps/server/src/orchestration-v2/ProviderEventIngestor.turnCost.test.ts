@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as TurnCostEstimator from "../usage/TurnCostEstimator.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as EventSink from "./EventSink.ts";
@@ -55,6 +56,10 @@ const layerIngestor = (estimator: TurnCostEstimator.TurnCostEstimatorShape) =>
           ThreadCommandExecutor.layer,
           layerGit,
           Layer.succeed(TurnCostEstimator.TurnCostEstimator, estimator),
+          Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+            // @effect-diagnostics-next-line effectSucceedWithVoid:off - Optional instances require undefined rather than void.
+            getInstance: () => Effect.succeed(undefined),
+          }),
         ),
       ),
     ),

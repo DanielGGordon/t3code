@@ -7,6 +7,7 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no createHmac or timingSafeEqual.
 import * as NodeCrypto from "node:crypto";
 import * as NodeNet from "node:net";
+import { normalizeHostname } from "@t3tools/shared/hostClassification";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Result from "effect/Result";
 
@@ -51,21 +52,22 @@ export function resolveLegacySessionCookieName(input: {
     : undefined;
 }
 
-export function isRemoteReachableHost(host: string | undefined): boolean {
-  if (host === "0.0.0.0" || host === "::" || host === "[::]") {
-    return true;
-  }
-  if (!host || host.length === 0) {
-    return false;
-  }
-  return !(
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("127.")
-  );
+/**
+ * The loopback address a server given `host` listens on, or undefined when it may listen beyond
+ * this machine. Unset means 127.0.0.1. Only a loopback literal or `localhost` counts: Node listens
+ * on every interface for an empty host, and any other name resolves through DNS.
+ */
+export function loopbackBindAddress(host: string | undefined): string | undefined {
+  if (host === undefined) return "127.0.0.1";
+  const address = normalizeHostname(host);
+  if (address === "localhost") return "127.0.0.1";
+  return (NodeNet.isIPv4(address) && address.startsWith("127.")) || address === "::1"
+    ? address
+    : undefined;
 }
+
+export const isRemoteReachableHost = (host: string | undefined): boolean =>
+  loopbackBindAddress(host) === undefined;
 
 export function base64UrlEncode(input: string | Uint8Array): string {
   return typeof input === "string"
@@ -129,9 +131,9 @@ function inferBrowser(userAgent: string | undefined): string | undefined {
     return undefined;
   }
   const normalized = userAgent.toLowerCase();
-  if (/edg\//.test(normalized)) return "Edge";
-  if (/opr\//.test(normalized)) return "Opera";
-  if (/firefox\//.test(normalized)) return "Firefox";
+  if (/edg(?:e|a|ios)?\//.test(normalized)) return "Edge";
+  if (/opr\/|opios\//.test(normalized)) return "Opera";
+  if (/firefox\/|fxios\//.test(normalized)) return "Firefox";
   if (/electron\//.test(normalized)) return "Electron";
   if (/chrome\//.test(normalized) || /crios\//.test(normalized)) return "Chrome";
   if (/safari\//.test(normalized) && !/chrome\//.test(normalized)) return "Safari";
@@ -176,13 +178,9 @@ function readForwardedIpAddress(value: string | undefined): string | undefined {
 }
 
 /**
- * The address of the client behind this request. When the TCP peer is
- * loopback, the request came through the host's local reverse proxy (Caddy),
- * so the client is the proxy's `X-Real-IP`, or else the right-most
- * `X-Forwarded-For` entry (the one the proxy itself appended). Those headers
- * are ignored from any other peer, which could set them to anything. The proxy
- * must overwrite `X-Real-IP` (Caddy: `header_up X-Real-IP {remote_host}`), or
- * a client could choose its own reported address.
+ * Behind a loopback peer (the local Caddy proxy) the client is `X-Real-IP`, else the proxy's
+ * right-most `X-Forwarded-For` entry; other peers could forge both, so they are ignored. The
+ * proxy must overwrite `X-Real-IP` (`header_up X-Real-IP {remote_host}`) or clients pick their own.
  */
 export function resolveClientIpAddress(
   request: Pick<HttpServerRequest.HttpServerRequest, "headers" | "source">,

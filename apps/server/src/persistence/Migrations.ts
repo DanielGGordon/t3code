@@ -37,14 +37,10 @@ import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.
 import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
 import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/033_ProjectionThreadRestartRequest.ts";
-// FORK MIGRATION OFFSET — every upstream migration id >= 33 is shifted +1 here.
-// This fork's 033 (ProjectionThreadRestartRequest) has been recorded in
-// production's effect_sql_migrations since 2026-07-09. Effect's Migrator skips
-// any id <= the recorded max WITHOUT comparing names, so upstream's 33..61 run
-// locally as 34..62 (and upstream's 062+ run at +4, after the fork's 63..65). File names keep upstream's numbering (so future syncs do
-// not re-conflict); only the ids in `migrationEntries` below are shifted.
-// Never renumber the fork's 033 upward. See UPSTREAM_DIVERGENCE.md and
-// Migrations/034_035_ForkMigrationOffset.test.ts.
+// FORK OFFSET: the Migrator skips ids <= the recorded max without comparing names, and
+// prod recorded the fork's 033 first. Upstream 33..61 run at +1, 062+ at +4 (after fork
+// 63..65); file names keep upstream's numbers. Never renumber the fork's 033. See
+// UPSTREAM_DIVERGENCE.md and Migrations/034_035_ForkMigrationOffset.test.ts.
 import Migration0034 from "./Migrations/034_ProjectionThreadsSettled.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadsSnoozed.ts";
 import Migration0036 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
@@ -90,6 +86,10 @@ import Migration0073 from "./Migrations/069_ThreadMessageSearch.ts";
 import Migration0074 from "./Migrations/070_PeerLinks.ts";
 import Migration0075 from "./Migrations/071_PeerLinkFence.ts";
 import Migration0076 from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0077 from "./Migrations/073_ActiveTurnItemIndexes.ts";
+import Migration0078 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import Migration0079 from "./Migrations/075_SubagentDeliveryState.ts";
+import Migration0080 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -166,7 +166,7 @@ export const migrationEntries = [
   [66, "ThreadFailureLookupIndex", Migration0066],
   [67, "DropUnusedV1Projections", Migration0067],
   [68, "CanonicalizeThreadPullRequestLinks", Migration0068],
-  // Upstream 065..072 at +4.
+  // Upstream 065..076 at +4.
   [69, "CodexUsageNativeTurnIndex", Migration0069],
   [70, "RepairClientSettlementTimestamps", Migration0070],
   [71, "WebhookDedupe", Migration0071],
@@ -175,6 +175,10 @@ export const migrationEntries = [
   [74, "PeerLinks", Migration0074],
   [75, "PeerLinkFence", Migration0075],
   [76, "WaitingLinkRequestIndex", Migration0076],
+  [77, "ActiveTurnItemIndexes", Migration0077],
+  [78, "ExcludeAttachmentPlaceholdersFromSearch", Migration0078],
+  [79, "SubagentDeliveryState", Migration0079],
+  [80, "ProjectionProjectsPinArchive", Migration0080],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -237,12 +241,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
-  // Order matters: the preview reconcile repairs upstream-numbered V2 preview
-  // ledgers into upstream's canonical numbering; the name-aware reconcile then
-  // maps any foreign numbering (stock upstream, or that preview result) onto
-  // this fork's ids and runs skipped gaps, before the ordinal Migrator. The V2
-  // clash check must come after it, or a stock-numbered ledger (production's
-  // 36..54) would be rejected before it could be renumbered.
+  // Order matters: preview reconcile -> name-aware reconcile onto fork ids (runs
+  // skipped gaps) -> V2 clash check -> ordinal Migrator. Checking for clashes earlier
+  // would reject a stock-numbered ledger (production's 36..54) before renumbering.
   const ledgerGapMigrations = yield* reconcileMigrationLedger(migrationEntries);
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
