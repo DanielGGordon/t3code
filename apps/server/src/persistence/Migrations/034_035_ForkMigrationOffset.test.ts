@@ -71,23 +71,24 @@ describe("034_035 fork migration offset", () => {
 
       const executed = yield* runMigrations();
       // Every upstream migration from upstream-35 (TitleRegeneration) on runs,
-      // none is skipped, and the ids are contiguous 36..76.
+      // none is skipped, and the ids are contiguous 36..80.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        Array.from({ length: 76 - 35 }, (_, index) => 36 + index),
+        Array.from({ length: 80 - 35 }, (_, index) => 36 + index),
       );
       assert.deepStrictEqual(executed[0], [36, "ProjectionThreadTitleRegeneration"]);
       assert.deepStrictEqual(
         executed.find(([, name]) => name === "OrchestrationV2"),
         [56, "OrchestrationV2"],
       );
-      assert.deepStrictEqual(executed.at(-15), [62, "PullRequestReviewGuides"]);
-      assert.deepStrictEqual(executed.at(-14), [63, "AuthSessionClientIps"]);
-      assert.deepStrictEqual(executed.at(-12), [65, "Notifications"]);
-      assert.deepStrictEqual(executed.at(-11), [66, "ThreadFailureLookupIndex"]);
-      assert.deepStrictEqual(executed.at(-9), [68, "CanonicalizeThreadPullRequestLinks"]);
-      assert.deepStrictEqual(executed.at(-8), [69, "CodexUsageNativeTurnIndex"]);
-      assert.deepStrictEqual(executed.at(-1), [76, "WaitingLinkRequestIndex"]);
+      assert.deepStrictEqual(executed.at(-19), [62, "PullRequestReviewGuides"]);
+      assert.deepStrictEqual(executed.at(-18), [63, "AuthSessionClientIps"]);
+      assert.deepStrictEqual(executed.at(-16), [65, "Notifications"]);
+      assert.deepStrictEqual(executed.at(-15), [66, "ThreadFailureLookupIndex"]);
+      assert.deepStrictEqual(executed.at(-13), [68, "CanonicalizeThreadPullRequestLinks"]);
+      assert.deepStrictEqual(executed.at(-12), [69, "CodexUsageNativeTurnIndex"]);
+      assert.deepStrictEqual(executed.at(-5), [76, "WaitingLinkRequestIndex"]);
+      assert.deepStrictEqual(executed.at(-1), [80, "ProjectionProjectsPinArchive"]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       // The recorded ledger equals this build's manifest (no divergence warning).

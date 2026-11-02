@@ -29,14 +29,9 @@ export class V2DatabaseNotInitializedError extends Schema.TaggedError<V2Database
 }
 
 /**
- * Whether this process may snapshot the legacy state.sqlite into statev2.sqlite.
- *
- * The snapshot is one-shot: once statev2.sqlite exists it is never re-seeded. If
- * a short-lived CLI process (e.g. the 15-minute `t3 import sync` timer running
- * from a freshly checked-out but not-yet-restarted deploy) took it while the old
- * server was still writing state.sqlite, every write after the snapshot would be
- * silently lost when the new server starts. So only the long-running server
- * (`runServer`) seeds; everything else defaults to refusing.
+ * The legacy snapshot is one-shot. A CLI process (e.g. the `t3 import sync` timer) taking it
+ * while the old server still writes state.sqlite would silently lose every later write, so
+ * only the long-running server (`runServer`) seeds; everything else refuses.
  */
 export type V2DatabaseSeedPolicyValue = "seed-from-legacy" | "refuse-legacy-seed";
 
@@ -49,6 +44,33 @@ export class V2DatabaseSeedPolicy extends Context.Reference<V2DatabaseSeedPolicy
 export const allowLegacySeed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, V2DatabaseSeedPolicy, "seed-from-legacy");
 
+const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+};
+
+// Legacy names have no PID; newer copies stay while their process is alive.
+const removeAbandonedCopies = Effect.fn("removeAbandonedCopies")(function* (directory: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const entries = yield* fs.readDirectory(directory).pipe(
+    Effect.catchIf(
+      (error) => error.reason._tag === "NotFound",
+      () => Effect.succeed([]),
+    ),
+  );
+  for (const entry of entries) {
+    const copy = /^\.v2-import-(?:(\d+)-)?[A-Za-z0-9]{6}$/.exec(entry);
+    if (copy === null || (copy[1] !== undefined && isProcessAlive(Number(copy[1])))) continue;
+    yield* fs.remove(path.join(directory, entry), { recursive: true });
+  }
+});
+
 /** Seed V2 once. Its copied legacy tables remain the source for lazy transcript import. */
 export const initializeV2Database = Effect.fn("initializeV2Database")(function* (
   destinationPath: string,
@@ -58,6 +80,7 @@ export const initializeV2Database = Effect.fn("initializeV2Database")(function* 
   const policy = yield* V2DatabaseSeedPolicy;
   const directory = path.dirname(destinationPath);
   const sourcePath = path.join(directory, "state.sqlite");
+  yield* removeAbandonedCopies(directory).pipe(Effect.ignore({ log: true }));
   yield* Effect.gen(function* () {
     if (yield* fs.exists(destinationPath)) return;
     if (!(yield* fs.exists(sourcePath))) return;
@@ -66,7 +89,7 @@ export const initializeV2Database = Effect.fn("initializeV2Database")(function* 
     }
     const temporaryDirectory = yield* fs.makeTempDirectoryScoped({
       directory,
-      prefix: ".v2-import-",
+      prefix: `.v2-import-${process.pid}-`,
     });
     const snapshotPath = path.join(temporaryDirectory, "snapshot.sqlite");
     yield* Effect.tryPromise(async () => {

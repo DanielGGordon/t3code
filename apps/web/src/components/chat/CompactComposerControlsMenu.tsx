@@ -1,5 +1,5 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode, useRef } from "react";
+import { memo, useRef } from "react";
 import { ChevronUpIcon, EllipsisIcon, HandIcon, PaperclipIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { openTouchGestures } from "../TouchGesturesDialog";
@@ -19,16 +19,16 @@ import { useComposerMenuState } from "./useComposerMenuState";
 import { formatComposerInteractionModeLabel } from "./composerTouchLayout";
 import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFooterControls";
 
-// Touch layout: every row in the popup (including the traits rows rendered by
-// TraitsMenuContent) becomes a >=48px target.
+// Touch layout: every row in the popup becomes a >=48px target.
 const TOUCH_MENU_POPUP_CLASS_NAME =
   "touch:min-w-72 touch:[&_[data-slot=menu-item]]:min-h-12 touch:[&_[data-slot=menu-radio-item]]:min-h-12 touch:[&_[data-slot=menu-checkbox-item]]:min-h-12";
 const SECTION_LABEL_CLASS_NAME =
   "px-2 py-1.5 font-medium text-muted-foreground text-xs touch:text-sm";
 
 /**
- * Touch layout folds every control in here, plus "Attach files"; the trigger spells out
- * the state (`summaryLabel`), or is an ellipsis on a phone to keep the footer one row.
+ * Touch layout folds every control but the model picker in here, plus "Attach files"; the
+ * trigger spells out the state (`summaryLabel`), or is an ellipsis on a phone to keep the
+ * footer one row.
  * Permission changes stay two taps deep (open, then pick).
  */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
@@ -36,7 +36,6 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   showInteractionModeToggle: boolean;
-  traitsMenuContent?: ReactNode;
   showPermissions?: boolean;
   size?: "sm" | "xs";
   /** Close the portaled popup when its trigger hides. */
@@ -56,13 +55,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const shortcut =
-    [
-      props.showPermissions !== false ? "composer.mode" : null,
-      props.traitsMenuContent ? "composer.effort" : null,
-    ]
-      .filter(Boolean)
-      .join(" ") || undefined;
+  const shortcut = props.showPermissions !== false ? "composer.mode" : undefined;
 
   return (
     <Menu
@@ -124,20 +117,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               className="max-md:flex md:hidden drive:flex short:flex"
               onClick={props.onChooseModel}
             >
-              <span className="min-w-0 flex-1 truncate">Model</span>
+              <span className="min-w-0 flex-1 truncate">Model & effort</span>
               {props.modelLabel ? (
                 <span className="truncate text-muted-foreground">{props.modelLabel}</span>
               ) : null}
             </MenuItem>
             <MenuDivider className="md:hidden drive:block short:block" />
-          </>
-        ) : null}
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            {props.showInteractionModeToggle || props.showPermissions !== false ? (
-              <MenuDivider />
-            ) : null}
           </>
         ) : null}
         {props.showInteractionModeToggle ? (

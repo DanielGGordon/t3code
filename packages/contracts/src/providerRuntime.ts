@@ -77,6 +77,14 @@ const TurnTokenUsageCommonFields = {
    * `costUsd` understates actual usage.
    */
   costUsdIncomplete: Schema.optional(Schema.Boolean),
+  // Native model ids the provider reported for the main agent's work. Absent means unknown.
+  models: Schema.optional(Schema.Array(TrimmedNonEmptyStringSchema)),
+  // The provider ran a local command; its counters describe that result, not model work.
+  localCommand: Schema.optional(Schema.Boolean),
+  // Provider-ledger counts beyond the main agent, such as native subagents and compaction.
+  otherUsage: Schema.optional(
+    Schema.Struct({ inputTokens: NonNegativeInt, outputTokens: NonNegativeInt }),
+  ),
 };
 export const TurnTokenUsage = Schema.Union([
   Schema.Struct({

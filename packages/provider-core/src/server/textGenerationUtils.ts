@@ -62,7 +62,13 @@ function truncateAtWordBoundary(text: string, max: number): string {
   if (text.length <= max) return text;
   const cut = text.slice(0, max + 1);
   const boundary = cut.lastIndexOf(" ");
-  const shortened = boundary >= Math.floor(max / 2) ? cut.slice(0, boundary) : text.slice(0, max);
+  let end = max;
+  const previous = text.charCodeAt(end - 1);
+  const next = text.charCodeAt(end);
+  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+    end -= 1;
+  }
+  const shortened = boundary >= Math.floor(max / 2) ? cut.slice(0, boundary) : text.slice(0, end);
   return shortened.replace(/[\s,;:\-–—/&]+$/u, "");
 }
 

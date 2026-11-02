@@ -23,6 +23,53 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-11-02 — True merge of upstream through `4a5251b1c` (2026-11-01)
+
+911 upstream commits since `5211acfe9` (managed policy, side chats, combined model+effort picker,
+project pin/archive, turn a No-project thread into a project, Usage filters, scheduled one-off
+runs, message media shapes, Diff pane local commits, many server/web fixes). 61 files conflicted
+(90 hunks); nothing in `apps/mobile` or `apps/desktop` conflicted.
+
+### Migration numbering (offset +4 continues)
+
+Upstream's 073 `ActiveTurnItemIndexes` … 076 `ProjectionProjectsPinArchive` run at fork ids
+**77–80**. Ledger tests list through 80; `069_ThreadMessageSearch.test.ts` uses fork ids (+4);
+upstream's new "registers every migration file" test in `Migrations.test.ts` is quarantined (#61)
+because it compares file-name ids against the offset list.
+
+### Resolutions worth knowing
+
+- **Auth:** upstream's DPoP session renewal (keeps Connect sockets alive) and the fork's 2FA lapse
+  check share `SessionStore.awaitInvalidation(session, proofKeyThumbprint?)`. WebSocket tickets
+  are now `Redacted` upstream.
+- **V2 seed:** upstream's abandoned-copy cleanup runs before the fork's seed-policy guard; the
+  guard (`allowLegacySeed`) is unchanged.
+- **Composer:** upstream folded effort into the model picker. The touch pill keeps its layout; in
+  the folded touch menu the model row is now "Model & effort" (effort is one tap deeper than
+  before). Fork `FastBolt` / `resolveTraitsTriggerDisplay` / `resolveProviderTraitsLabel` were
+  dropped in favour of upstream's `EffortGlyph` / `describeComposerEffort`.
+- **Thread details:** upstream's "choose what to show" card is combined with the fork's
+  Features-panel auto-hiding in touch chrome.
+- **Workspace:** upstream's batched symlink handling, plus the fork's rule that a symlink to a file
+  outside the root (a worktree `.env`) is still listed.
+- **Devices:** upstream's `DeviceService` rewrite, with the fork's stopped-device tracking on top.
+- **Title generation:** fork's 40-character word-boundary cut kept; upstream's surrogate-pair guard
+  moved into its fallback cut.
+
+### Known leftovers
+
+- Upstream's project **Archive** overlaps the fork's client-side "Hide from project list" (#115);
+  both are offered in project settings. Decide whether to retire #115.
+- Upstream's `ProjectPinButton` shows an unpinned project's pin only on hover or `pointer-coarse`,
+  so it is hidden in the car (`pointer: fine`) and has no `touch:` sizing.
+- `scripts/build-npm-launcher.ts` reads the max migration id from file names (76), not the fork's
+  ledger (80); only matters if the fork publishes the npm launcher.
+- `runtimeLayer.test.ts` "recovers only reconstructable user questions … on startup" fails on fork
+  `main` too (the fork's title refinement queues an extra `thread-title.generate`).
+- The `TS377xxx` Effect language-service diagnostics on fork-only server files remain (25 now).
+
+---
+
 ## 2026-10-28 — True merge of upstream through `5211acfe9` (2026-10-28)
 
 1517 upstream commits since `f0fb0e852` (React Compiler/lint-rule sweep, test pruning #22557, peer
