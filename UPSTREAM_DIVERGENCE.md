@@ -53,13 +53,13 @@ because it compares file-name ids against the offset list.
 - **Workspace:** upstream's batched symlink handling, plus the fork's rule that a symlink to a file
   outside the root (a worktree `.env`) is still listed.
 - **Devices:** upstream's `DeviceService` rewrite, with the fork's stopped-device tracking on top.
+- **Retired #115:** the fork's client-side "Hide from project list" was removed in favour of
+  upstream's server-side project Archive. Saved `sidebarHiddenProjectKeys` values are ignored.
 - **Title generation:** fork's 40-character word-boundary cut kept; upstream's surrogate-pair guard
   moved into its fallback cut.
 
 ### Known leftovers
 
-- Upstream's project **Archive** overlaps the fork's client-side "Hide from project list" (#115);
-  both are offered in project settings. Decide whether to retire #115.
 - Upstream's `ProjectPinButton` shows an unpinned project's pin only on hover or `pointer-coarse`,
   so it is hidden in the car (`pointer: fine`) and has no `touch:` sizing.
 - `scripts/build-npm-launcher.ts` reads the max migration id from file names (76), not the fork's
