@@ -63,7 +63,7 @@ const clientSettings: ClientSettings = {
   headerUsageScopedWeeklyVisible: false,
   headerUsageSessionVisible: false,
   headerUsageSpendVisible: false,
-  headerUsageStockSymbol: "SPY",
+  headerUsageStockSymbol: "TSLA, SPCX, SPY",
   headerUsageStockVisible: false,
   headerUsageWeeklyVisible: false,
   onboardingCompletedAt: null,

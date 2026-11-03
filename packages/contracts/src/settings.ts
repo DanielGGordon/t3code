@@ -555,9 +555,11 @@ export const ClientSettingsSchema = Schema.Struct({
   headerUsageSessionVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   headerUsageSpendVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // A "for fun" stock/index ticker in the header. Visibility is per device;
-  // the symbol it tracks defaults to SPY and is edited from the header menu.
+  // the comma-separated symbols it rotates through are edited from the header menu.
   headerUsageStockVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  headerUsageStockSymbol: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("SPY"))),
+  headerUsageStockSymbol: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("TSLA, SPCX, SPY")),
+  ),
   headerUsageWeeklyVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Compact CPU/memory readout for the T3 server host, rendered next to the
   // Settings button in the sidebar footer. Default off; toggled per device

@@ -57,7 +57,7 @@ import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
 import { TokenUsageBadge } from "./TokenUsageBadge";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
 import { useProviderUsage } from "../../hooks/useProviderUsage";
-import { useStockQuote } from "../../hooks/useStockQuote";
+import { useStockTicker } from "../../hooks/useStockQuote";
 import { textDirection } from "~/textDirection";
 import { GuestShareIndicator } from "./GuestShareControls";
 
@@ -124,8 +124,11 @@ export const ChatHeader = memo(function ChatHeader({
     gemini: geminiUsage,
   } = useProviderUsage(activeThreadEnvironmentId, providerInstanceId);
   const usageStatsVisibility = useClientSettings(selectHeaderUsageStatsVisibility);
-  const stockSymbol = useClientSettings((settings) => settings.headerUsageStockSymbol);
-  const stockQuote = useStockQuote(usageStatsVisibility.stock, stockSymbol);
+  const stockSymbols = useClientSettings((settings) => settings.headerUsageStockSymbol);
+  const { symbol: stockSymbol, quote: stockQuote } = useStockTicker(
+    usageStatsVisibility.stock,
+    stockSymbols,
+  );
   // Phones and the touch / car layout keep the big usage readouts visible and
   // drop the small badges that duplicate them.
   const condensed = useCondensedChrome();
@@ -541,7 +544,7 @@ export const ChatHeader = memo(function ChatHeader({
           condensed={condensed}
           visibility={usageStatsVisibility}
           scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
-          stockSymbol={stockSymbol}
+          stockSymbol={stockSymbols}
           onPatch={updateClientSettings}
         />
         {/* Elsewhere the toggle lives in the composer footer beside the access mode. */}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
+import { parseStockSymbols } from "~/hooks/useStockQuote";
 import { deriveLatestContextWindowSnapshot } from "~/lib/contextWindow";
 import type { HeaderClaudeUsage } from "~/lib/headerUsageLimits";
 import {
@@ -413,6 +414,22 @@ describe("selectHeaderUsageStats", () => {
     });
 
     expect(stats.some((stat) => stat.id === "stock")).toBe(false);
+  });
+});
+
+describe("parseStockSymbols", () => {
+  it("splits on commas and whitespace, uppercases, de-duplicates and caps the list", () => {
+    expect(parseStockSymbols(" tsla, spcx  spy,,TSLA ")).toEqual(["TSLA", "SPCX", "SPY"]);
+    expect(parseStockSymbols("  ,  ")).toEqual([]);
+    expect(parseStockSymbols("a b c d e f g h i j")).toHaveLength(8);
+  });
+
+  it("defaults to TSLA, SPCX and SPY", () => {
+    expect(parseStockSymbols(DEFAULT_CLIENT_SETTINGS.headerUsageStockSymbol)).toEqual([
+      "TSLA",
+      "SPCX",
+      "SPY",
+    ]);
   });
 });
 
