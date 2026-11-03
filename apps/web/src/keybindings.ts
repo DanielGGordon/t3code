@@ -21,6 +21,7 @@ import {
 import { isElectron } from "./env";
 import { isEditableFocused } from "./lib/editableFocus";
 import { projectScriptIdFromCommand } from "./projectScripts";
+import { chordPrefixFor } from "./shortcuts/chordTracker";
 
 export type { ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
 export { shortcutKeyFromEvent } from "@t3tools/shared/keybindings";
@@ -43,6 +44,8 @@ export interface ShortcutMatchContext {
 interface ShortcutMatchOptions {
   platform?: string;
   context?: Partial<ShortcutMatchContext>;
+  /** The keydown that armed a chord. Defaults to what the chord tracker recorded for the event. */
+  chordPrefix?: SharedShortcutEventLike | null;
 }
 
 interface ResolvedShortcutLabelOptions extends ShortcutMatchOptions {
@@ -110,6 +113,15 @@ export function shortcutConflictKey(
   ].join("|");
 }
 
+/** A chord's key is both steps, so `ctrl+e s` and `ctrl+e d` do not collide. */
+export function bindingConflictKey(
+  binding: Pick<ResolvedKeybindingRule, "shortcut" | "second">,
+  platform = navigator.platform,
+): string {
+  const first = shortcutConflictKey(binding.shortcut, platform);
+  return binding.second ? `${first} ${shortcutConflictKey(binding.second, platform)}` : first;
+}
+
 function shortcutForContext(binding: ResolvedKeybindingRule, context: ShortcutMatchContext) {
   const shortcut = binding.shortcut;
   // Resolve persisted Mod+Enter against send preference without rewriting saved shortcuts.
@@ -128,15 +140,20 @@ function shortcutForContext(binding: ResolvedKeybindingRule, context: ShortcutMa
   return shortcut;
 }
 
-export function effectiveShortcutsForCommand(
+export interface EffectiveBinding {
+  readonly shortcut: KeybindingShortcut;
+  readonly second?: KeybindingShortcut | undefined;
+}
+
+function effectiveBindingsForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,
-): KeybindingShortcut[] {
+): EffectiveBinding[] {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
   const claimedShortcuts = new Set<string>();
-  const effective: KeybindingShortcut[] = [];
+  const effective: EffectiveBinding[] = [];
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
@@ -144,26 +161,37 @@ export function effectiveShortcutsForCommand(
     if (!matchesWhenClause(binding.whenAst, context)) continue;
 
     const shortcut = shortcutForContext(binding, context);
-    const conflictKey = shortcutConflictKey(shortcut, platform);
+    const conflictKey = bindingConflictKey({ shortcut, second: binding.second }, platform);
     if (claimedShortcuts.has(conflictKey)) {
       continue;
     }
 
     claimedShortcuts.add(conflictKey);
     if (binding.command === command) {
-      effective.push(shortcut);
+      effective.push({ shortcut, second: binding.second });
     }
   }
 
   return effective;
 }
 
-function findEffectiveShortcutForCommand(
+/** Single-key shortcuts only; a chord cannot be forwarded as one key. */
+export function effectiveShortcutsForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,
-): KeybindingShortcut | null {
-  return effectiveShortcutsForCommand(keybindings, command, options)[0] ?? null;
+): KeybindingShortcut[] {
+  return effectiveBindingsForCommand(keybindings, command, options).flatMap((binding) =>
+    binding.second ? [] : [binding.shortcut],
+  );
+}
+
+function findEffectiveBindingForCommand(
+  keybindings: ResolvedKeybindingsConfig,
+  command: KeybindingCommand,
+  options?: ShortcutMatchOptions,
+): EffectiveBinding | null {
+  return effectiveBindingsForCommand(keybindings, command, options)[0] ?? null;
 }
 
 function matchesCommandShortcut(
@@ -186,10 +214,24 @@ export function resolveShortcutCommand(
     context.editableFocus = isEditableFocused(event.target ?? document.activeElement);
   }
 
+  const prefix = options?.chordPrefix ?? chordPrefixFor(event);
+
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
+    // The second key of a chord is only a chord; the first key alone is claimed by the tracker.
+    if ((binding.second !== undefined) !== (prefix !== null)) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (prefix !== null) {
+      if (
+        !matchesKeybindingShortcut(prefix, binding.shortcut, platform) ||
+        !binding.second ||
+        !matchesKeybindingShortcut(event, binding.second, platform)
+      ) {
+        continue;
+      }
+      return binding.command;
+    }
     if (!matchesKeybindingShortcut(event, shortcutForContext(binding, context), platform)) continue;
     return binding.command;
   }
@@ -248,6 +290,11 @@ export function formatShortcutLabel(
   return parts.join("+");
 }
 
+export function formatBindingLabel(binding: EffectiveBinding, platform = navigator.platform) {
+  const first = formatShortcutLabel(binding.shortcut, platform);
+  return binding.second ? `${first} ${formatShortcutLabel(binding.second, platform)}` : first;
+}
+
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand | null,
@@ -259,8 +306,8 @@ export function shortcutLabelForCommand(
       ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
       : options;
   const platform = resolvePlatform(resolvedOptions);
-  const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
-  return shortcut ? formatShortcutLabel(shortcut, platform) : null;
+  const binding = findEffectiveBindingForCommand(keybindings, command, resolvedOptions);
+  return binding ? formatBindingLabel(binding, platform) : null;
 }
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
@@ -293,9 +340,9 @@ export function shouldShowThreadJumpHintsForModifiers(
   const platform = resolvePlatform(options);
 
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
-    const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
-    if (!shortcut) continue;
-    if (matchesKeybindingShortcutModifiers(modifiers, shortcut, platform)) {
+    const binding = findEffectiveBindingForCommand(keybindings, command, options);
+    if (!binding || binding.second) continue;
+    if (matchesKeybindingShortcutModifiers(modifiers, binding.shortcut, platform)) {
       return true;
     }
   }

@@ -212,9 +212,10 @@ export function HtmlRenderDocument(props: {
     .filter((binding) => !HTML_RENDER_SHORTCUT_COMMANDS.has(binding.command))
     .map((binding) => resolve(binding.shortcut));
   const shortcutsByKey = new Map<string, HtmlRenderShortcut>();
-  for (const { command, shortcut } of keybindings) {
+  for (const { command, shortcut, second } of keybindings) {
     if (
       HTML_RENDER_SHORTCUT_COMMANDS.has(command) &&
+      !second &&
       (shortcut.metaKey || shortcut.ctrlKey || shortcut.modKey)
     ) {
       shortcutsByKey.set(shortcutConflictKey(shortcut), resolve(shortcut));

@@ -1,5 +1,6 @@
 import type { KeybindingCommand, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
+import { isElectron } from "../env";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -7,6 +8,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { advanceChord } from "./chordTracker";
 
 /** Return `false` to let the next scope handle the event. */
 export type CommandHandler = (event: KeyboardEvent) => boolean | void;
@@ -53,6 +55,22 @@ function readFocusContext(event: KeyboardEvent): Partial<ShortcutMatchContext> {
   };
 }
 
+// Registered ahead of every other keydown listener, so each resolver sees the chord state of the
+// event it is handling.
+function trackChordKeyDown(event: KeyboardEvent): void {
+  // A shortcut recorder must see every key, including a chord's first key.
+  if (event.target instanceof Element && event.target.closest("[data-keybinding-capture]")) return;
+  const swallow = advanceChord(
+    event,
+    appAtomRegistry.get(primaryServerKeybindingsAtom),
+    { ...readFocusContext(event), isWeb: !isElectron, isDesktop: isElectron },
+    navigator.platform,
+  );
+  if (!swallow) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
 function isInsideConfirmation(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[role="alertdialog"]') !== null;
 }
@@ -97,9 +115,13 @@ let keydownInstalled = false;
 function ensureKeydownListener() {
   if (keydownInstalled || typeof window === "undefined") return;
   keydownInstalled = true;
+  window.addEventListener("keydown", trackChordKeyDown, true);
   window.addEventListener("keydown", dispatchCaptureKeyDown, true);
   window.addEventListener("keydown", dispatchKeyDown);
 }
+
+// Installed on import so the chord tracker precedes any listener a component adds later.
+ensureKeydownListener();
 
 function pushScope(list: CommandScope[], scope: CommandScope): () => void {
   ensureKeydownListener();

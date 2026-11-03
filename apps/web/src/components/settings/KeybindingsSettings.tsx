@@ -37,7 +37,7 @@ import {
 
 import { isElectron } from "../../env";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
-import { formatShortcutLabel } from "../../keybindings";
+import { formatBindingLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -61,6 +61,7 @@ import {
   isKnownWhenVariable,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  recordedKeybindingDraft,
   parseWhenExpressionDraft,
   groupKeybindingRows,
   type KeybindingCommandOption,
@@ -755,7 +756,10 @@ function useKeybindingRowEditor({
       layoutCharacter: true,
     });
     if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    setDraft({
+      keyDraft: isRecording ? next : recordedKeybindingDraft(keyDraft, next),
+      isRecording: false,
+    });
   };
 
   return {
@@ -828,7 +832,7 @@ function KeybindingKeyControl({
           ref={pillRef}
           type="button"
           onClick={() => setDraft({ isRecording: true })}
-          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatShortcutLabel(row.binding.shortcut)}`}
+          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatBindingLabel(row.binding)}`}
           className={cn(
             "inline-flex h-8 cursor-pointer items-center rounded-md border border-transparent px-1.5 sm:h-7 outline-none transition-colors hover:border-border/70 hover:bg-accent focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/24",
             pillClassName,
@@ -1085,7 +1089,10 @@ function useNewKeybindingDraft({
       layoutCharacter: true,
     });
     if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    setDraft({
+      keyDraft: isRecording ? next : recordedKeybindingDraft(keyDraft, next),
+      isRecording: false,
+    });
   };
 
   return {

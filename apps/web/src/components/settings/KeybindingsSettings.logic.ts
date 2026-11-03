@@ -8,12 +8,12 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
-  parseKeybindingShortcut,
+  parseKeybindingKey,
   parseKeybindingWhenExpression,
   US_SHIFTED_TO_UNSHIFTED_KEYS,
 } from "@t3tools/shared/keybindings";
 
-import { shortcutConflictKey, shortcutKeyFromEvent } from "../../keybindings";
+import { bindingConflictKey, shortcutKeyFromEvent } from "../../keybindings";
 import { isMacPlatform } from "../../lib/utils";
 import { METRIC_OPTIONS, WINDOW_OPTIONS } from "../usage/usageShortcuts";
 
@@ -88,6 +88,11 @@ export function shortcutToKeybindingInput(shortcut: KeybindingShortcut): string 
   return parts.join("+");
 }
 
+function bindingToKeybindingInput(binding: ResolvedKeybindingRule): string {
+  const first = shortcutToKeybindingInput(binding.shortcut);
+  return binding.second ? `${first} ${shortcutToKeybindingInput(binding.second)}` : first;
+}
+
 export function whenAstToExpression(node: KeybindingWhenNode | undefined): string {
   if (!node) return "";
   switch (node.type) {
@@ -137,12 +142,12 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
     return "Project";
   }
 
-  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingKey = bindingToKeybindingInput(binding);
   const bindingWhen = whenAstToExpression(binding.whenAst);
   const isDefault = DEFAULT_RESOLVED_KEYBINDINGS.some(
     (entry) =>
       entry.command === binding.command &&
-      shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+      bindingToKeybindingInput(entry) === bindingKey &&
       whenAstToExpression(entry.whenAst) === bindingWhen,
   );
 
@@ -152,14 +157,14 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
 function defaultBindingForBinding(
   binding: ResolvedKeybindingRule,
 ): ResolvedKeybindingRule | undefined {
-  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingKey = bindingToKeybindingInput(binding);
   const bindingWhen = whenAstToExpression(binding.whenAst);
 
   return (
     DEFAULT_RESOLVED_KEYBINDINGS.find(
       (entry) =>
         entry.command === binding.command &&
-        shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+        bindingToKeybindingInput(entry) === bindingKey &&
         whenAstToExpression(entry.whenAst) === bindingWhen,
     ) ??
     DEFAULT_RESOLVED_KEYBINDINGS.find(
@@ -178,21 +183,41 @@ function conflictsWithWhen(leftWhen: string, rightWhen: string): boolean {
   return leftWhen.length === 0 || rightWhen.length === 0 || leftWhen === rightWhen;
 }
 
+// A single key that is also a chord's first key is shadowed: the chord claims the key first.
+function bindingsCollide(
+  left: Pick<ResolvedKeybindingRule, "shortcut" | "second">,
+  right: Pick<ResolvedKeybindingRule, "shortcut" | "second">,
+  leftKey: string,
+  platform: string,
+): boolean {
+  if (leftKey === bindingConflictKey(right, platform)) return true;
+  if (left.second && !right.second) {
+    return (
+      bindingConflictKey({ shortcut: left.shortcut }, platform) ===
+      bindingConflictKey(right, platform)
+    );
+  }
+  if (right.second && !left.second) {
+    return bindingConflictKey({ shortcut: right.shortcut }, platform) === leftKey;
+  }
+  return false;
+}
+
 export function keybindingConflictLabels(
   rows: ReadonlyArray<KeybindingRow>,
   input: { readonly rowId: string; readonly key: string; readonly when: string },
   platform = navigator.platform,
 ): ReadonlyArray<string> {
   if (input.key.trim().length === 0) return [];
-  const shortcut = parseKeybindingShortcut(input.key);
-  if (!shortcut) return [];
+  const parsed = parseKeybindingKey(input.key);
+  if (!parsed) return [];
   // Compare resolved chords so mod+k and ctrl+k collide where mod is Ctrl.
-  const conflictKey = shortcutConflictKey(shortcut, platform);
+  const conflictKey = bindingConflictKey(parsed, platform);
   const conflicts: Array<string> = [];
   for (const candidate of rows) {
     if (
       candidate.id !== input.rowId &&
-      shortcutConflictKey(candidate.binding.shortcut, platform) === conflictKey &&
+      bindingsCollide(parsed, candidate.binding, conflictKey, platform) &&
       conflictsWithWhen(candidate.when, input.when)
     ) {
       conflicts.push(commandLabel(candidate.command));
@@ -253,7 +278,7 @@ export function buildKeybindingRows(
   const rowsById = new Map<string, KeybindingRow>();
   for (const binding of keybindings) {
     const defaultBinding = defaultBindingForBinding(binding);
-    const key = shortcutToKeybindingInput(binding.shortcut);
+    const key = bindingToKeybindingInput(binding);
     const when = whenAstToExpression(binding.whenAst);
     const id = keybindingRowId(binding.command, key, when);
     rowsById.set(id, {
@@ -262,7 +287,7 @@ export function buildKeybindingRows(
       key,
       when,
       source: sourceForBinding(binding),
-      defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
+      defaultKey: defaultBinding ? bindingToKeybindingInput(defaultBinding) : null,
       defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
       binding,
       conflicts: [],
@@ -388,7 +413,7 @@ export function collectMyShortcuts(
     { keys: string[]; shortcuts: KeybindingShortcut[] }
   >();
   for (const row of buildKeybindingRows(keybindings)) {
-    if (row.source === "Default") continue;
+    if (row.source === "Default" || row.binding.second) continue;
     const { modKey, ctrlKey, metaKey, shiftKey, altKey } = row.binding.shortcut;
     if (!shiftKey || altKey || (modKey ? 1 : 0) + (ctrlKey ? 1 : 0) + (metaKey ? 1 : 0) !== 1) {
       continue;
@@ -479,6 +504,18 @@ function normalizeShortcutKeyToken(key: string): string | null {
   }
   if (normalized === "pageup" || normalized === "pagedown") return normalized;
   return null;
+}
+
+/**
+ * Recording a chord: a plain key typed after a Ctrl/Alt/Meta shortcut is its second key. Any other
+ * key starts the shortcut over.
+ */
+export function recordedKeybindingDraft(current: string, next: string): string {
+  const hasArmingModifier = (key: string) => /(?:^|\+)(?:mod|ctrl|meta|alt)\+/.test(key);
+  const [first] = current.split(" ");
+  return first !== undefined && hasArmingModifier(first) && !hasArmingModifier(next)
+    ? `${first} ${next}`
+    : next;
 }
 
 export function keybindingFromKeyboardEvent(

@@ -14,6 +14,7 @@ import {
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
+  recordedKeybindingDraft,
   shortcutToKeybindingInput,
   whenAstToExpression,
 } from "./KeybindingsSettings.logic";
@@ -309,6 +310,30 @@ describe("KeybindingsSettings.logic", () => {
     expect(
       keybindingConflictLabels(rows, { rowId: "new", key: "ctrl+k", when: "" }, expected.platform),
     ).toEqual(["Chat: New Local", ...expected.ctrl].toSorted());
+  });
+
+  it("treats a single key as colliding with a chord that starts with it, but not a sibling chord", () => {
+    const rows = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([
+        { command: "chat.new", key: "ctrl+e s" },
+        { command: "chat.newLocal", key: "ctrl+e d" },
+        { command: "terminal.toggle", key: "ctrl+e" },
+      ]),
+      "Linux x86_64",
+    );
+    const conflictsFor = (key: string) => rows.find((row) => row.key === key)?.conflicts;
+
+    expect(conflictsFor("ctrl+e s")).toEqual(["Terminal: Toggle"]);
+    expect(conflictsFor("ctrl+e d")).toEqual(["Terminal: Toggle"]);
+    expect(conflictsFor("ctrl+e")).toEqual(["Chat: New", "Chat: New Local"]);
+  });
+
+  it("records a plain key after a Ctrl/Alt shortcut as the chord's second key", () => {
+    expect(recordedKeybindingDraft("mod+e", "s")).toBe("mod+e s");
+    expect(recordedKeybindingDraft("alt+t c", "d")).toBe("alt+t d");
+    expect(recordedKeybindingDraft("mod+e", "mod+g")).toBe("mod+g");
+    expect(recordedKeybindingDraft("c", "t")).toBe("t");
+    expect(recordedKeybindingDraft("", "s")).toBe("s");
   });
 
   it("keeps mod and ctrl shortcuts apart when their when contexts differ", () => {

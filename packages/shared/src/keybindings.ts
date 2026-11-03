@@ -244,7 +244,7 @@ function normalizeKeyToken(token: string): string {
   return token;
 }
 
-export function parseKeybindingShortcut(value: string): KeybindingShortcut | null {
+function parseSingleKeybindingShortcut(value: string): KeybindingShortcut | null {
   const rawTokens = value
     .toLowerCase()
     .split("+")
@@ -306,6 +306,37 @@ export function parseKeybindingShortcut(value: string): KeybindingShortcut | nul
     altKey,
     modKey,
   };
+}
+
+export interface ParsedKeybindingKey {
+  readonly shortcut: KeybindingShortcut;
+  readonly second?: KeybindingShortcut;
+}
+
+/** A chord's first key arms it, so it must carry Ctrl, Alt, Meta or Mod or it would eat plain typing. */
+function canArmChord(shortcut: KeybindingShortcut): boolean {
+  return shortcut.ctrlKey || shortcut.altKey || shortcut.metaKey || shortcut.modKey;
+}
+
+/** One shortcut (`mod+k`) or a two-key chord separated by a space (`ctrl+e s`). */
+export function parseKeybindingKey(value: string): ParsedKeybindingKey | null {
+  const steps = value
+    .trim()
+    .replace(/\s*\+\s*/g, "+")
+    .split(/\s+/);
+  if (steps.length > 2) return null;
+  const shortcut = parseSingleKeybindingShortcut(steps[0] ?? "");
+  if (!shortcut) return null;
+  if (steps.length === 1) return { shortcut };
+  const second = parseSingleKeybindingShortcut(steps[1] ?? "");
+  if (!second || !canArmChord(shortcut)) return null;
+  return { shortcut, second };
+}
+
+/** The single-key form; a chord is not a shortcut, so it parses to `null`. */
+export function parseKeybindingShortcut(value: string): KeybindingShortcut | null {
+  const parsed = parseKeybindingKey(value);
+  return parsed && !parsed.second ? parsed.shortcut : null;
 }
 
 function tokenizeWhenExpression(expression: string): WhenToken[] | null {
@@ -443,8 +474,9 @@ export function parseKeybindingWhenExpression(expression: string): KeybindingWhe
 }
 
 export function compileResolvedKeybindingRule(rule: KeybindingRule): ResolvedKeybindingRule | null {
-  const shortcut = parseKeybindingShortcut(rule.key);
-  if (!shortcut) return null;
+  const parsed = parseKeybindingKey(rule.key);
+  if (!parsed) return null;
+  const { shortcut, second } = parsed;
 
   if (rule.when !== undefined) {
     const whenAst = parseKeybindingWhenExpression(rule.when);
@@ -452,6 +484,7 @@ export function compileResolvedKeybindingRule(rule: KeybindingRule): ResolvedKey
     return {
       command: rule.command,
       shortcut,
+      ...(second ? { second } : {}),
       whenAst,
     };
   }
@@ -459,6 +492,7 @@ export function compileResolvedKeybindingRule(rule: KeybindingRule): ResolvedKey
   return {
     command: rule.command,
     shortcut,
+    ...(second ? { second } : {}),
   };
 }
 
