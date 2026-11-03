@@ -14,6 +14,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useNowMinute } from "../../hooks/useNowMinute";
+import { parseStockSymbols } from "../../hooks/useStockQuote";
 import { cn } from "~/lib/utils";
 import type {
   HeaderClaudeUsage,
@@ -600,7 +601,7 @@ export function HeaderUsageStatsMenu(props: {
     setSymbolDraft(stockSymbol);
   }
   const commitSymbol = () => {
-    const normalized = symbolDraft.trim().toUpperCase();
+    const normalized = parseStockSymbols(symbolDraft).join(", ");
     if (normalized.length === 0) {
       setSymbolDraft(stockSymbol);
       return;
@@ -659,8 +660,8 @@ export function HeaderUsageStatsMenu(props: {
                   <Input
                     size="compact"
                     value={symbolDraft}
-                    aria-label="Stock ticker symbol"
-                    placeholder="SPY"
+                    aria-label="Stock ticker symbols, comma separated"
+                    placeholder="TSLA, SPCX, SPY"
                     spellCheck={false}
                     autoComplete="off"
                     autoCapitalize="characters"
