@@ -301,6 +301,44 @@ describe("split/new/close terminal shortcuts", () => {
   });
 });
 
+describe("chords", () => {
+  const bindings = compileResolvedKeybindingsConfig([
+    { key: "ctrl+e s", command: "sidebar.toggle", when: "!terminalFocus" },
+    { key: "s", command: "usage.cost" },
+  ]);
+  const ctrlE = event({ key: "e", ctrlKey: true });
+  const options = { platform: "Linux" };
+
+  it("resolves the second key only after its first key armed the chord", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "s" }), bindings, { ...options, chordPrefix: ctrlE }),
+      "sidebar.toggle",
+    );
+    assert.equal(resolveShortcutCommand(event({ key: "s" }), bindings, options), "usage.cost");
+    assert.isNull(resolveShortcutCommand(ctrlE, bindings, options));
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "s" }), bindings, {
+        ...options,
+        chordPrefix: event({ key: "d", ctrlKey: true }),
+      }),
+    );
+  });
+
+  it("applies the when clause to the completing key", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "s" }), bindings, {
+        ...options,
+        chordPrefix: ctrlE,
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+
+  it("labels a chord with both keys", () => {
+    assert.equal(shortcutLabelForCommand(bindings, "sidebar.toggle", "Linux"), "Ctrl+E S");
+  });
+});
+
 describe("shortcutLabelForCommand", () => {
   it("returns null for commands shadowed by a later conflicting shortcut", () => {
     const bindings = compile([

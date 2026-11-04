@@ -39,7 +39,7 @@ import {
   mergeWithDefaultKeybindings,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
-  parseKeybindingShortcut,
+  parseKeybindingKey,
   parseKeybindingWhenExpression,
 } from "@t3tools/shared/keybindings";
 
@@ -60,7 +60,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
         ),
 
       encode: Effect.fn("keybindings.encode")(function* (resolved) {
-        const key = encodeShortcut(resolved.shortcut);
+        const key = encodeKeybindingKey(resolved);
         if (!key) {
           return yield* Effect.fail(
             new SchemaIssue.InvalidValue({
@@ -83,8 +83,8 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
 // Settings sends replace/remove targets in its own normalized spelling, which can differ from a
 // hand-edited file ("cmd+k" vs "meta+k", "a&&b" vs "a && b"), so compare parsed forms.
 function keybindingRuleIdentity(rule: KeybindingRule): string {
-  const shortcut = parseKeybindingShortcut(rule.key);
-  const key = (shortcut && encodeShortcut(shortcut)) ?? rule.key;
+  const parsed = parseKeybindingKey(rule.key);
+  const key = (parsed && encodeKeybindingKey(parsed)) ?? rule.key;
   if (rule.when === undefined) return JSON.stringify([rule.command, key, null]);
   const whenAst = parseKeybindingWhenExpression(rule.when);
   return JSON.stringify([rule.command, key, whenAst ? encodeWhenAst(whenAst) : rule.when]);
@@ -115,9 +115,9 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
 ];
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
-  const parsed = parseKeybindingShortcut(rule.key);
+  const parsed = parseKeybindingKey(rule.key);
   if (!parsed) return null;
-  const encoded = encodeShortcut(parsed);
+  const encoded = encodeKeybindingKey(parsed);
   if (!encoded) return null;
   return `${encoded}\u0000${rule.when ?? ""}`;
 }
@@ -153,6 +153,16 @@ function encodeShortcut(shortcut: KeybindingShortcut): string | null {
   if (shortcut.key !== "+" && shortcut.key.includes("+")) return null;
   const key = shortcut.key === " " ? "space" : shortcut.key;
   return [...modifiers, key].join("+");
+}
+
+function encodeKeybindingKey(key: {
+  readonly shortcut: KeybindingShortcut;
+  readonly second?: KeybindingShortcut | undefined;
+}): string | null {
+  const first = encodeShortcut(key.shortcut);
+  if (!first || !key.second) return first;
+  const second = encodeShortcut(key.second);
+  return second && `${first} ${second}`;
 }
 
 function encodeWhenAst(node: KeybindingWhenNode): string {

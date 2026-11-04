@@ -3,6 +3,19 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
+## Two-key chords
+
+A shortcut can be two keys pressed one after the other, such as `ctrl+e s`: press
+Ctrl+E, let go, then press S. In **Settings → Keybindings**, record the first
+shortcut and then press a plain second key. In `keybindings.json`, separate the two
+keys with a space.
+
+The first key of a chord must include Ctrl, Alt, or Cmd, so a chord never swallows
+ordinary typing. It is held back from the page while the chord waits, and the second key
+must follow within two seconds. Any other key cancels the chord and is swallowed too.
+Chords work in the main app on web and desktop. They are not forwarded into the browser
+preview or HTML render frames.
+
 ## Composer controls
 
 In **Settings → Chat → Send shortcut**, choose whether Enter sends, requires

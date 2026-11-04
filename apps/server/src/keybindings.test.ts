@@ -129,6 +129,57 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
+  it.effect("compiles a chord and rejects ones that would eat plain typing", () =>
+    Effect.sync(() => {
+      const compiled = SharedKeybindings.compileResolvedKeybindingRule({
+        key: "Ctrl+E  S",
+        command: "sidebar.toggle",
+      });
+      assert.deepEqual(compiled?.shortcut, {
+        key: "e",
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+        modKey: false,
+      });
+      assert.equal(compiled?.second?.key, "s");
+      assert.isFalse(compiled?.second?.ctrlKey);
+      for (const key of ["e s", "shift+e s", "ctrl+e s d"]) {
+        assert.isNull(
+          SharedKeybindings.compileResolvedKeybindingRule({ key, command: "sidebar.toggle" }),
+        );
+      }
+    }),
+  );
+
+  it.effect("saves a chord, matches it by its settings spelling, and removes it", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "Ctrl+E  Alt+S", command: "sidebar.toggle" },
+      ]);
+      const keybindings = yield* Keybindings.Keybindings;
+      yield* keybindings.upsertKeybindingRule({
+        key: "alt+e s",
+        command: "sidebar.toggle",
+        replace: { key: "ctrl+e alt+s", command: "sidebar.toggle" },
+      });
+      const saved = yield* keybindings.loadConfigState;
+      const resolved = saved.keybindings.find(
+        (rule) => rule.command === "sidebar.toggle" && rule.second,
+      );
+      assert.equal(resolved?.shortcut.altKey, true);
+      assert.equal(resolved?.second?.key, "s");
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), [
+        { key: "alt+e s", command: "sidebar.toggle" },
+      ]);
+
+      yield* keybindings.removeKeybindingRule({ key: "alt+e s", command: "sidebar.toggle" });
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), []);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("bootstraps default keybindings when config file is missing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

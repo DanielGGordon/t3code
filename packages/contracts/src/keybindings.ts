@@ -212,6 +212,8 @@ export type KeybindingWhenNode =
 export const ResolvedKeybindingRule = Schema.Struct({
   command: KeybindingCommand,
   shortcut: KeybindingShortcut,
+  /** Present on a chord (`ctrl+e s`): `shortcut` arms it, this key completes it. */
+  second: Schema.optional(KeybindingShortcut),
   whenAst: Schema.optional(KeybindingWhenNode),
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
