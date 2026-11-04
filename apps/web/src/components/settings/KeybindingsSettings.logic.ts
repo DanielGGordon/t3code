@@ -422,6 +422,7 @@ export function commandLabel(command: KeybindingCommand): string {
     return `Chat: New Thread in Project Slot ${raw.slice("chat.newInProject.".length)}`;
   }
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
+  if (command === "view.tiles.toggle") return "Toggle Tile Wall";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
