@@ -1,4 +1,8 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  threadRuntimeIsActive,
+  type EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/models";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 
@@ -63,4 +67,39 @@ export function computeTileGrid(
     }
   }
   return best;
+}
+
+export type TileState = "waiting" | "running" | "failed" | "done" | "idle";
+
+/**
+ * What a tile's color says, read from the thread alone: unlike the sidebar's status pill it does
+ * not fade once the thread has been visited, since every tile on the wall is always in view.
+ */
+export function resolveTileState(
+  thread: Pick<
+    EnvironmentThreadShell,
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "pendingSubagentRequest"
+    | "pendingGuestMessageCount"
+    | "hasActionableProposedPlan"
+    | "interactionMode"
+    | "pendingBackgroundTasks"
+    | "latestRun"
+    | "runtime"
+  >,
+): TileState {
+  const active = threadRuntimeIsActive(thread.runtime);
+  if (
+    thread.hasPendingApprovals ||
+    thread.hasPendingUserInput ||
+    thread.pendingSubagentRequest != null ||
+    (thread.pendingGuestMessageCount ?? 0) > 0 ||
+    (!active && thread.interactionMode === "plan" && thread.hasActionableProposedPlan)
+  ) {
+    return "waiting";
+  }
+  if (active || backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks)) return "running";
+  if (thread.latestRun?.status === "failed") return "failed";
+  return thread.latestRun === null ? "idle" : "done";
 }

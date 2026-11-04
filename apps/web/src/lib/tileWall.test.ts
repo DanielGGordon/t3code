@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
-import { computeTileGrid, selectTileWallThreads } from "./tileWall";
+import { computeTileGrid, resolveTileState, selectTileWallThreads } from "./tileWall";
 
 const NOW = "2026-11-04T12:00:00.000Z";
 
@@ -65,5 +65,38 @@ describe("computeTileGrid", () => {
       const { columns, rows } = computeTileGrid(count, 3440, 1440);
       expect(columns * rows).toBeGreaterThanOrEqual(count);
     }
+  });
+});
+
+describe("resolveTileState", () => {
+  const base = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    pendingSubagentRequest: null,
+    pendingGuestMessageCount: 0,
+    hasActionableProposedPlan: false,
+    interactionMode: "default",
+    pendingBackgroundTasks: [],
+    latestRun: { status: "completed" },
+    runtime: { status: "idle" },
+  };
+  it.each([
+    { name: "a finished run", overrides: {}, expected: "done" },
+    { name: "no run yet", overrides: { latestRun: null }, expected: "idle" },
+    { name: "an active run", overrides: { runtime: { status: "running" } }, expected: "running" },
+    { name: "a failed run", overrides: { latestRun: { status: "failed" } }, expected: "failed" },
+    {
+      name: "an approval on a running thread",
+      overrides: { runtime: { status: "running" }, hasPendingApprovals: true },
+      expected: "waiting",
+    },
+    { name: "a question", overrides: { hasPendingUserInput: true }, expected: "waiting" },
+    {
+      name: "a plan ready for review",
+      overrides: { interactionMode: "plan", hasActionableProposedPlan: true },
+      expected: "waiting",
+    },
+  ])("reads $name as $expected", ({ overrides, expected }) => {
+    expect(resolveTileState({ ...base, ...overrides } as never)).toBe(expected);
   });
 });

@@ -3,8 +3,15 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { cn } from "../lib/utils";
 import { observeResize } from "../lib/observeResize";
-import { MIN_TILE_HEIGHT_PX, computeTileGrid, selectTileWallThreads } from "../lib/tileWall";
+import {
+  MIN_TILE_HEIGHT_PX,
+  computeTileGrid,
+  resolveTileState,
+  selectTileWallThreads,
+  type TileState,
+} from "../lib/tileWall";
 import { useDelegatedUnderParent, useProject, useThreadShells } from "../state/entities";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { closeTileWall } from "../tileWallStore";
@@ -12,13 +19,33 @@ import { toastManager } from "./ui/toast";
 import ChatView from "./ChatView";
 import { ComposerHandleContext } from "../composerHandleContext";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
-import { resolveThreadStatusPill } from "./Sidebar.logic";
+
+// Theme tokens, not palette colors, so Solarized and every custom theme supply their own hues.
+const TILE_STATE_STYLES: Record<
+  TileState,
+  { readonly label: string; readonly frame: string; readonly header: string }
+> = {
+  waiting: {
+    label: "Waiting on you",
+    frame: "border-tile-waiting",
+    header: "bg-tile-waiting text-background",
+  },
+  running: { label: "Running", frame: "border-info", header: "bg-info text-background" },
+  done: { label: "Done", frame: "border-success", header: "bg-success text-background" },
+  failed: {
+    label: "Failed",
+    frame: "border-destructive",
+    header: "bg-destructive text-background",
+  },
+  idle: { label: "New", frame: "border-border", header: "bg-muted text-foreground" },
+};
 
 function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
   const navigate = useNavigate();
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const project = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
-  const status = resolveThreadStatusPill({ thread });
+  const stateKey = resolveTileState(thread);
+  const state = TILE_STATE_STYLES[stateKey];
 
   const openThread = () => {
     closeTileWall();
@@ -39,28 +66,26 @@ function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
     <section
       data-side-chat-pane
       data-tile-wall-tile
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background focus-within:border-ring"
+      data-tile-state={stateKey}
+      className={cn(
+        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border-2 bg-background focus-within:ring-2 focus-within:ring-inset focus-within:ring-foreground/30",
+        state.frame,
+      )}
     >
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        {status ? (
-          <span
-            role="img"
-            aria-label={status.label}
-            className={`size-2 shrink-0 rounded-full ${status.dotClass}`}
-          />
-        ) : null}
+      <header className={cn("flex h-9 shrink-0 items-center gap-2 px-3", state.header)}>
         <button
           type="button"
-          className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline"
+          className="min-w-0 flex-1 truncate text-left text-sm font-semibold hover:underline"
           onClick={openThread}
         >
           {thread.title}
         </button>
         {project ? (
-          <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
-            {project.title}
-          </span>
+          <span className="max-w-[30%] shrink-0 truncate text-xs opacity-75">{project.title}</span>
         ) : null}
+        <span className="shrink-0 rounded-sm bg-background/25 px-1.5 py-0.5 text-2xs font-bold tracking-wide uppercase">
+          {state.label}
+        </span>
       </header>
       <BackgroundThreadContext value>
         <ComposerHandleContext value={null}>
