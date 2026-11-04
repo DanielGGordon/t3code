@@ -3,8 +3,10 @@ import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-r
 import { useState } from "react";
 
 import { ThreadRouteView } from "../components/ThreadRouteView";
+import { TileWall } from "../components/TileWall";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { SidebarInset } from "../components/ui/sidebar";
+import { useTileWallStore } from "../tileWallStore";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { retainThreadFindForRoute } from "../components/chat/threadFindStore";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
@@ -53,6 +55,7 @@ function ChatRouteLayout() {
     setBackgroundTarget(threadTarget);
   }
   const shownTarget = modalOpen ? backgroundTarget : threadTarget;
+  const tileWallOpen = useTileWallStore((state) => state.open);
   return (
     <>
       <ChatRouteTouchGestures />
@@ -68,6 +71,7 @@ function ChatRouteLayout() {
       ) : (
         <Outlet />
       )}
+      {tileWallOpen && !modalOpen ? <TileWall /> : null}
       {modalOpen ? <Outlet /> : null}
     </>
   );

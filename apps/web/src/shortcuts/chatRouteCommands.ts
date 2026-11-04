@@ -31,6 +31,7 @@ import { readEnvironmentScope } from "../state/session";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
+import { toggleTileWall } from "../tileWallStore";
 import { useUiStateStore } from "../uiStateStore";
 import { type CommandHandler, registerCommands } from "./dispatcher";
 
@@ -166,6 +167,10 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
   return registerCommands(
     {
       ...projectSlotCommands,
+      "view.tiles.toggle": (event) => {
+        claim(event);
+        if (!event.repeat) toggleTileWall();
+      },
       "shortcuts.showMine": (event) => {
         claim(event);
         if (!event.repeat) toggleMyShortcuts();
