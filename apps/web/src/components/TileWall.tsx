@@ -1,21 +1,61 @@
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
+import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
+import { CheckIcon, LayoutGridIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useClientSettings } from "../hooks/useSettings";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { cn } from "../lib/utils";
 import { observeResize } from "../lib/observeResize";
 import {
-  MIN_TILE_HEIGHT_PX,
+  MAX_TILE_COLUMNS,
+  MAX_TILE_ROWS,
+  TILE_GAP_PX,
   computeTileGrid,
+  orderTileWallThreads,
   resolveTileState,
   selectTileWallThreads,
+  tileWallKey,
   type TileState,
 } from "../lib/tileWall";
-import { useDelegatedUnderParent, useProject, useThreadShells } from "../state/entities";
+import {
+  useDelegatedUnderParent,
+  useProject,
+  useServerConfigs,
+  useThreadShells,
+} from "../state/entities";
+import { useEnvironmentScope } from "../state/session";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { closeTileWall } from "../tileWallStore";
-import { toastManager } from "./ui/toast";
+import {
+  closeTileWall,
+  setTileWallLayout,
+  setTileWallOrder,
+  useTileWallStore,
+} from "../tileWallStore";
+import { SnoozeMenuButton } from "./sidebar/SidebarThreadRow";
+import { Button } from "./ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
+import { stackedThreadToast, toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import ChatView from "./ChatView";
 import { ComposerHandleContext } from "../composerHandleContext";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
@@ -40,12 +80,59 @@ const TILE_STATE_STYLES: Record<
   idle: { label: "New", frame: "border-border", header: "bg-muted text-foreground" },
 };
 
-function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
+const TILE_HEADER_BUTTON_CLASS =
+  "inline-flex cursor-pointer items-center gap-1 rounded-sm bg-background/25 px-1.5 py-0.5 text-2xs font-bold tracking-wide uppercase hover:bg-background/40";
+
+function reportTileActionFailure(title: string, result: AtomCommandResult<unknown, unknown>) {
+  if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+  const error = squashAtomCommandFailure(result);
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title,
+      description: error instanceof Error ? error.message : "An error occurred.",
+    }),
+  );
+}
+
+function TileWallTile({
+  thread,
+  position,
+}: {
+  readonly thread: EnvironmentThreadShell;
+  /** Where the tile sits on the wall; the DOM keeps creation order so a move never remounts it. */
+  readonly position: number;
+}) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tileWallKey(thread),
+  });
   const navigate = useNavigate();
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const project = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
   const stateKey = resolveTileState(thread);
   const state = TILE_STATE_STYLES[stateKey];
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
+  const { settleThread, snoozeThread } = useThreadActions();
+  const environmentKnown = useServerConfigs().has(thread.environmentId);
+  const canOperate = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
+  // Read when the thread changes, not per render, so the snooze gate follows the thread's state.
+  const [snoozeClock, setSnoozeClock] = useState(() => ({
+    thread,
+    now: new Date().toISOString(),
+  }));
+  if (snoozeClock.thread !== thread) {
+    // oxlint-disable-next-line react/purity -- Reseeds the clock only in the render-phase adjustment that runs when the thread changes.
+    setSnoozeClock({ thread, now: new Date().toISOString() });
+  }
+  const showSnooze = canOperate && environmentKnown && canSnooze(thread, { now: snoozeClock.now });
+  const settleTile = async () =>
+    reportTileActionFailure("Failed to settle thread", await settleThread(threadRef));
+  const snoozeTile = async (preset: { readonly snoozedUntil: string }) =>
+    reportTileActionFailure(
+      "Failed to snooze thread",
+      await snoozeThread(threadRef, preset.snoozedUntil),
+    );
 
   const openThread = () => {
     closeTileWall();
@@ -64,15 +151,30 @@ function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
 
   return (
     <section
+      ref={setNodeRef}
+      style={{
+        order: position,
+        transform: CSS.Translate.toString(transform),
+        transition,
+        zIndex: isDragging ? 10 : undefined,
+      }}
       data-side-chat-pane
       data-tile-wall-tile
       data-tile-state={stateKey}
       className={cn(
         "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border-2 bg-background focus-within:ring-2 focus-within:ring-inset focus-within:ring-foreground/30",
+        isDragging && "opacity-90 shadow-2xl",
         state.frame,
       )}
     >
-      <header className={cn("flex h-9 shrink-0 items-center gap-2 px-3", state.header)}>
+      <header
+        {...listeners}
+        className={cn(
+          "flex h-9 shrink-0 cursor-grab touch-none items-center gap-2 px-3 select-none",
+          isDragging && "cursor-grabbing",
+          state.header,
+        )}
+      >
         <button
           type="button"
           className="min-w-0 flex-1 truncate text-left text-sm font-semibold hover:underline"
@@ -86,6 +188,34 @@ function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
         <span className="shrink-0 rounded-sm bg-background/25 px-1.5 py-0.5 text-2xs font-bold tracking-wide uppercase">
           {state.label}
         </span>
+        {showSnooze ? (
+          <SnoozeMenuButton
+            open={snoozeMenuOpen}
+            onOpenChange={setSnoozeMenuOpen}
+            onSnooze={(preset) => void snoozeTile(preset)}
+            timestampFormat={timestampFormat}
+            environmentId={thread.environmentId}
+            triggerClassName={cn(TILE_HEADER_BUTTON_CLASS, "py-1")}
+          />
+        ) : null}
+        {canOperate && environmentKnown ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Settle thread"
+                  className={TILE_HEADER_BUTTON_CLASS}
+                  onClick={() => void settleTile()}
+                />
+              }
+            >
+              <CheckIcon className="size-3" />
+              Settle
+            </TooltipTrigger>
+            <TooltipPopup>Settle thread</TooltipPopup>
+          </Tooltip>
+        ) : null}
       </header>
       <BackgroundThreadContext value>
         <ComposerHandleContext value={null}>
@@ -101,6 +231,34 @@ function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
   );
 }
 
+function TileCountPicker(props: {
+  readonly label: string;
+  readonly max: number;
+  readonly value: number | null;
+  readonly onChange: (value: number | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-14 shrink-0 text-xs text-muted-foreground">{props.label}</span>
+      <ToggleGroup
+        aria-label={props.label}
+        value={[props.value === null ? "auto" : String(props.value)]}
+        onValueChange={(next) => {
+          const value = next[0];
+          if (value) props.onChange(value === "auto" ? null : Number(value));
+        }}
+      >
+        <Toggle value="auto">Auto</Toggle>
+        {Array.from({ length: props.max }, (_, index) => (
+          <Toggle key={index} value={String(index + 1)}>
+            {index + 1}
+          </Toggle>
+        ))}
+      </ToggleGroup>
+    </div>
+  );
+}
+
 /**
  * Every unsettled thread as a live chat tile filling the window; toggled by `view.tiles.toggle`.
  * Tiles stay mounted, so a half-typed message waits in its composer while you work in another.
@@ -109,6 +267,18 @@ export function TileWall() {
   const threads = useThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
   const tiles = selectTileWallThreads({ threads, delegatedUnderParent });
+  const savedOrder = useTileWallStore((state) => state.order);
+  const orderedKeys = orderTileWallThreads(tiles, savedOrder).map(tileWallKey);
+  // A small drag distance keeps a plain click on the title opening the thread.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = orderedKeys.indexOf(String(active.id));
+    const to = orderedKeys.indexOf(String(over.id));
+    if (from >= 0 && to >= 0) setTileWallOrder(arrayMove(orderedKeys, from, to));
+  };
+  const columnsPreference = useTileWallStore((state) => state.columns);
+  const rowsPreference = useTileWallStore((state) => state.rows);
   const [gridElement, setGridElement] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mirrors the wall's measured size into state so the grid shape follows the window
@@ -120,20 +290,75 @@ export function TileWall() {
     return observeResize(gridElement, read);
   }, [gridElement]);
 
-  const { columns, rows } = computeTileGrid(tiles.length, size.width, size.height);
+  const { columns, visibleRows, minTileHeightPx } = computeTileGrid(
+    tiles.length,
+    size.width,
+    size.height,
+    { columns: columnsPreference, rows: rowsPreference },
+  );
   return (
     <div
       data-tile-wall
-      className="fixed inset-0 z-50 flex bg-background p-1.5"
+      className="fixed inset-0 z-50 flex flex-col gap-1 bg-background p-1.5"
       role="region"
       aria-label="Thread tile wall"
     >
+      <div className="flex h-7 shrink-0 items-center gap-2 px-1 text-xs text-muted-foreground">
+        <span>{tiles.length === 1 ? "1 thread" : `${tiles.length} threads`}</span>
+        <div className="ms-auto flex items-center gap-1">
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost-muted"
+                  size="xs"
+                  aria-label="Tile layout"
+                  title="Tile layout"
+                />
+              }
+            >
+              <LayoutGridIcon />
+              {columns} × {visibleRows}
+            </PopoverTrigger>
+            <PopoverPopup align="end" padding="compact">
+              <div className="flex flex-col gap-2">
+                <TileCountPicker
+                  label="Columns"
+                  max={MAX_TILE_COLUMNS}
+                  value={columnsPreference}
+                  onChange={(value) => setTileWallLayout({ columns: value })}
+                />
+                <TileCountPicker
+                  label="Rows"
+                  max={MAX_TILE_ROWS}
+                  value={rowsPreference}
+                  onChange={(value) => setTileWallLayout({ rows: value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The most tiles shown at once. The rest scroll. Auto fits the window.
+                </p>
+              </div>
+            </PopoverPopup>
+          </Popover>
+          <Button
+            variant="ghost-muted"
+            size="icon-xs"
+            aria-label="Close tile wall"
+            title="Close tile wall"
+            onClick={closeTileWall}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      </div>
       <div
         ref={setGridElement}
-        className="grid min-h-0 min-w-0 flex-1 gap-1.5 overflow-y-auto"
+        className="grid min-h-0 min-w-0 flex-1 overflow-y-auto"
         style={{
+          gap: TILE_GAP_PX,
           gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          gridAutoRows: `minmax(${MIN_TILE_HEIGHT_PX}px, calc((100% - ${(rows - 1) * 6}px) / ${rows}))`,
+          // max(), not minmax(): a minmax track shrinks to fit every row on screen instead of scrolling.
+          gridAutoRows: `max(${minTileHeightPx}px, calc((100% - ${(visibleRows - 1) * TILE_GAP_PX}px) / ${visibleRows}))`,
         }}
       >
         {tiles.length === 0 ? (
@@ -141,9 +366,21 @@ export function TileWall() {
             No active threads. Press the shortcut again to leave the tile wall.
           </p>
         ) : (
-          tiles.map((thread) => (
-            <TileWallTile key={`${thread.environmentId}:${thread.id}`} thread={thread} />
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={orderedKeys} strategy={rectSortingStrategy}>
+              {tiles.map((thread) => (
+                <TileWallTile
+                  key={tileWallKey(thread)}
+                  thread={thread}
+                  position={orderedKeys.indexOf(tileWallKey(thread))}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
     </div>

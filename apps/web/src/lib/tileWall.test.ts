@@ -2,7 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
-import { computeTileGrid, resolveTileState, selectTileWallThreads } from "./tileWall";
+import {
+  computeTileGrid,
+  orderTileWallThreads,
+  resolveTileState,
+  selectTileWallThreads,
+  tileWallKey,
+} from "./tileWall";
 
 const NOW = "2026-11-04T12:00:00.000Z";
 
@@ -47,6 +53,19 @@ describe("selectTileWallThreads", () => {
   });
 });
 
+describe("orderTileWallThreads", () => {
+  it("puts dragged tiles first in their saved order and leaves new threads after them", () => {
+    const threads = [shell("1"), shell("2"), shell("3"), shell("4")];
+    const saved = [tileWallKey(threads[2]!), tileWallKey(threads[0]!), "env:gone"];
+    expect(orderTileWallThreads(threads, saved).map((thread) => thread.id)).toEqual([
+      "3",
+      "1",
+      "2",
+      "4",
+    ]);
+  });
+});
+
 describe("computeTileGrid", () => {
   it.each([
     { count: 1, columns: 1, rows: 1 },
@@ -54,17 +73,37 @@ describe("computeTileGrid", () => {
     { count: 8, columns: 4, rows: 2 },
     { count: 12, columns: 6, rows: 2 },
   ])("lays $count tiles out in $columns x $rows on a 3440x1440 screen", (expected) => {
-    expect(computeTileGrid(expected.count, 3440, 1440)).toEqual({
+    expect(computeTileGrid(expected.count, 3440, 1440)).toMatchObject({
       columns: expected.columns,
-      rows: expected.rows,
+      visibleRows: expected.rows,
     });
   });
 
-  it("never drops a tile", () => {
-    for (let count = 1; count <= 30; count += 1) {
-      const { columns, rows } = computeTileGrid(count, 3440, 1440);
-      expect(columns * rows).toBeGreaterThanOrEqual(count);
-    }
+  it("keeps tiles wide enough on a 2560x1440 screen and scrolls past that", () => {
+    expect(computeTileGrid(12, 2560, 1400)).toMatchObject({ columns: 4, visibleRows: 3 });
+    // 5 columns of 512px is the most that fits, and 3 rows the most that stay 420px tall.
+    expect(computeTileGrid(40, 2560, 1400)).toMatchObject({ columns: 5, visibleRows: 3 });
+  });
+
+  it("treats a chosen count as a cap that never leaves empty columns", () => {
+    expect(computeTileGrid(8, 3440, 1440, { columns: 3, rows: null })).toMatchObject({
+      columns: 3,
+      visibleRows: 3,
+    });
+    expect(computeTileGrid(2, 3440, 1440, { columns: 6, rows: 2 })).toMatchObject({
+      columns: 2,
+      visibleRows: 1,
+    });
+    expect(computeTileGrid(9, 3440, 1440, { columns: null, rows: 2 })).toMatchObject({
+      columns: 5,
+      visibleRows: 2,
+      minTileHeightPx: 0,
+    });
+    // More tiles than the chosen grid shows: the rest scroll.
+    expect(computeTileGrid(20, 3440, 1440, { columns: 4, rows: 2 })).toMatchObject({
+      columns: 4,
+      visibleRows: 2,
+    });
   });
 });
 
