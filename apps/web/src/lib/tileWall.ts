@@ -12,6 +12,25 @@ import { filterSidebarV2VisibleThreads } from "../components/Sidebar.logic";
 const TARGET_TILE_ASPECT = 0.9;
 /** The wall scrolls rather than let a tile get shorter than this. */
 export const MIN_TILE_HEIGHT_PX = 420;
+/** ...or narrower than this, where the composer toolbar stops fitting. */
+export const MIN_TILE_WIDTH_PX = 440;
+export const TILE_GAP_PX = 6;
+export const MAX_TILE_COLUMNS = 8;
+export const MAX_TILE_ROWS = 4;
+
+/** `null` lets the wall's size decide; a number is the most that many the wall shows at once. */
+export interface TileLayoutPreference {
+  readonly columns: number | null;
+  readonly rows: number | null;
+}
+
+export interface TileGrid {
+  readonly columns: number;
+  /** Rows on screen at once; tiles past them scroll. */
+  readonly visibleRows: number;
+  /** A chosen row count sizes tiles exactly, so only an automatic one keeps a floor. */
+  readonly minTileHeightPx: number;
+}
 
 /**
  * Every thread the sidebar would not tuck away: not archived, settled, snoozed or shown under a
@@ -40,33 +59,57 @@ export function selectTileWallThreads(input: {
 }
 
 /**
- * Columns and rows for `count` tiles in a `width` x `height` box: the fewest empty cells first,
- * then the tile shape closest to `TARGET_TILE_ASPECT`. Rows past what fits at the minimum tile
- * height are fine; the wall scrolls.
+ * The grid for `count` tiles in a `width` x `height` box. Automatic picks the fewest empty cells,
+ * then the tile shape closest to `TARGET_TILE_ASPECT`, without going under the minimum tile size
+ * (past that the wall scrolls). A chosen count caps that axis and never leaves empty columns.
  */
 export function computeTileGrid(
   count: number,
   width: number,
   height: number,
-): { readonly columns: number; readonly rows: number } {
-  if (count <= 1 || width <= 0 || height <= 0) return { columns: 1, rows: 1 };
-  let best = { columns: count, rows: 1 };
+  preference: TileLayoutPreference = { columns: null, rows: null },
+): TileGrid {
+  const minTileHeightPx = preference.rows === null ? MIN_TILE_HEIGHT_PX : 0;
+  if (count <= 1 || width <= 0 || height <= 0)
+    return { columns: 1, visibleRows: 1, minTileHeightPx };
+  const fitsColumns = Math.max(1, Math.floor(width / MIN_TILE_WIDTH_PX));
+  const fitsRows = Math.max(1, Math.floor(height / MIN_TILE_HEIGHT_PX));
+
+  if (preference.columns !== null) {
+    const columns = Math.min(preference.columns, count);
+    const neededRows = Math.ceil(count / columns);
+    return {
+      columns,
+      visibleRows: Math.min(preference.rows ?? fitsRows, neededRows),
+      minTileHeightPx,
+    };
+  }
+  if (preference.rows !== null) {
+    const rows = Math.min(preference.rows, count);
+    const columns = Math.min(Math.ceil(count / rows), fitsColumns);
+    return { columns, visibleRows: Math.min(rows, Math.ceil(count / columns)), minTileHeightPx };
+  }
+
+  let best: TileGrid | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (let rows = 1; rows <= count; rows += 1) {
+  for (let rows = 1; rows <= Math.min(count, fitsRows); rows += 1) {
     const columns = Math.ceil(count / rows);
     // A trailing row that holds a single tile wastes more than rebalancing would.
-    if (rows > 1 && (rows - 1) * columns >= count) continue;
-    const tileHeight = height / rows;
-    if (tileHeight < MIN_TILE_HEIGHT_PX && rows > 1) continue;
-    const aspect = width / columns / tileHeight;
-    const emptyCells = columns * rows - count;
-    const score = Math.abs(Math.log(aspect / TARGET_TILE_ASPECT)) + emptyCells * 0.35;
+    if (columns > fitsColumns || (rows > 1 && (rows - 1) * columns >= count)) continue;
+    const aspect = width / columns / (height / rows);
+    const score = Math.abs(Math.log(aspect / TARGET_TILE_ASPECT)) + (columns * rows - count) * 0.35;
     if (score < bestScore) {
       bestScore = score;
-      best = { columns, rows };
+      best = { columns, visibleRows: rows, minTileHeightPx };
     }
   }
-  return best;
+  return (
+    best ?? {
+      columns: fitsColumns,
+      visibleRows: Math.min(fitsRows, Math.ceil(count / fitsColumns)),
+      minTileHeightPx,
+    }
+  );
 }
 
 export type TileState = "waiting" | "running" | "failed" | "done" | "idle";

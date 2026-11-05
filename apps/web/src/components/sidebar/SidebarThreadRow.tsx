@@ -371,14 +371,16 @@ function SidebarThreadTooltip({
   );
 }
 
-function SnoozeMenuButton(props: {
+export function SnoozeMenuButton(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
   environmentId: EnvironmentId;
+  /** For surfaces where the muted sidebar-row look would not read. */
+  triggerClassName?: string;
 }) {
-  const { open, onOpenChange, onSnooze, timestampFormat, environmentId } = props;
+  const { open, onOpenChange, onSnooze, timestampFormat, environmentId, triggerClassName } = props;
   const presets = open
     ? // oxlint-disable-next-line react/purity -- Presets are resolved only while the menu is open, so each opening reads a fresh time.
       resolveSnoozePresets(new Date(), timestampFormat, environmentId)
@@ -395,7 +397,10 @@ function SnoozeMenuButton(props: {
                   aria-label="Snooze thread"
                   onClick={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => event.stopPropagation()}
-                  className="inline-flex h-full cursor-pointer items-center gap-0.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  className={
+                    triggerClassName ??
+                    "inline-flex h-full cursor-pointer items-center gap-0.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  }
                 />
               }
             />
