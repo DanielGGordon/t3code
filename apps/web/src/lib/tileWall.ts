@@ -11,9 +11,9 @@ import { filterSidebarV2VisibleThreads } from "../components/Sidebar.logic";
 /** Chat tiles read best a little taller than wide; the grid is chosen to land near this. */
 const TARGET_TILE_ASPECT = 0.9;
 /** The wall scrolls rather than let a tile get shorter than this. */
-export const MIN_TILE_HEIGHT_PX = 420;
+const MIN_TILE_HEIGHT_PX = 420;
 /** ...or narrower than this, where the composer toolbar stops fitting. */
-export const MIN_TILE_WIDTH_PX = 440;
+const MIN_TILE_WIDTH_PX = 440;
 export const TILE_GAP_PX = 6;
 export const MAX_TILE_COLUMNS = 8;
 export const MAX_TILE_ROWS = 4;
