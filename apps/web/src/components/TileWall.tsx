@@ -1,3 +1,13 @@
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
@@ -20,8 +30,10 @@ import {
   MAX_TILE_ROWS,
   TILE_GAP_PX,
   computeTileGrid,
+  orderTileWallThreads,
   resolveTileState,
   selectTileWallThreads,
+  tileWallKey,
   type TileState,
 } from "../lib/tileWall";
 import {
@@ -32,7 +44,12 @@ import {
 } from "../state/entities";
 import { useEnvironmentScope } from "../state/session";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { closeTileWall, setTileWallLayout, useTileWallStore } from "../tileWallStore";
+import {
+  closeTileWall,
+  setTileWallLayout,
+  setTileWallOrder,
+  useTileWallStore,
+} from "../tileWallStore";
 import { SnoozeMenuButton } from "./sidebar/SidebarThreadRow";
 import { Button } from "./ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -78,7 +95,17 @@ function reportTileActionFailure(title: string, result: AtomCommandResult<unknow
   );
 }
 
-function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
+function TileWallTile({
+  thread,
+  position,
+}: {
+  readonly thread: EnvironmentThreadShell;
+  /** Where the tile sits on the wall; the DOM keeps creation order so a move never remounts it. */
+  readonly position: number;
+}) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tileWallKey(thread),
+  });
   const navigate = useNavigate();
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const project = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
@@ -124,15 +151,30 @@ function TileWallTile({ thread }: { readonly thread: EnvironmentThreadShell }) {
 
   return (
     <section
+      ref={setNodeRef}
+      style={{
+        order: position,
+        transform: CSS.Translate.toString(transform),
+        transition,
+        zIndex: isDragging ? 10 : undefined,
+      }}
       data-side-chat-pane
       data-tile-wall-tile
       data-tile-state={stateKey}
       className={cn(
         "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border-2 bg-background focus-within:ring-2 focus-within:ring-inset focus-within:ring-foreground/30",
+        isDragging && "opacity-90 shadow-2xl",
         state.frame,
       )}
     >
-      <header className={cn("flex h-9 shrink-0 items-center gap-2 px-3", state.header)}>
+      <header
+        {...listeners}
+        className={cn(
+          "flex h-9 shrink-0 cursor-grab touch-none items-center gap-2 px-3 select-none",
+          isDragging && "cursor-grabbing",
+          state.header,
+        )}
+      >
         <button
           type="button"
           className="min-w-0 flex-1 truncate text-left text-sm font-semibold hover:underline"
@@ -225,6 +267,16 @@ export function TileWall() {
   const threads = useThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
   const tiles = selectTileWallThreads({ threads, delegatedUnderParent });
+  const savedOrder = useTileWallStore((state) => state.order);
+  const orderedKeys = orderTileWallThreads(tiles, savedOrder).map(tileWallKey);
+  // A small drag distance keeps a plain click on the title opening the thread.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = orderedKeys.indexOf(String(active.id));
+    const to = orderedKeys.indexOf(String(over.id));
+    if (from >= 0 && to >= 0) setTileWallOrder(arrayMove(orderedKeys, from, to));
+  };
   const columnsPreference = useTileWallStore((state) => state.columns);
   const rowsPreference = useTileWallStore((state) => state.rows);
   const [gridElement, setGridElement] = useState<HTMLDivElement | null>(null);
@@ -314,9 +366,21 @@ export function TileWall() {
             No active threads. Press the shortcut again to leave the tile wall.
           </p>
         ) : (
-          tiles.map((thread) => (
-            <TileWallTile key={`${thread.environmentId}:${thread.id}`} thread={thread} />
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={orderedKeys} strategy={rectSortingStrategy}>
+              {tiles.map((thread) => (
+                <TileWallTile
+                  key={tileWallKey(thread)}
+                  thread={thread}
+                  position={orderedKeys.indexOf(tileWallKey(thread))}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
     </div>

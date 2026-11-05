@@ -58,6 +58,26 @@ export function selectTileWallThreads(input: {
     );
 }
 
+export function tileWallKey(thread: Pick<EnvironmentThreadShell, "environmentId" | "id">): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+/**
+ * Tiles the user has dragged keep their saved order; any thread not in it yet (new, or woken)
+ * follows, in the creation order `selectTileWallThreads` already gave.
+ */
+export function orderTileWallThreads(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  savedOrder: ReadonlyArray<string>,
+): ReadonlyArray<EnvironmentThreadShell> {
+  const rank = new Map(savedOrder.map((key, index) => [key, index]));
+  return threads.toSorted(
+    (a, b) =>
+      (rank.get(tileWallKey(a)) ?? Number.POSITIVE_INFINITY) -
+        (rank.get(tileWallKey(b)) ?? Number.POSITIVE_INFINITY) || 0,
+  );
+}
+
 /**
  * The grid for `count` tiles in a `width` x `height` box. Automatic picks the fewest empty cells,
  * then the tile shape closest to `TARGET_TILE_ASPECT`, without going under the minimum tile size

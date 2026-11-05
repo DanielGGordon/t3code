@@ -2,7 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
-import { computeTileGrid, resolveTileState, selectTileWallThreads } from "./tileWall";
+import {
+  computeTileGrid,
+  orderTileWallThreads,
+  resolveTileState,
+  selectTileWallThreads,
+  tileWallKey,
+} from "./tileWall";
 
 const NOW = "2026-11-04T12:00:00.000Z";
 
@@ -44,6 +50,19 @@ describe("selectTileWallThreads", () => {
     ];
     const selected = selectTileWallThreads({ threads, delegatedUnderParent: new Set(), now: NOW });
     expect(selected.map((thread) => thread.id)).toEqual(["5", "6", "7"]);
+  });
+});
+
+describe("orderTileWallThreads", () => {
+  it("puts dragged tiles first in their saved order and leaves new threads after them", () => {
+    const threads = [shell("1"), shell("2"), shell("3"), shell("4")];
+    const saved = [tileWallKey(threads[2]!), tileWallKey(threads[0]!), "env:gone"];
+    expect(orderTileWallThreads(threads, saved).map((thread) => thread.id)).toEqual([
+      "3",
+      "1",
+      "2",
+      "4",
+    ]);
   });
 });
 

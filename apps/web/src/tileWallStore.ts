@@ -6,6 +6,8 @@ import { resolveStorage } from "./lib/storage";
 
 interface TileWallState extends TileLayoutPreference {
   readonly open: boolean;
+  /** Tile keys in the order the user dragged them into; threads missing from it follow. */
+  readonly order: ReadonlyArray<string>;
 }
 
 function boundedOrNull(value: unknown, max: number): number | null {
@@ -16,20 +18,23 @@ function boundedOrNull(value: unknown, max: number): number | null {
 
 // Per device: the same wall wants different counts on an ultrawide and a laptop.
 export const useTileWallStore = create<TileWallState>()(
-  persist<TileWallState, [], [], TileLayoutPreference>(
-    () => ({ open: false, columns: null, rows: null }),
+  persist<TileWallState, [], [], Omit<TileWallState, "open">>(
+    () => ({ open: false, columns: null, rows: null, order: [] }),
     {
       name: "t3code:tile-wall:v1",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
-      partialize: ({ columns, rows }) => ({ columns, rows }),
+      partialize: ({ columns, rows, order }) => ({ columns, rows, order }),
       merge: (persisted, current) => {
-        const layout = (persisted ?? {}) as Partial<TileLayoutPreference>;
+        const layout = (persisted ?? {}) as Partial<Omit<TileWallState, "open">>;
         return {
           ...current,
           columns: boundedOrNull(layout.columns, MAX_TILE_COLUMNS),
           rows: boundedOrNull(layout.rows, MAX_TILE_ROWS),
+          order: Array.isArray(layout.order)
+            ? layout.order.filter((key): key is string => typeof key === "string")
+            : [],
         };
       },
     },
@@ -46,4 +51,8 @@ export function closeTileWall(): void {
 
 export function setTileWallLayout(layout: Partial<TileLayoutPreference>): void {
   useTileWallStore.setState(layout);
+}
+
+export function setTileWallOrder(order: ReadonlyArray<string>): void {
+  useTileWallStore.setState({ order });
 }
