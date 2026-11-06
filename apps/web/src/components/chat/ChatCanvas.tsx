@@ -55,9 +55,11 @@ export function ChatCanvas({
         maxChatWidth: Number.parseFloat(styles.width),
         minChatWidth: Number.parseFloat(styles.minWidth),
         composerHeight: composerOverlayElement?.getBoundingClientRect().height ?? 0,
+        // Without a timeline the gutter styles nothing; keeping it spares a canvas-wide restyle
+        // when a revealed Activity measures here a commit before its timeline re-registers.
         timelineGutter: timelineElement
           ? (timelineElement.offsetWidth - timelineElement.clientWidth) / 2
-          : 0,
+          : store.getState().measurements.timelineGutter,
       });
     };
     measure();
