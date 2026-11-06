@@ -94,8 +94,8 @@ export function CacheExpiryBanners() {
     }));
   });
 
+  // Keeps the toast ids: the sync effect below closes each tile once `open` empties.
   const dismissAll = useStableCallback(() => {
-    toasts.current.clear();
     const now = Date.now();
     setStore((current) => ({
       open: [],
