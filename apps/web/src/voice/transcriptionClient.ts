@@ -1,4 +1,5 @@
 import {
+  VOICE_TRANSCRIPTION_CONTEXT_PARAM,
   VOICE_TRANSCRIPTION_ROUTE_PATH,
   VoiceTranscriptionFailure,
   VoiceTranscriptionResult,
@@ -11,9 +12,19 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import * as PrimaryEnvironmentHttp from "../environments/primary/httpLayer";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 
-/** A transcription request that failed; `message` is safe to show the user. */
+/**
+ * A transcription request that failed; `message` is safe to show the user. `retryable` says that
+ * trying the same audio again may work (the server was unreachable or busy), as opposed to a
+ * missing configuration or an expired session.
+ */
 export class VoiceTranscriptionRequestError extends Error {
   override readonly name = "VoiceTranscriptionRequestError";
+  readonly retryable: boolean;
+
+  constructor(message: string, options: { readonly retryable?: boolean } = {}) {
+    super(message);
+    this.retryable = options.retryable ?? false;
+  }
 }
 
 const DEFAULT_RECORDING_MIME_TYPE = "audio/webm";
@@ -28,34 +39,49 @@ export function describeVoiceTranscriptionFailure(status: number, body: unknown)
   return `Transcription failed (HTTP ${status}).`;
 }
 
+/** Whether the same request is worth repeating: a network error, or an answer that says "busy". */
+export function isRetryableVoiceTranscriptionFailure(status: number, body: unknown): boolean {
+  const failure = decodeFailure(body);
+  if (Option.isSome(failure)) return failure.value.reason === "upstream_error";
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
 /**
  * Upload a recording to the primary environment's `/api/voice/transcribe`
- * and return the transcript. Auth (cookie in the browser, bearer token in the
- * desktop app) comes from the shared primary-environment HTTP layer.
+ * and return the transcript. Auth comes from the shared primary-environment
+ * HTTP layer. `context` is the text already transcribed from the same recording.
  */
-export function transcribeVoiceRecording(recording: Blob): Promise<string> {
+export function transcribeVoiceRecording(
+  recording: Blob,
+  options: { readonly context?: string } = {},
+): Promise<string> {
   return Effect.runPromise(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
       const bytes = new Uint8Array(yield* Effect.promise(() => recording.arrayBuffer()));
       const request = HttpClientRequest.post(
-        resolvePrimaryEnvironmentHttpUrl(VOICE_TRANSCRIPTION_ROUTE_PATH),
+        resolvePrimaryEnvironmentHttpUrl(
+          VOICE_TRANSCRIPTION_ROUTE_PATH,
+          options.context ? { [VOICE_TRANSCRIPTION_CONTEXT_PARAM]: options.context } : undefined,
+        ),
       ).pipe(
         HttpClientRequest.bodyUint8Array(bytes, recording.type || DEFAULT_RECORDING_MIME_TYPE),
       );
-      const response = yield* client
-        .execute(request)
-        .pipe(
-          Effect.mapError(
-            () => new VoiceTranscriptionRequestError("Could not reach the server to transcribe."),
-          ),
-        );
+      const response = yield* client.execute(request).pipe(
+        Effect.mapError(
+          () =>
+            new VoiceTranscriptionRequestError("Could not reach the server to transcribe.", {
+              retryable: true,
+            }),
+        ),
+      );
       const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
       const result = response.status === 200 ? decodeResult(body) : Option.none();
       if (Option.isSome(result)) return result.value.text;
       return yield* Effect.fail(
         new VoiceTranscriptionRequestError(
           describeVoiceTranscriptionFailure(response.status, body),
+          { retryable: isRetryableVoiceTranscriptionFailure(response.status, body) },
         ),
       );
     }).pipe(Effect.provide(PrimaryEnvironmentHttp.layer)),
