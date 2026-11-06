@@ -60,7 +60,11 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import ChatView from "./ChatView";
 import { ComposerHandleContext } from "../composerHandleContext";
-import { BackgroundThreadContext, HiddenThreadViewContext } from "./chat/backgroundThread";
+import {
+  BackgroundThreadContext,
+  HiddenThreadViewContext,
+  TileThreadContext,
+} from "./chat/backgroundThread";
 
 // Theme tokens, not palette colors, so Solarized and every custom theme supply their own hues.
 const TILE_STATE_STYLES: Record<
@@ -220,14 +224,16 @@ function TileWallTile({
         ) : null}
       </header>
       <BackgroundThreadContext value>
-        <ComposerHandleContext value={null}>
-          <ChatView
-            environmentId={thread.environmentId}
-            threadId={thread.id}
-            routeKind="server"
-            embedded={parentPanel}
-          />
-        </ComposerHandleContext>
+        <TileThreadContext value>
+          <ComposerHandleContext value={null}>
+            <ChatView
+              environmentId={thread.environmentId}
+              threadId={thread.id}
+              routeKind="server"
+              embedded={parentPanel}
+            />
+          </ComposerHandleContext>
+        </TileThreadContext>
       </BackgroundThreadContext>
     </section>
   );

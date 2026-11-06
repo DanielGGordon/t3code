@@ -11,3 +11,6 @@ export const BackgroundThreadContext = createContext(false);
  * destroys an editor whose effects do not mount within a tick, so the editor waits until shown.
  */
 export const HiddenThreadViewContext = createContext(false);
+
+/** True for a tile on the tile wall: its small timeline renders little beyond what it shows. */
+export const TileThreadContext = createContext(false);
