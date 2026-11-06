@@ -19,7 +19,7 @@ import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, LayoutGridIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 import { useClientSettings } from "../hooks/useSettings";
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -311,8 +311,9 @@ export function TileWall() {
   const rowsPreference = useTileWallStore((state) => state.rows);
   const [gridElement, setGridElement] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Measured before paint and tiles wait for it, so they never mount into a one-column grid and reflow.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mirrors the wall's measured size into state so the grid shape follows the window
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!gridElement) return;
     const read = () =>
       setSize({ width: gridElement.clientWidth, height: gridElement.clientHeight });
@@ -391,7 +392,7 @@ export function TileWall() {
           gridAutoRows: `max(${minTileHeightPx}px, calc((100% - ${(visibleRows - 1) * TILE_GAP_PX}px) / ${visibleRows}))`,
         }}
       >
-        {tiles.length === 0 ? (
+        {size.width === 0 ? null : tiles.length === 0 ? (
           <p className="col-span-full self-center text-center text-sm text-muted-foreground">
             No active threads. Press the shortcut again to leave the tile wall.
           </p>
