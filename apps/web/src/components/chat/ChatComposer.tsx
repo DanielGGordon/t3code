@@ -979,9 +979,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
   const backgroundThread = use(BackgroundThreadContext);
-  // A background composer (tile wall, side chat) scans its cwd only once focused, so a wall of
-  // them does not fire one provider refresh per tile on open.
-  const [workspaceSnapshotWanted, setWorkspaceSnapshotWanted] = useState(!backgroundThread);
+  // A background composer (tile wall, side chat, a thread under a modal page) scans its cwd only
+  // once focused, so a wall of them does not fire one provider refresh per tile on open.
+  const [focusedOnce, setFocusedOnce] = useState(false);
+  const workspaceSnapshotWanted = !backgroundThread || focusedOnce;
   const { refresh: refreshWorkspaceSnapshotOnTyping, scanning: workspaceSkillsScanning } =
     useProviderWorkspaceSnapshotRefresh({
       environmentId,
@@ -3358,7 +3359,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ref={composerFormRef}
       onSubmit={submitComposerStable}
       onFocusCapture={(event) => {
-        setWorkspaceSnapshotWanted(true);
+        setFocusedOnce(true);
         const activeElement = event.target;
         if (
           activeElement instanceof Element &&

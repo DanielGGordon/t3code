@@ -69,6 +69,9 @@ import {
   TileThreadContext,
 } from "./chat/backgroundThread";
 
+/** How long a closed, warmed wall keeps its tiles (and their thread streams) before releasing them. */
+const WARM_LINGER_MS = 5 * 60_000;
+
 // Theme tokens, not palette colors, so Solarized and every custom theme supply their own hues.
 const TILE_STATE_STYLES: Record<
   TileState,
@@ -107,8 +110,11 @@ function reportTileActionFailure(title: string, result: AtomCommandResult<unknow
 function TileWallTile({
   thread,
   position,
+  closed,
 }: {
   readonly thread: EnvironmentThreadShell;
+  /** The wall is out of sight; a menu left open would stay painted over the page behind it. */
+  readonly closed: boolean;
   /** Where the tile sits on the wall; the DOM keeps creation order so a move never remounts it. */
   readonly position: number;
 }) {
@@ -125,6 +131,7 @@ function TileWallTile({
   const environmentKnown = useServerConfigs().has(thread.environmentId);
   const canOperate = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
+  if (closed && snoozeMenuOpen) setSnoozeMenuOpen(false);
   // Read when the thread changes, not per render, so the snooze gate follows the thread's state.
   const [snoozeClock, setSnoozeClock] = useState(() => ({
     thread,
@@ -257,13 +264,27 @@ export function TileWallHost({ open }: { readonly open: boolean }) {
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const [idle, setIdle] = useState(false);
   const [warm, setWarm] = useState(false);
+  const [dropped, setDropped] = useState(false);
   if (open && !warm) setWarm(true);
+  if (open && dropped) setDropped(false);
+  // Each warm tile holds a live thread stream, so a wall left closed gives them up; the cache
+  // prefetch stays, and the next open mounts the tiles from memory.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the hidden tiles' thread streams after the wall has stayed closed
+  useEffect(() => {
+    if (open || !warm || dropped) return;
+    const timer = window.setTimeout(() => {
+      setDropped(true);
+      setWarm(false);
+    }, WARM_LINGER_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, warm, dropped]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- waits for the browser's first idle period after startup
   useEffect(() => {
     if (!used || !bootstrapped || idle) return;
     return onIdle(() => setIdle(true));
   }, [used, bootstrapped, idle]);
-  const warming = idle && !warm;
+  const mounted = open || (idle && !dropped);
+  const warming = idle && !warm && !dropped;
   const registry = use(RegistryContext);
   const [pausable] = useState(() => makePausableAtomRegistry(registry));
   // Resumed before paint, so the revealed wall shows whatever changed while it was closed.
@@ -274,7 +295,7 @@ export function TileWallHost({ open }: { readonly open: boolean }) {
       {idle ? <TileWallPrefetch /> : null}
       <RegistryContext value={pausable.registry}>
         <HiddenThreadViewContext value={!open}>
-          {open || idle ? (
+          {mounted ? (
             <TileWall warming={warming} closed={!open} onWarm={() => setWarm(true)} />
           ) : null}
         </HiddenThreadViewContext>
@@ -367,6 +388,8 @@ function TileWall({
     const to = orderedKeys.indexOf(String(over.id));
     if (from >= 0 && to >= 0) setTileWallOrder(arrayMove(orderedKeys, from, to));
   };
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  if (closed && layoutOpen) setLayoutOpen(false);
   const columnsPreference = useTileWallStore((state) => state.columns);
   const rowsPreference = useTileWallStore((state) => state.rows);
   const [gridElement, setGridElement] = useState<HTMLDivElement | null>(null);
@@ -408,7 +431,7 @@ function TileWall({
       <div className="flex h-7 shrink-0 items-center gap-2 px-1 text-xs text-muted-foreground">
         <span>{tiles.length === 1 ? "1 thread" : `${tiles.length} threads`}</span>
         <div className="ms-auto flex items-center gap-1">
-          <Popover>
+          <Popover open={layoutOpen} onOpenChange={setLayoutOpen}>
             <PopoverTrigger
               render={
                 <Button
@@ -478,6 +501,7 @@ function TileWall({
                 <TileWallTile
                   key={tileWallKey(thread)}
                   thread={thread}
+                  closed={closed}
                   position={orderedKeys.indexOf(tileWallKey(thread))}
                 />
               ))}

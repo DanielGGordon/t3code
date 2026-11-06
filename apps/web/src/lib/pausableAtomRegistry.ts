@@ -1,8 +1,19 @@
 import type { AtomRegistry } from "effect/reactivity/AtomRegistry";
 
+const underlying = new WeakMap<AtomRegistry, AtomRegistry>();
+
+/**
+ * The registry behind a pausable view, or `registry` itself. Work that waits on a result
+ * (commands, queries) must use this: a paused view would hold its one-shot listener until resume.
+ */
+export function unpausedAtomRegistry(registry: AtomRegistry): AtomRegistry {
+  return underlying.get(registry) ?? registry;
+}
+
 /**
  * A view of `registry` whose subscribers hear nothing while paused and catch up on resume.
  * Atoms stay mounted, so a hidden subtree keeps its data current without re-rendering.
+ * It pauses what React hooks subscribe to; commands and queries use `unpausedAtomRegistry`.
  */
 export function makePausableAtomRegistry(registry: AtomRegistry) {
   let paused = false;
@@ -36,6 +47,7 @@ export function makePausableAtomRegistry(registry: AtomRegistry) {
       return method;
     },
   });
+  underlying.set(view, registry);
   const setPaused = (next: boolean) => {
     paused = next;
     if (paused) return;
