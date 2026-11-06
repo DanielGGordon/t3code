@@ -22,6 +22,7 @@ import {
   type ComposerPromptEditorHandle,
   type ComposerPromptEditorProps,
 } from "./ComposerPromptEditorTiptap";
+import { HiddenThreadViewContext } from "./chat/backgroundThread";
 
 const babysit: ServerProviderSkill = {
   name: "babysit",
@@ -237,6 +238,23 @@ it("keeps the caret inside unknown dollar text across rich and plain remounts", 
     editor.commands.insertContent("Y");
   });
   expect(serializeEditorDoc(editor.state.doc).value).toBe("echo $HOXYME now");
+});
+
+it("shows a revealed hidden composer's draft until focus builds the editor, focused", async () => {
+  const inView = (hidden: boolean) => (
+    <HiddenThreadViewContext value={hidden}>{composer("half typed")}</HiddenThreadViewContext>
+  );
+  await using screen = await render(inView(true));
+  using _idle = vi.spyOn(window, "requestIdleCallback").mockReturnValue(0);
+  await screen.rerender(inView(false));
+  const draft = screen.container.querySelector<HTMLElement>("[data-composer-editor-static]");
+  if (!draft) throw new Error("The revealed composer showed no draft");
+  expect(draft.textContent).toBe("half typed");
+  expect(screen.container.querySelector(".tiptap")).toBeNull();
+  await userEvent.click(draft);
+  const editor = editorIn(screen.container);
+  expect(serializeEditorDoc(editor.state.doc).value).toBe("half typed");
+  expect(editor.view.hasFocus()).toBe(true);
 });
 
 const file = {
