@@ -7,8 +7,8 @@ import { createContext } from "react";
 export const BackgroundThreadContext = createContext(false);
 
 /**
- * True while a thread view is pre-rendered or kept mounted hidden inside an `<Activity>`. Tiptap
- * destroys an editor whose effects do not mount within a tick, so the editor waits until shown.
+ * True while a thread view is kept mounted out of sight, as tile wall tiles are while it is
+ * closed. It builds no editor and records no visit until shown.
  */
 export const HiddenThreadViewContext = createContext(false);
 

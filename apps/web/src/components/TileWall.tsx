@@ -19,11 +19,14 @@ import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, LayoutGridIcon, XIcon } from "lucide-react";
-import { Activity, useEffect, useLayoutEffect, useState } from "react";
+import { use, useEffect, useLayoutEffect, useState } from "react";
+
+import { RegistryContext } from "@effect/atom-react";
 
 import { useClientSettings } from "../hooks/useSettings";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { cn } from "../lib/utils";
+import { makePausableAtomRegistry } from "../lib/pausableAtomRegistry";
 import { observeResize } from "../lib/observeResize";
 import {
   MAX_TILE_COLUMNS,
@@ -246,8 +249,8 @@ function PrefetchTileThread({ thread }: { readonly thread: EnvironmentThreadShel
 
 /**
  * Once the wall has been used on this device, it warms up at idle: each tile's cached thread is
- * decoded, the tiles mount out of sight one per idle period, then the wall hides, so opening it
- * only reveals it. It stays mounted while closed; hidden, its effects and subscriptions stop.
+ * decoded and the tiles mount out of sight one per idle period, so opening it only reveals it.
+ * It stays mounted and laid out while closed; its atoms stay current but re-render only on open.
  */
 export function TileWallHost({ open }: { readonly open: boolean }) {
   const used = useTileWallStore((state) => state.used);
@@ -261,14 +264,21 @@ export function TileWallHost({ open }: { readonly open: boolean }) {
     return onIdle(() => setIdle(true));
   }, [used, bootstrapped, idle]);
   const warming = idle && !warm;
+  const registry = use(RegistryContext);
+  const [pausable] = useState(() => makePausableAtomRegistry(registry));
+  // Resumed before paint, so the revealed wall shows whatever changed while it was closed.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pauses the wall's atom notifications while it is out of sight
+  useLayoutEffect(() => pausable.setPaused(!open), [pausable, open]);
   return (
     <>
       {idle ? <TileWallPrefetch /> : null}
-      <Activity mode={open || warming ? "visible" : "hidden"}>
+      <RegistryContext value={pausable.registry}>
         <HiddenThreadViewContext value={!open}>
-          {open || idle ? <TileWall warming={warming} onWarm={() => setWarm(true)} /> : null}
+          {open || idle ? (
+            <TileWall warming={warming} closed={!open} onWarm={() => setWarm(true)} />
+          ) : null}
         </HiddenThreadViewContext>
-      </Activity>
+      </RegistryContext>
     </>
   );
 }
@@ -324,10 +334,13 @@ function TileCountPicker(props: {
  */
 function TileWall({
   warming,
+  closed,
   onWarm,
 }: {
   /** Mounting out of sight, one more tile per idle period, before the wall first opens. */
   readonly warming: boolean;
+  /** Out of sight; once warm its laid-out contents are skipped, so opening restyles nothing. */
+  readonly closed: boolean;
   readonly onWarm: () => void;
 }) {
   const threads = useThreadShells();
@@ -384,12 +397,13 @@ function TileWall({
       data-tile-wall
       className={cn(
         "fixed inset-0 z-50 flex flex-col gap-1 bg-background p-1.5",
-        warming && "invisible",
+        closed && "invisible",
+        closed && !warming && "[content-visibility:hidden]",
       )}
       role="region"
       aria-label="Thread tile wall"
-      aria-hidden={warming || undefined}
-      inert={warming}
+      aria-hidden={closed || undefined}
+      inert={closed}
     >
       <div className="flex h-7 shrink-0 items-center gap-2 px-1 text-xs text-muted-foreground">
         <span>{tiles.length === 1 ? "1 thread" : `${tiles.length} threads`}</span>
