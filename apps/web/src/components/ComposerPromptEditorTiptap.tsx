@@ -107,6 +107,7 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
+import { HiddenThreadViewContext } from "./chat/backgroundThread";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipPopover, skillPopoverDescription } from "./chat/SkillInlineText";
@@ -780,6 +781,7 @@ function replaceSkillChips(
 }
 
 export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
+  const hidden = use(HiddenThreadViewContext);
   const restoreFocusRef = useRef(false);
   const { onChange: onPromptChange } = props;
   const [selection, setSelection] = useState<{
@@ -796,6 +798,7 @@ export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
     setSelection({ value, cursor, expandedCursor });
     onPromptChange(value, cursor, expandedCursor, ...rest);
   };
+  if (hidden) return null;
   // Changing text mode remounts the editor. Its collapsed cursor cannot represent
   // a caret inside unknown `$name` text, so retain the exact Markdown offset here.
   return (

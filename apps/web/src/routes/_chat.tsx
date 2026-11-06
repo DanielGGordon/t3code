@@ -3,7 +3,7 @@ import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-r
 import { useState } from "react";
 
 import { ThreadRouteView } from "../components/ThreadRouteView";
-import { TileWall, TileWallPrefetch } from "../components/TileWall";
+import { TileWallHost } from "../components/TileWall";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useTileWallStore } from "../tileWallStore";
@@ -71,8 +71,7 @@ function ChatRouteLayout() {
       ) : (
         <Outlet />
       )}
-      <TileWallPrefetch />
-      {tileWallOpen && !modalOpen ? <TileWall /> : null}
+      <TileWallHost open={tileWallOpen && !modalOpen} />
       {modalOpen ? <Outlet /> : null}
     </>
   );
