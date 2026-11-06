@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { Atom, AtomRegistry } from "effect/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
@@ -54,6 +54,7 @@ const SNAPSHOT: OrchestrationV2ThreadDetailSnapshot = { snapshotSequence: 7, pro
 const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?: {
   readonly snapshot?: OrchestrationV2ThreadDetailSnapshot;
   readonly snapshotUnavailable?: boolean;
+  readonly cached?: OrchestrationV2ThreadDetailSnapshot;
 }) {
   const subscriptions = yield* Queue.unbounded<{
     readonly afterSequence: number | undefined;
@@ -172,7 +173,7 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
           loadThread: () =>
             Effect.sync(() => {
               diskLoads += 1;
-              return Option.none();
+              return Option.fromNullishOr(options?.cached);
             }),
           saveThread: () => Effect.void,
           removeThread: () => Effect.void,
@@ -289,6 +290,27 @@ describe("createEnvironmentThreadStateAtoms", () => {
       expect(h.counts()).toEqual({ httpLoads: 1, diskLoads: 1, opened: 2, active: 1 });
       remount();
       yield* Deferred.await(next.closed);
+    }),
+  );
+
+  it.effect("renders a prefetched cache entry on mount and resumes from its cursor", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness({ cached: SNAPSHOT });
+      const prefetchAtom = h.rawAtoms.prefetchAtom(h.ref.environmentId, h.ref.threadId);
+      const unmountPrefetch = h.registry.mount(prefetchAtom);
+      yield* AtomRegistry.toStream(h.registry, prefetchAtom).pipe(
+        Stream.filter(AsyncResult.isSuccess),
+        Stream.runHead,
+      );
+      const unmount = h.registry.mount(h.stateAtom);
+      expect(h.registry.get(h.stateAtom).status).toBe("cached");
+      expect(currentThread(h.registry, h.stateAtom)).toBe(THREAD);
+      const subscription = yield* Queue.take(h.subscriptions);
+      expect(subscription.afterSequence).toBe(7);
+      expect(h.counts()).toEqual({ httpLoads: 0, diskLoads: 1, opened: 1, active: 1 });
+      unmount();
+      unmountPrefetch();
+      yield* Deferred.await(subscription.closed);
     }),
   );
 

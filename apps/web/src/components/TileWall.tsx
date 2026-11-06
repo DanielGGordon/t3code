@@ -37,11 +37,13 @@ import {
   type TileState,
 } from "../lib/tileWall";
 import {
+  useAllEnvironmentShellsBootstrapped,
   useDelegatedUnderParent,
   useProject,
   useServerConfigs,
   useThreadShells,
 } from "../state/entities";
+import { usePrefetchEnvironmentThread } from "../state/threads";
 import { useEnvironmentScope } from "../state/session";
 import { buildThreadRouteParams } from "../threadRoutes";
 import {
@@ -229,6 +231,34 @@ function TileWallTile({
       </BackgroundThreadContext>
     </section>
   );
+}
+
+function PrefetchTileThread({ thread }: { readonly thread: EnvironmentThreadShell }) {
+  usePrefetchEnvironmentThread(thread.environmentId, thread.id);
+  return null;
+}
+
+/** Once the app is idle, decodes each tile's cached thread so opening the wall renders from memory. */
+export function TileWallPrefetch() {
+  const used = useTileWallStore((state) => state.used);
+  const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  const [idle, setIdle] = useState(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- waits for the browser's first idle period after startup
+  useEffect(() => {
+    if (!used || !bootstrapped || idle) return;
+    if (typeof window.requestIdleCallback !== "function") {
+      const timer = window.setTimeout(() => setIdle(true), 500);
+      return () => window.clearTimeout(timer);
+    }
+    const handle = window.requestIdleCallback(() => setIdle(true), { timeout: 3000 });
+    return () => window.cancelIdleCallback(handle);
+  }, [used, bootstrapped, idle]);
+  const threads = useThreadShells(idle);
+  const delegatedUnderParent = useDelegatedUnderParent();
+  if (!idle) return null;
+  return selectTileWallThreads({ threads, delegatedUnderParent }).map((thread) => (
+    <PrefetchTileThread key={tileWallKey(thread)} thread={thread} />
+  ));
 }
 
 function TileCountPicker(props: {
