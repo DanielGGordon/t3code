@@ -8,6 +8,15 @@ import * as Schema from "effect/Schema";
  */
 export const VOICE_TRANSCRIPTION_ROUTE_PATH = "/api/voice/transcribe";
 
+/**
+ * Optional query parameter on the route: the end of the text already transcribed from the same
+ * recording. The server appends it to Whisper's `prompt` so a long recording sent in pieces keeps
+ * its capitalisation and sentences across the cuts. Longer values are cut to their last
+ * `VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS` characters.
+ */
+export const VOICE_TRANSCRIPTION_CONTEXT_PARAM = "context";
+export const VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS = 400;
+
 /** Matches the transcription API's own upload limit. */
 export const VOICE_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
 

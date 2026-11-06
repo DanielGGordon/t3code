@@ -48,8 +48,8 @@ const makeHandler = () =>
     disableLogger: true,
   });
 
-const post = (body: Uint8Array, contentType: string, token?: string) =>
-  new Request("http://127.0.0.1/api/voice/transcribe", {
+const post = (body: Uint8Array, contentType: string, token?: string, query = "") =>
+  new Request(`http://127.0.0.1/api/voice/transcribe${query}`, {
     method: "POST",
     headers: {
       "content-type": contentType,
@@ -93,6 +93,25 @@ it.effect("transcribes voice recordings for authenticated sessions", () =>
     expect(response.status).toBe(200);
     expect(yield* Effect.promise(() => response.json())).toEqual({ text: "run the tests please" });
     expect(received).toEqual([{ bytes: 4, mimeType: "audio/webm;codecs=opus" }]);
+  }),
+);
+
+it.effect("passes the recording's text so far on as normalized prompt context", () =>
+  Effect.gen(function* () {
+    const received: Array<string | undefined> = [];
+    const transcribeWith = (query: string) =>
+      run(
+        (input) =>
+          Effect.sync(() => {
+            received.push(input.context);
+            return "ok";
+          }),
+        post(new Uint8Array([1]), "audio/wav", OPERATE_TOKEN, query),
+      );
+    yield* transcribeWith("?context=" + encodeURIComponent("  Move the\nmigration step, "));
+    yield* transcribeWith("?context=%20%20");
+    yield* transcribeWith("");
+    expect(received).toEqual(["Move the migration step,", undefined, undefined]);
   }),
 );
 

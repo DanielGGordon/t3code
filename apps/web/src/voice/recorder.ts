@@ -45,7 +45,7 @@ export class VoiceRecordingStartError extends Error {
   override readonly name = "VoiceRecordingStartError";
 }
 
-function describeStartFailure(cause: unknown): string {
+export function describeStartFailure(cause: unknown): string {
   const name = cause instanceof DOMException ? cause.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") {
     return "Microphone access was blocked. Allow it in the browser's site settings.";

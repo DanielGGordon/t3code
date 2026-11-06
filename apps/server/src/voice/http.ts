@@ -1,5 +1,6 @@
 import {
   AuthOrchestrationOperateScope,
+  VOICE_TRANSCRIPTION_CONTEXT_PARAM,
   VOICE_TRANSCRIPTION_MAX_BYTES,
   VOICE_TRANSCRIPTION_ROUTE_PATH,
   type VoiceTranscriptionFailure,
@@ -33,7 +34,9 @@ const failureResponse = (reason: VoiceTranscriptionFailureReason, message: strin
 
 /**
  * `POST /api/voice/transcribe` — body is the raw recording, `Content-Type` its
- * MIME type. Same auth as the other raw routes (an operate-scoped session).
+ * MIME type. Same auth as the other raw routes (an operate-scoped session). The
+ * optional `context` query parameter is the text already transcribed from the
+ * same recording, used as Whisper prompt context.
  */
 export const voiceTranscriptionRouteLayer = HttpRouter.add(
   "POST",
@@ -48,6 +51,11 @@ export const voiceTranscriptionRouteLayer = HttpRouter.add(
       return failureResponse("audio_too_large", "The recording is too long to transcribe.");
     }
     const mimeType = request.headers["content-type"]?.trim() || "audio/webm";
+    const context = VoiceTranscription.normalizeTranscriptionContext(
+      new URL(request.url, "http://localhost").searchParams.get(
+        VOICE_TRANSCRIPTION_CONTEXT_PARAM,
+      ) ?? undefined,
+    );
 
     const body = yield* request.arrayBuffer.pipe(
       Effect.provideService(
@@ -64,7 +72,7 @@ export const voiceTranscriptionRouteLayer = HttpRouter.add(
     }
 
     return yield* voiceTranscription
-      .transcribe({ audio: new Uint8Array(body.value), mimeType })
+      .transcribe({ audio: new Uint8Array(body.value), mimeType, context })
       .pipe(
         Effect.map((text) =>
           HttpServerResponse.jsonUnsafe({ text } satisfies VoiceTranscriptionResult),
