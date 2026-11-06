@@ -49,6 +49,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import { EditorContent, useEditor } from "@tiptap/react";
 
 import {
@@ -107,6 +108,7 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
+import { HiddenThreadViewContext } from "./chat/backgroundThread";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipPopover, skillPopoverDescription } from "./chat/SkillInlineText";
@@ -779,8 +781,63 @@ function replaceSkillChips(
   editor.view.dispatch(transaction);
 }
 
+// touch:text-lg: an 18px editor and placeholder in the touch layout, readable at a glance.
+const COMPOSER_CONTAINER_CLASS =
+  "relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch) touch:text-lg";
+const COMPOSER_EDITOR_CLASS =
+  "composer-tiptap -m-1 block max-h-52 min-h-[calc(2lh+--spacing(2))] overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none";
+const COMPOSER_PLACEHOLDER_CLASS =
+  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder";
+
+function onIdle(callback: () => void): () => void {
+  if (typeof window.requestIdleCallback !== "function") {
+    const timer = window.setTimeout(callback, 0);
+    return () => window.clearTimeout(timer);
+  }
+  const handle = window.requestIdleCallback(callback, { timeout: 1000 });
+  return () => window.cancelIdleCallback(handle);
+}
+
+/** The prompt as plain text, shown until the editor is built; it builds on hover or focus. */
+function ComposerPromptEditorStatic(
+  props: ComposerPromptEditorProps & { readonly onActivate: (focus: boolean) => void },
+) {
+  return (
+    <div className={cn(COMPOSER_CONTAINER_CLASS, props.containerClassName)}>
+      <div
+        data-composer-editor-static
+        className={cn(COMPOSER_EDITOR_CLASS, props.className)}
+        role="textbox"
+        aria-multiline="true"
+        aria-label={props.ariaLabel}
+        aria-placeholder={props.placeholder}
+        tabIndex={props.disabled ? -1 : 0}
+        onPointerEnter={() => props.onActivate(false)}
+        onFocus={() => props.onActivate(true)}
+      >
+        <p>{props.value}</p>
+      </div>
+      {props.value.length === 0 && props.contextRecords.size === 0 && props.placeholder ? (
+        <div className={cn(COMPOSER_PLACEHOLDER_CLASS, props.placeholderClassName)}>
+          {props.placeholder}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
+  const hidden = use(HiddenThreadViewContext);
   const restoreFocusRef = useRef(false);
+  // A view revealed from hidden builds its editor at idle, so a tile wall does not build every
+  // tile's editor in the frame that reveals it.
+  const [live, setLive] = useState(!hidden);
+  if (hidden && live) setLive(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- builds the editor in a browser idle period, one editor per period
+  useEffect(() => {
+    if (hidden || live) return;
+    return onIdle(() => flushSync(() => setLive(true)));
+  }, [hidden, live]);
   const { onChange: onPromptChange } = props;
   const [selection, setSelection] = useState<{
     value: string;
@@ -796,6 +853,18 @@ export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
     setSelection({ value, cursor, expandedCursor });
     onPromptChange(value, cursor, expandedCursor, ...rest);
   };
+  if (!live) {
+    return (
+      <ComposerPromptEditorStatic
+        {...props}
+        onActivate={(focus) => {
+          if (hidden) return;
+          if (focus) restoreFocusRef.current = true;
+          setLive(true);
+        }}
+      />
+    );
+  }
   // Changing text mode remounts the editor. Its collapsed cursor cannot represent
   // a caret inside unknown `$name` text, so retain the exact Markdown offset here.
   return (
@@ -1097,10 +1166,7 @@ function ComposerPromptEditorTiptapInner(
   };
 
   const editorAttributes = {
-    class: cn(
-      "composer-tiptap -m-1 block max-h-52 min-h-[calc(2lh+--spacing(2))] overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
-      className,
-    ),
+    class: cn(COMPOSER_EDITOR_CLASS, className),
     "data-testid": "composer-editor",
     ...(keyboardLocked ? { "data-keyboard-locked": "true" } : {}),
     "data-composer-rich-text": richText ? "true" : "false",
@@ -1809,14 +1875,7 @@ function ComposerPromptEditorTiptapInner(
     <RichComposerSkillsContext value={skills}>
       <ComposerContextRecordsContext value={contextRecords}>
         <ComposerCitationCommentContext value={citationCommentActions}>
-          <div
-            className={cn(
-              "relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)",
-              // Touch layout: 18px editor and placeholder, readable at a glance.
-              "touch:text-lg",
-              containerClassName,
-            )}
-          >
+          <div className={cn(COMPOSER_CONTAINER_CLASS, containerClassName)}>
             <EditorContent
               editor={editor}
               onKeyDown={(event) => {
@@ -1867,12 +1926,7 @@ function ComposerPromptEditorTiptapInner(
               onCutCapture={(event) => handleCopyCut(event, true)}
             />
             {isEmpty && contextRecords.size === 0 && placeholder ? (
-              <div
-                className={cn(
-                  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder",
-                  placeholderClassName,
-                )}
-              >
+              <div className={cn(COMPOSER_PLACEHOLDER_CLASS, placeholderClassName)}>
                 {placeholder}
               </div>
             ) : null}

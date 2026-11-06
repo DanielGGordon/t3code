@@ -1,5 +1,5 @@
 import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
@@ -60,6 +60,10 @@ export function useEnvironmentThread(
   );
   const state = AsyncResult.getOrElse(result, () => EMPTY_ENVIRONMENT_THREAD_STATE);
   return state;
+}
+
+export function usePrefetchEnvironmentThread(environmentId: EnvironmentId, threadId: ThreadId) {
+  useAtomMount(environmentThreads.prefetchAtom(environmentId, threadId));
 }
 
 const isRunning = (status: string) =>

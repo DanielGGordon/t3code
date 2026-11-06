@@ -1091,10 +1091,45 @@ export function createEnvironmentThreadStateAtoms<R, E>(
       )
       .pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-state:${key}`));
   });
+  // Decodes the cached thread into the resume slot ahead of a mount, so a view that is likely
+  // to open soon renders from memory instead of waiting on IndexedDB. Never overrides an owner.
+  const prefetchFamily = Atom.family((key: string) => {
+    const { environmentId, threadId } = parseThreadKey(key);
+    const resumeAtom = resumeFamily(key);
+    return runtime
+      .atom((get) => {
+        get.mount(resumeAtom);
+        const resume = get.once(resumeAtom);
+        const claimed = () => resume.snapshot !== undefined || resume.owner !== undefined;
+        return Effect.gen(function* () {
+          if (claimed()) return;
+          const cache = yield* Persistence.EnvironmentCacheStore;
+          const cached = yield* cache
+            .loadThread(environmentId, threadId)
+            .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationV2ThreadDetailSnapshot>()));
+          if (Option.isNone(cached) || claimed()) return;
+          const { projection, snapshotSequence } = cached.value;
+          resume.snapshot = {
+            state: {
+              data: Option.some(projection),
+              status: "cached",
+              error: Option.none(),
+              history: historyMetaFromCachedSnapshot(cached.value),
+              sequence: snapshotSequence,
+            },
+            sequence: snapshotSequence,
+            persisted: true,
+          };
+        });
+      })
+      .pipe(Atom.withLabel(`environment-thread-prefetch:${key}`));
+  });
 
   return {
     stateAtom: (environmentId: EnvironmentIdType, threadId: ThreadIdType) =>
       family(threadKey({ environmentId, threadId })),
+    prefetchAtom: (environmentId: EnvironmentIdType, threadId: ThreadIdType) =>
+      prefetchFamily(threadKey({ environmentId, threadId })),
   };
 }
 

@@ -19,11 +19,14 @@ import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, LayoutGridIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { use, useEffect, useLayoutEffect, useState } from "react";
+
+import { RegistryContext } from "@effect/atom-react";
 
 import { useClientSettings } from "../hooks/useSettings";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { cn } from "../lib/utils";
+import { makePausableAtomRegistry } from "../lib/pausableAtomRegistry";
 import { observeResize } from "../lib/observeResize";
 import {
   MAX_TILE_COLUMNS,
@@ -37,11 +40,13 @@ import {
   type TileState,
 } from "../lib/tileWall";
 import {
+  useAllEnvironmentShellsBootstrapped,
   useDelegatedUnderParent,
   useProject,
   useServerConfigs,
   useThreadShells,
 } from "../state/entities";
+import { usePrefetchEnvironmentThread } from "../state/threads";
 import { useEnvironmentScope } from "../state/session";
 import { buildThreadRouteParams } from "../threadRoutes";
 import {
@@ -58,7 +63,14 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import ChatView from "./ChatView";
 import { ComposerHandleContext } from "../composerHandleContext";
-import { BackgroundThreadContext } from "./chat/backgroundThread";
+import {
+  BackgroundThreadContext,
+  HiddenThreadViewContext,
+  TileThreadContext,
+} from "./chat/backgroundThread";
+
+/** How long a closed, warmed wall keeps its tiles (and their thread streams) before releasing them. */
+const WARM_LINGER_MS = 5 * 60_000;
 
 // Theme tokens, not palette colors, so Solarized and every custom theme supply their own hues.
 const TILE_STATE_STYLES: Record<
@@ -98,8 +110,11 @@ function reportTileActionFailure(title: string, result: AtomCommandResult<unknow
 function TileWallTile({
   thread,
   position,
+  closed,
 }: {
   readonly thread: EnvironmentThreadShell;
+  /** The wall is out of sight; a menu left open would stay painted over the page behind it. */
+  readonly closed: boolean;
   /** Where the tile sits on the wall; the DOM keeps creation order so a move never remounts it. */
   readonly position: number;
 }) {
@@ -116,6 +131,7 @@ function TileWallTile({
   const environmentKnown = useServerConfigs().has(thread.environmentId);
   const canOperate = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
+  if (closed && snoozeMenuOpen) setSnoozeMenuOpen(false);
   // Read when the thread changes, not per render, so the snooze gate follows the thread's state.
   const [snoozeClock, setSnoozeClock] = useState(() => ({
     thread,
@@ -218,17 +234,91 @@ function TileWallTile({
         ) : null}
       </header>
       <BackgroundThreadContext value>
-        <ComposerHandleContext value={null}>
-          <ChatView
-            environmentId={thread.environmentId}
-            threadId={thread.id}
-            routeKind="server"
-            embedded={parentPanel}
-          />
-        </ComposerHandleContext>
+        <TileThreadContext value>
+          <ComposerHandleContext value={null}>
+            <ChatView
+              environmentId={thread.environmentId}
+              threadId={thread.id}
+              routeKind="server"
+              embedded={parentPanel}
+            />
+          </ComposerHandleContext>
+        </TileThreadContext>
       </BackgroundThreadContext>
     </section>
   );
+}
+
+function PrefetchTileThread({ thread }: { readonly thread: EnvironmentThreadShell }) {
+  usePrefetchEnvironmentThread(thread.environmentId, thread.id);
+  return null;
+}
+
+/**
+ * Once the wall has been used on this device, it warms up at idle: each tile's cached thread is
+ * decoded and the tiles mount out of sight one per idle period, so opening it only reveals it.
+ * It stays mounted and laid out while closed; its atoms stay current but re-render only on open.
+ */
+export function TileWallHost({ open }: { readonly open: boolean }) {
+  const used = useTileWallStore((state) => state.used);
+  const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  const [idle, setIdle] = useState(false);
+  const [warm, setWarm] = useState(false);
+  const [dropped, setDropped] = useState(false);
+  if (open && !warm) setWarm(true);
+  if (open && dropped) setDropped(false);
+  // Each warm tile holds a live thread stream, so a wall left closed gives them up; the cache
+  // prefetch stays, and the next open mounts the tiles from memory.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the hidden tiles' thread streams after the wall has stayed closed
+  useEffect(() => {
+    if (open || !warm || dropped) return;
+    const timer = window.setTimeout(() => {
+      setDropped(true);
+      setWarm(false);
+    }, WARM_LINGER_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, warm, dropped]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- waits for the browser's first idle period after startup
+  useEffect(() => {
+    if (!used || !bootstrapped || idle) return;
+    return onIdle(() => setIdle(true));
+  }, [used, bootstrapped, idle]);
+  const mounted = open || (idle && !dropped);
+  const warming = idle && !warm && !dropped;
+  const registry = use(RegistryContext);
+  const [pausable] = useState(() => makePausableAtomRegistry(registry));
+  // Resumed before paint, so the revealed wall shows whatever changed while it was closed.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pauses the wall's atom notifications while it is out of sight
+  useLayoutEffect(() => pausable.setPaused(!open), [pausable, open]);
+  return (
+    <>
+      {idle ? <TileWallPrefetch /> : null}
+      <RegistryContext value={pausable.registry}>
+        <HiddenThreadViewContext value={!open}>
+          {mounted ? (
+            <TileWall warming={warming} closed={!open} onWarm={() => setWarm(true)} />
+          ) : null}
+        </HiddenThreadViewContext>
+      </RegistryContext>
+    </>
+  );
+}
+
+function onIdle(callback: () => void): () => void {
+  if (typeof window.requestIdleCallback !== "function") {
+    const timer = window.setTimeout(callback, 500);
+    return () => window.clearTimeout(timer);
+  }
+  const handle = window.requestIdleCallback(callback, { timeout: 3000 });
+  return () => window.cancelIdleCallback(handle);
+}
+
+function TileWallPrefetch() {
+  const threads = useThreadShells();
+  const delegatedUnderParent = useDelegatedUnderParent();
+  return selectTileWallThreads({ threads, delegatedUnderParent }).map((thread) => (
+    <PrefetchTileThread key={tileWallKey(thread)} thread={thread} />
+  ));
 }
 
 function TileCountPicker(props: {
@@ -263,10 +353,31 @@ function TileCountPicker(props: {
  * Every unsettled thread as a live chat tile filling the window; toggled by `view.tiles.toggle`.
  * Tiles stay mounted, so a half-typed message waits in its composer while you work in another.
  */
-export function TileWall() {
+function TileWall({
+  warming,
+  closed,
+  onWarm,
+}: {
+  /** Mounting out of sight, one more tile per idle period, before the wall first opens. */
+  readonly warming: boolean;
+  /** Out of sight; once warm its laid-out contents are skipped, so opening restyles nothing. */
+  readonly closed: boolean;
+  readonly onWarm: () => void;
+}) {
   const threads = useThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
   const tiles = selectTileWallThreads({ threads, delegatedUnderParent });
+  const [warmedTiles, setWarmedTiles] = useState(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts one hidden tile per browser idle period so warming never blocks input for long
+  useEffect(() => {
+    if (!warming) return;
+    if (warmedTiles >= tiles.length) {
+      onWarm();
+      return;
+    }
+    return onIdle(() => setWarmedTiles((count) => count + 1));
+  }, [warming, warmedTiles, tiles.length, onWarm]);
+  const mountedTiles = warming ? tiles.slice(0, warmedTiles) : tiles;
   const savedOrder = useTileWallStore((state) => state.order);
   const orderedKeys = orderTileWallThreads(tiles, savedOrder).map(tileWallKey);
   // A small drag distance keeps a plain click on the title opening the thread.
@@ -277,15 +388,23 @@ export function TileWall() {
     const to = orderedKeys.indexOf(String(over.id));
     if (from >= 0 && to >= 0) setTileWallOrder(arrayMove(orderedKeys, from, to));
   };
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  if (closed && layoutOpen) setLayoutOpen(false);
   const columnsPreference = useTileWallStore((state) => state.columns);
   const rowsPreference = useTileWallStore((state) => state.rows);
   const [gridElement, setGridElement] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Measured before paint and tiles wait for it, so they never mount into a one-column grid and reflow.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mirrors the wall's measured size into state so the grid shape follows the window
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!gridElement) return;
-    const read = () =>
-      setSize({ width: gridElement.clientWidth, height: gridElement.clientHeight });
+    const read = () => {
+      const width = gridElement.clientWidth;
+      const height = gridElement.clientHeight;
+      setSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    };
     read();
     return observeResize(gridElement, read);
   }, [gridElement]);
@@ -299,14 +418,20 @@ export function TileWall() {
   return (
     <div
       data-tile-wall
-      className="fixed inset-0 z-50 flex flex-col gap-1 bg-background p-1.5"
+      className={cn(
+        "fixed inset-0 z-50 flex flex-col gap-1 bg-background p-1.5",
+        closed && "invisible",
+        closed && !warming && "[content-visibility:hidden]",
+      )}
       role="region"
       aria-label="Thread tile wall"
+      aria-hidden={closed || undefined}
+      inert={closed}
     >
       <div className="flex h-7 shrink-0 items-center gap-2 px-1 text-xs text-muted-foreground">
         <span>{tiles.length === 1 ? "1 thread" : `${tiles.length} threads`}</span>
         <div className="ms-auto flex items-center gap-1">
-          <Popover>
+          <Popover open={layoutOpen} onOpenChange={setLayoutOpen}>
             <PopoverTrigger
               render={
                 <Button
@@ -361,7 +486,7 @@ export function TileWall() {
           gridAutoRows: `max(${minTileHeightPx}px, calc((100% - ${(visibleRows - 1) * TILE_GAP_PX}px) / ${visibleRows}))`,
         }}
       >
-        {tiles.length === 0 ? (
+        {size.width === 0 ? null : tiles.length === 0 ? (
           <p className="col-span-full self-center text-center text-sm text-muted-foreground">
             No active threads. Press the shortcut again to leave the tile wall.
           </p>
@@ -372,10 +497,11 @@ export function TileWall() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={orderedKeys} strategy={rectSortingStrategy}>
-              {tiles.map((thread) => (
+              {mountedTiles.map((thread) => (
                 <TileWallTile
                   key={tileWallKey(thread)}
                   thread={thread}
+                  closed={closed}
                   position={orderedKeys.indexOf(tileWallKey(thread))}
                 />
               ))}

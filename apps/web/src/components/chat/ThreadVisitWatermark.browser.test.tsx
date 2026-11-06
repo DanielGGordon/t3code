@@ -27,6 +27,7 @@ vi.mock(import("../../state/threads"), async (original) => {
   };
 });
 
+import { HiddenThreadViewContext } from "./backgroundThread";
 import { ThreadVisitWatermark } from "./ThreadVisitWatermark";
 
 // Kept alive so a shell set before its tracker mounts is still there when it does.
@@ -36,6 +37,7 @@ const NOW = Date.parse("2026-01-04T00:00:00.000Z");
 const ENVIRONMENT = EnvironmentId.make("environment-visit-watermark");
 const threadA: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("a") };
 const threadB: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("b") };
+const threadC: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("c") };
 
 function setShell(ref: ScopedThreadRef, updatedAt: string) {
   appAtomRegistry.set(shellAtom(shellKey(ref)), {
@@ -79,4 +81,30 @@ it("records the visit of the next thread at once after switching threads", async
   // Thread A's throttle must not hold back B's first watermark: leaving B
   // within the throttle window would otherwise keep it unread.
   expect(visitedThreadIds()).toEqual(["a", "b"]);
+});
+
+it("records no visit while the view is warmed up out of sight, then visits once shown", async () => {
+  mocks.visitRun.mockReset();
+  mocks.visitRun.mockResolvedValue(AsyncResult.success(undefined));
+  setShell(threadC, "2026-01-02T00:00:00.000Z");
+  using _timers = fakeTimers();
+  vi.setSystemTime(NOW);
+
+  await using screen = await render(
+    <AppAtomRegistryProvider>
+      <HiddenThreadViewContext value>
+        <ThreadVisitWatermark threadRef={threadC} />
+      </HiddenThreadViewContext>
+    </AppAtomRegistryProvider>,
+  );
+  expect(visitedThreadIds()).toEqual([]);
+
+  await screen.rerender(
+    <AppAtomRegistryProvider>
+      <HiddenThreadViewContext value={false}>
+        <ThreadVisitWatermark threadRef={threadC} />
+      </HiddenThreadViewContext>
+    </AppAtomRegistryProvider>,
+  );
+  expect(visitedThreadIds()).toEqual(["c"]);
 });
