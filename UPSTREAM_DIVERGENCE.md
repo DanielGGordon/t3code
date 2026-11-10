@@ -59,6 +59,7 @@ Upstream's 077 `RepairBooleanSettledOverride` … 080 `ScheduledTaskThreadMode` 
   client-runtime snapshot. The footer context meter went with upstream's deletion (header usage
   stats remain). The fork's "Auto hidden unless enabled" filter is one helper,
   `filterAutoRuntimeModeOption`, used by the composer and the context-strip menu.
+- **Voice route:** the fork's `POST /api/voice/transcribe` (compressed audio) moved to `/api/fork/voice/transcribe`; upstream's dictation owns the old path (raw PCM). The duplicate registration crashed the server on boot.
 - **Two mics (open decision):** the fork's server Whisper/OpenAI voice button (`composerVoiceInput`)
   and upstream's dictation mic both render on desktop; in touch layout only the fork's shows.
 - **Shell:** the fork's notification hosts moved into upstream's `appHosts`, so they also mount on
