@@ -12,9 +12,10 @@ import * as PrimaryEnvironmentHttp from "../environments/primary/httpLayer";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 
 /** A transcription request that failed; `message` is safe to show the user. */
-export class VoiceTranscriptionRequestError extends Error {
-  override readonly name = "VoiceTranscriptionRequestError";
-}
+export class VoiceTranscriptionRequestError extends Schema.TaggedError<VoiceTranscriptionRequestError>()(
+  "VoiceTranscriptionRequestError",
+  { message: Schema.String },
+) {}
 
 const DEFAULT_RECORDING_MIME_TYPE = "audio/webm";
 const decodeResult = Schema.decodeUnknownOption(VoiceTranscriptionResult);
@@ -47,17 +48,18 @@ export function transcribeVoiceRecording(recording: Blob): Promise<string> {
         .execute(request)
         .pipe(
           Effect.mapError(
-            () => new VoiceTranscriptionRequestError("Could not reach the server to transcribe."),
+            () =>
+              new VoiceTranscriptionRequestError({
+                message: "Could not reach the server to transcribe.",
+              }),
           ),
         );
       const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
       const result = response.status === 200 ? decodeResult(body) : Option.none();
       if (Option.isSome(result)) return result.value.text;
-      return yield* Effect.fail(
-        new VoiceTranscriptionRequestError(
-          describeVoiceTranscriptionFailure(response.status, body),
-        ),
-      );
+      return yield* new VoiceTranscriptionRequestError({
+        message: describeVoiceTranscriptionFailure(response.status, body),
+      });
     }).pipe(Effect.provide(PrimaryEnvironmentHttp.layer)),
   );
 }

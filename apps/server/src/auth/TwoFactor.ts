@@ -52,31 +52,30 @@ export const make = Effect.gen(function* () {
         return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64");
       }),
     );
-  const decrypt = (encrypted: string) =>
-    Effect.gen(function* () {
-      // Never silently replace a lost encryption key for an existing enrollment.
-      const stored = yield* secrets.get("two-factor-encryption");
-      if (Option.isNone(stored))
-        return yield* new TwoFactorError({
-          message: "Two-factor key unavailable. Restore the server secrets backup.",
-        });
-      return yield* Effect.try({
-        try: () => {
-          const bytes = Buffer.from(encrypted, "base64");
-          const cipher = NodeCrypto.createDecipheriv(
-            "aes-256-gcm",
-            stored.value,
-            bytes.subarray(0, 12),
-          );
-          cipher.setAuthTag(bytes.subarray(12, 28));
-          return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]);
-        },
-        catch: () =>
-          new TwoFactorError({
-            message: "Two-factor key unavailable. Restore the server secrets backup.",
-          }),
+  const decrypt = Effect.fn("TwoFactor.decrypt")(function* (encrypted: string) {
+    // Never silently replace a lost encryption key for an existing enrollment.
+    const stored = yield* secrets.get("two-factor-encryption");
+    if (Option.isNone(stored))
+      return yield* new TwoFactorError({
+        message: "Two-factor key unavailable. Restore the server secrets backup.",
       });
+    return yield* Effect.try({
+      try: () => {
+        const bytes = Buffer.from(encrypted, "base64");
+        const cipher = NodeCrypto.createDecipheriv(
+          "aes-256-gcm",
+          stored.value,
+          bytes.subarray(0, 12),
+        );
+        cipher.setAuthTag(bytes.subarray(12, 28));
+        return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]);
+      },
+      catch: () =>
+        new TwoFactorError({
+          message: "Two-factor key unavailable. Restore the server secrets backup.",
+        }),
     });
+  });
   const status = Effect.fn("TwoFactor.status")(function* (session: TwoFactorSession) {
     const enabled = (yield* read()).length > 0;
     if (session.issuedLocally) return { enabled, required: false, expiresAt: null };

@@ -1,13 +1,7 @@
 /**
- * Top comments for a YouTube video, via the official YouTube Data API v3
- * (`commentThreads.list`, 1 quota unit per call, 10,000 units/day by default).
- *
- * Why the API and not scraping: yt-dlp is answered with "Sign in to confirm
- * you're not a bot" from datacenter IPs (verified on the T3 host 2026-10-19),
- * while the API is keyed and IP-independent.
- *
- * Dependency-free on purpose (global `fetch` only): the `ytcomments` CLI
- * (scripts/ytcomments.ts) and any server-side caller share this one module.
+ * Top comments for a YouTube video via the YouTube Data API v3 (`commentThreads.list`).
+ * The API is used because yt-dlp gets bot-checked from datacenter IPs.
+ * Dependency-free on purpose (global `fetch` only) so the CLI and servers share it.
  *
  * @module youtubeComments
  */
@@ -35,6 +29,7 @@ export type YoutubeCommentsErrorCode =
   | "QUOTA_EXCEEDED"
   | "UPSTREAM_ERROR";
 
+// @effect-diagnostics-next-line extendsNativeError:off - this module is dependency-free on purpose and throws plain errors.
 export class YoutubeCommentsError extends Error {
   readonly code: YoutubeCommentsErrorCode;
   constructor(code: YoutubeCommentsErrorCode, message: string) {
@@ -315,7 +310,7 @@ export function formatYoutubeComments(
   const date = (iso: string) => iso.slice(0, 10);
   const { video } = result;
   const lines = [
-    `${video.title} — ${video.channel}`,
+    `${video.title}: ${video.channel}`,
     `${video.commentCount ?? "?"} comments · showing ${result.comments.length} ${
       result.order === "relevance" ? "top" : "newest"
     }`,

@@ -90,6 +90,10 @@ import Migration0077 from "./Migrations/073_ActiveTurnItemIndexes.ts";
 import Migration0078 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
 import Migration0079 from "./Migrations/075_SubagentDeliveryState.ts";
 import Migration0080 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
+import Migration0081 from "./Migrations/077_RepairBooleanSettledOverride.ts";
+import Migration0082 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
+import Migration0083 from "./Migrations/079_DelegatedRecoveryIndexes.ts";
+import Migration0084 from "./Migrations/080_ScheduledTaskThreadMode.ts";
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -166,7 +170,7 @@ export const migrationEntries = [
   [66, "ThreadFailureLookupIndex", Migration0066],
   [67, "DropUnusedV1Projections", Migration0067],
   [68, "CanonicalizeThreadPullRequestLinks", Migration0068],
-  // Upstream 065..076 at +4.
+  // Upstream 065..080 at +4.
   [69, "CodexUsageNativeTurnIndex", Migration0069],
   [70, "RepairClientSettlementTimestamps", Migration0070],
   [71, "WebhookDedupe", Migration0071],
@@ -179,6 +183,10 @@ export const migrationEntries = [
   [78, "ExcludeAttachmentPlaceholdersFromSearch", Migration0078],
   [79, "SubagentDeliveryState", Migration0079],
   [80, "ProjectionProjectsPinArchive", Migration0080],
+  [81, "RepairBooleanSettledOverride", Migration0081],
+  [82, "DropOrchestrationEventCorrelationIndex", Migration0082],
+  [83, "DelegatedRecoveryIndexes", Migration0083],
+  [84, "ScheduledTaskThreadMode", Migration0084],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

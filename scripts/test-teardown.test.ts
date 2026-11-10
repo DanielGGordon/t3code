@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

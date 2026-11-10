@@ -1,3 +1,4 @@
+// @effect-diagnostics extendsNativeError:off globalDate:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Shared logic for the local test-deployment framework.
 //
 // These scripts intentionally avoid the repo's Effect toolchain: they are

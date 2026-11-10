@@ -1,12 +1,6 @@
-// Fork: end-to-end resume behaviour of threads written by `t3 import sync`.
-//
-//  1. The first send in an imported thread resumes the native Claude session
-//     in place and does NOT also prepend the legacy-import summary handoff
-//     (Claude already holds that history).
-//  2. `t3 session reset` refuses while the provider session is loaded; once it
-//     is released, reset detaches the thread and the next send opens a NEW
-//     provider thread (fresh native session) with the thread's history handed
-//     over as context.
+// Fork: resume of threads written by `t3 import sync`. The first send resumes the native session in
+// place without the legacy summary handoff; `t3 session reset` refuses while the session is loaded,
+// then the next send opens a NEW provider thread with history handed over as context.
 import { assert, describe, it } from "@effect/vitest";
 import {
   CommandId,

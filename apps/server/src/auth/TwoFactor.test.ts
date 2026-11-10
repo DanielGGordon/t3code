@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthSessionId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
@@ -14,7 +15,7 @@ import * as TwoFactor from "./TwoFactor.ts";
 import { base32, matchingTotpStep, totp } from "./totp.ts";
 const layer = Layer.mergeAll(SqlitePersistence.layerMemory, ServerSecretStore.layer).pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-two-factor-" })),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const a = AuthSessionId.make("session-a");
 const b = AuthSessionId.make("session-b");

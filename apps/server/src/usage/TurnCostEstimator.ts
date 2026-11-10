@@ -1,16 +1,7 @@
 /**
- * Fork (thread spend): prices one provider turn's token usage against the
- * LiteLLM rate table `UsageService` already maintains for the usage page.
- *
- * Claude reports its own cost (`total_cost_usd`, see ClaudeAdapterV2), so this
- * only fills turns that arrive without `costUsd` — Codex and the other
- * token-reporting drivers. The result is an API-equivalent estimate, not a
- * bill.
- *
- * Exposed as a `Context.Reference` whose default prices nothing, so every
- * layer that builds the provider event ingestor (tests, CLI runtimes) keeps
- * working unchanged; the server provides `layer` for real pricing.
- *
+ * Fork (thread spend): prices a provider turn's token usage against `UsageService`'s LiteLLM rate
+ * table, only for turns without `costUsd` (Claude reports its own). An API-equivalent estimate. A
+ * `Context.Reference` defaulting to no pricing so other runtimes work unchanged.
  * @module TurnCostEstimator
  */
 import type { ModelSelection, ProviderDriverKind, TurnTokenUsage } from "@t3tools/contracts";
@@ -92,13 +83,11 @@ export interface TurnCostEstimatorShape {
 
 export class TurnCostEstimator extends Context.Reference<TurnCostEstimatorShape>(
   "t3/usage/TurnCostEstimator",
-  { defaultValue: () => ({ estimate: () => Effect.succeed(undefined) }) },
+  { defaultValue: () => ({ estimate: () => Effect.undefined }) },
 ) {}
 
 /** Prices nothing; turns keep whatever cost their adapter reported. */
-export const layerNoop = Layer.succeed(TurnCostEstimator, {
-  estimate: () => Effect.succeed(undefined),
-});
+export const layerNoop = Layer.succeed(TurnCostEstimator, TurnCostEstimator.defaultValue());
 
 export const layer = Layer.effect(
   TurnCostEstimator,

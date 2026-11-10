@@ -37,7 +37,7 @@ const makeAuth = (
   const layer = Layer.mock(EnvironmentAuth.EnvironmentAuth, {
     awaitSessionInvalidation: () => invalidated,
     authenticateWebSocketUpgrade: (request) => {
-      requests.push(request.originalUrl);
+      requests.push(request.url);
       return error
         ? Effect.fail(error)
         : Effect.succeed({

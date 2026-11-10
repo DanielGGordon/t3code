@@ -126,6 +126,10 @@ describe("reconcileMigrationLedger", () => {
         [78, "ExcludeAttachmentPlaceholdersFromSearch"],
         [79, "SubagentDeliveryState"],
         [80, "ProjectionProjectsPinArchive"],
+        [81, "RepairBooleanSettledOverride"],
+        [82, "DropOrchestrationEventCorrelationIndex"],
+        [83, "DelegatedRecoveryIndexes"],
+        [84, "ScheduledTaskThreadMode"],
       ]);
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
 
@@ -184,7 +188,7 @@ describe("reconcileMigrationLedger", () => {
         executed.map(([id]) => id),
         [
           33, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
-          77, 78, 79, 80,
+          77, 78, 79, 80, 81, 82, 83, 84,
         ],
       );
       assert.deepStrictEqual(yield* readLedger, migrationManifest);

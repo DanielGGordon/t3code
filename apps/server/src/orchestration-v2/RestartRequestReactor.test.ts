@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -220,5 +221,8 @@ it.live("flags a thread when a finalized run assistant message asks for a restar
     // The single worker processes in order, so the earlier ignored messages
     // were classified before the ask: the imported thread stays unflagged.
     assert.isNull((yield* orchestrator.getThreadShell(importedThreadId))?.restartRequest ?? null);
-  }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerTest, NodeServices.layer))),
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(layerTest, NodeServices.layer, NodeCrypto.layer)),
+  ),
 );

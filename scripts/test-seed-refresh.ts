@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Build / refresh the curated seed template for the test-deploy framework.
 //
 //   node scripts/test-seed-refresh.ts \

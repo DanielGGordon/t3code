@@ -254,7 +254,7 @@ describe("formatYoutubeComments", () => {
       { maxChars: 20, replies: 1 },
     );
     expect(text.split("\n")).toEqual([
-      "T — C",
+      "T: C",
       "3 comments · showing 1 top",
       "",
       "1. [7♥] @a · 2026-10-18: xxxxxxxxxxxxxxxxxxx…  (1 reply)",

@@ -1,11 +1,7 @@
 /**
- * Inbound external notifications (fork). Sources, normally through the Alfred
- * hub, push with a bearer token holding `notifications:write`:
- *
- * - `PUT  /api/notifications/:source/:sourceId` — idempotent upsert.
- * - `POST /api/notifications/:source/:sourceId/resolve` — idempotent resolve.
- *
- * Contract and examples: docs/user/notifications-api.md.
+ * Inbound external notifications (fork): sources push with a `notifications:write` bearer token via
+ * `PUT /api/notifications/:source/:sourceId` (upsert) and `POST .../resolve`, both idempotent.
+ * Contract: docs/user/notifications-api.md.
  */
 import {
   AuthNotificationsWriteScope,
