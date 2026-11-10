@@ -823,7 +823,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
-    // Fork: POST /api/voice/transcribe.
+    // Fork: POST /api/fork/voice/transcribe.
     voiceTranscriptionRouteLayer,
     // Fork: POST /api/fork/import/claude-sync, /api/fork/session/reset (t3 CLI).
     forkRouteLayer,

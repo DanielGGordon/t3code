@@ -30,7 +30,7 @@ export function describeVoiceTranscriptionFailure(status: number, body: unknown)
 }
 
 /**
- * Upload a recording to the primary environment's `/api/voice/transcribe`
+ * Upload a recording to the primary environment's `/api/fork/voice/transcribe`
  * and return the transcript. Auth (cookie in the browser, bearer token in the
  * desktop app) comes from the shared primary-environment HTTP layer.
  */

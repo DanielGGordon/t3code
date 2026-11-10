@@ -32,7 +32,7 @@ const failureResponse = (reason: VoiceTranscriptionFailureReason, message: strin
   });
 
 /**
- * `POST /api/voice/transcribe` — body is the raw recording, `Content-Type` its
+ * `POST /api/fork/voice/transcribe` — body is the raw recording, `Content-Type` its
  * MIME type. Same auth as the other raw routes (an operate-scoped session).
  */
 export const voiceTranscriptionRouteLayer = HttpRouter.add(

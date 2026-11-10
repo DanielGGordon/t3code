@@ -152,7 +152,7 @@ records a clip and has this server transcribe it. Tap it to record, then:
 - **✕** — stop and throw the recording away.
 
 The browser records the clip and uploads it to the server
-(`POST /api/voice/transcribe`), which transcribes it — with a local Whisper
+(`POST /api/fork/voice/transcribe`), which transcribes it — with a local Whisper
 server, OpenAI, or both — and returns the text. Recordings stop on their own after 10 minutes. Inserting a transcript does
 not focus the text box, so on a touch screen the on-screen keyboard stays down.
 
