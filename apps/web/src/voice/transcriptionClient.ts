@@ -44,16 +44,14 @@ export function transcribeVoiceRecording(recording: Blob): Promise<string> {
       ).pipe(
         HttpClientRequest.bodyUint8Array(bytes, recording.type || DEFAULT_RECORDING_MIME_TYPE),
       );
-      const response = yield* client
-        .execute(request)
-        .pipe(
-          Effect.mapError(
-            () =>
-              new VoiceTranscriptionRequestError({
-                message: "Could not reach the server to transcribe.",
-              }),
-          ),
-        );
+      const response = yield* client.execute(request).pipe(
+        Effect.mapError(
+          () =>
+            new VoiceTranscriptionRequestError({
+              message: "Could not reach the server to transcribe.",
+            }),
+        ),
+      );
       const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
       const result = response.status === 200 ? decodeResult(body) : Option.none();
       if (Option.isSome(result)) return result.value.text;
