@@ -1,10 +1,11 @@
 /**
  * Speech-to-text for the composer's voice input: forwards the clip to an OpenAI-compatible endpoint.
  * `T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL` (self-hosted Whisper) is tried first, OpenAI is the fallback;
- * the key is re-read on every request so it can change without a restart.
- * `T3CODE_VOICE_TRANSCRIPTION_PROMPT` goes to both backends as Whisper's `prompt` vocabulary hint.
+ * the key is re-read on every request. `T3CODE_VOICE_TRANSCRIPTION_PROMPT` goes to both as Whisper's
+ * `prompt` hint, followed by any text already transcribed from the same recording.
  */
 import {
+  VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS,
   type VoiceTranscriptionFailureReason,
   VoiceTranscriptionFailureReason as VoiceTranscriptionFailureReasonSchema,
 } from "@t3tools/contracts";
@@ -80,6 +81,35 @@ export function describeUpstreamFailure(status: number, body: string): string {
   return `The transcription service answered HTTP ${status}.`;
 }
 
+/**
+ * The text already transcribed from the same recording, made safe to put in Whisper's prompt:
+ * control characters become spaces, whitespace collapses, and only the last
+ * `VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS` characters are kept (from a whole word). Undefined when
+ * nothing is left.
+ */
+export function normalizeTranscriptionContext(raw: string | undefined): string | undefined {
+  let text = (raw ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length > VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS) {
+    text = text.slice(-VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS);
+    const firstSpace = text.indexOf(" ");
+    text = firstSpace === -1 ? text : text.slice(firstSpace + 1);
+  }
+  return text.length > 0 ? text : undefined;
+}
+
+/** The configured vocabulary hint followed by the recording's text so far, the way Whisper reads a transcript. */
+function composeTranscriptionPrompt(
+  vocabulary: string | undefined,
+  context: string | undefined,
+): string | undefined {
+  if (!context) return vocabulary;
+  if (!vocabulary) return context;
+  return `${/[.!?]$/.test(vocabulary) ? vocabulary : `${vocabulary}.`} ${context}`;
+}
+
 /** Turns a configured base URL (`http://127.0.0.1:8650`) into its transcription endpoint. */
 export function localTranscriptionsUrl(baseUrl: string): string {
   return `${baseUrl.trim().replace(/\/+$/, "")}/v1/audio/transcriptions`;
@@ -91,6 +121,8 @@ export class VoiceTranscription extends Context.Service<
     readonly transcribe: (input: {
       readonly audio: Uint8Array;
       readonly mimeType: string;
+      /** The end of the text already transcribed from the same recording (see `normalizeTranscriptionContext`). */
+      readonly context?: string | undefined;
     }) => Effect.Effect<string, VoiceTranscriptionError>;
   }
 >()("t3/voice/VoiceTranscription") {}
@@ -161,12 +193,20 @@ export const make = Effect.gen(function* () {
       readonly apiKey: string | undefined;
       readonly timeout: Duration.Duration;
     },
-    input: { readonly audio: Uint8Array; readonly mimeType: string },
+    input: {
+      readonly audio: Uint8Array;
+      readonly mimeType: string;
+      readonly context?: string | undefined;
+    },
   ) {
     const form = new FormData();
     form.append("model", target.model);
     form.append("response_format", "json");
-    if (Option.isSome(prompt)) form.append("prompt", prompt.value);
+    const requestPrompt = composeTranscriptionPrompt(
+      Option.getOrUndefined(prompt),
+      normalizeTranscriptionContext(input.context),
+    );
+    if (requestPrompt !== undefined) form.append("prompt", requestPrompt);
     form.append(
       "file",
       new Blob([input.audio], { type: input.mimeType }),
@@ -206,6 +246,7 @@ export const make = Effect.gen(function* () {
   const transcribe = Effect.fn("VoiceTranscription.transcribe")(function* (input: {
     readonly audio: Uint8Array;
     readonly mimeType: string;
+    readonly context?: string | undefined;
   }) {
     if (input.audio.byteLength === 0) {
       return yield* fail("empty_audio", "The recording was empty.");

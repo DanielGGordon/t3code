@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useStableCallback } from "../hooks/useStableCallback";
-import { startVoiceRecording, type VoiceRecording } from "./recorder";
-import { transcribeVoiceRecording } from "./transcriptionClient";
+import { startVoiceDictationSession, type VoiceDictationSession } from "./voiceSession";
 
 /** What to do with the transcript once it arrives. */
 export type VoiceDictationFinishMode = "insert" | "send";
@@ -27,7 +26,7 @@ export function useVoiceDictation(options: {
 }): VoiceDictation {
   const [phase, setPhase] = useState<VoiceDictationPhase>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
-  const recordingRef = useRef<VoiceRecording | null>(null);
+  const recordingRef = useRef<VoiceDictationSession | null>(null);
   const startedAtRef = useRef(0);
   // Bumped on cancel/unmount so a late start or transcript is ignored.
   const generationRef = useRef(0);
@@ -41,15 +40,20 @@ export function useVoiceDictation(options: {
     const generation = generationRef.current;
     setPhase("transcribing");
     void recording
-      .stop()
-      .then((audio) => transcribeVoiceRecording(audio))
+      .finish()
       .then(
-        (text) => {
+        ({ text, error }) => {
           if (generation !== generationRef.current) return;
-          if (text.trim().length === 0) {
-            onError("No speech was detected.");
+          const transcript = text.trim();
+          if (transcript.length === 0) {
+            onError(error ? error.message : "No speech was detected.");
+          } else if (error) {
+            // Part of the recording failed: let the user look at what was heard, even if they
+            // asked to send it.
+            onTranscript(transcript, "insert");
+            onError(`Part of the recording could not be transcribed: ${error.message}`);
           } else {
-            onTranscript(text.trim(), mode);
+            onTranscript(transcript, mode);
           }
         },
         (error: unknown) => {
@@ -73,7 +77,7 @@ export function useVoiceDictation(options: {
     if (recordingRef.current || phase !== "idle") return;
     const generation = ++generationRef.current;
     setPhase("starting");
-    void startVoiceRecording().then(
+    void startVoiceDictationSession().then(
       (recording) => {
         if (generation !== generationRef.current) {
           recording.cancel();
@@ -92,6 +96,7 @@ export function useVoiceDictation(options: {
     );
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the elapsed-time interval is a timer that exists only while recording
   useEffect(() => {
     if (phase !== "recording") return;
     const interval = window.setInterval(() => {
@@ -103,6 +108,7 @@ export function useVoiceDictation(options: {
   }, [finish, phase]);
 
   // Release the microphone if the composer unmounts mid-recording.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the microphone held outside React until unmount
   useEffect(
     () => () => {
       generationRef.current += 1;

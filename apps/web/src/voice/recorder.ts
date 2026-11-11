@@ -48,7 +48,7 @@ export class VoiceRecordingStartError extends Schema.TaggedError<VoiceRecordingS
   { message: Schema.String, cause: Schema.Defect() },
 ) {}
 
-function describeStartFailure(cause: unknown): string {
+export function describeStartFailure(cause: unknown): string {
   const name = cause instanceof DOMException ? cause.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") {
     return "Microphone access was blocked. Allow it in the browser's site settings.";

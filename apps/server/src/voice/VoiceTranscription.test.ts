@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
+import { VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS } from "@t3tools/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as VoiceTranscription from "./VoiceTranscription.ts";
 
@@ -70,10 +71,14 @@ const makeHarness = (options: {
     Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.env ?? {} }))),
   );
 
-  const transcribe = (audio = new Uint8Array([1, 2, 3]), mimeType = "audio/webm;codecs=opus") =>
+  const transcribe = (
+    audio = new Uint8Array([1, 2, 3]),
+    mimeType = "audio/webm;codecs=opus",
+    context?: string,
+  ) =>
     Effect.gen(function* () {
       const service = yield* VoiceTranscription.VoiceTranscription;
-      return yield* service.transcribe({ audio, mimeType });
+      return yield* service.transcribe({ audio, mimeType, context });
     }).pipe(Effect.provide(layer));
 
   return { captured, transcribe };
@@ -92,6 +97,22 @@ describe("transcriptionFileNameForMimeType", () => {
     );
     assert.equal(VoiceTranscription.transcriptionFileNameForMimeType("audio/x-wav"), "speech.wav");
     assert.equal(VoiceTranscription.transcriptionFileNameForMimeType(""), "speech.webm");
+  });
+});
+
+describe("normalizeTranscriptionContext", () => {
+  it("collapses whitespace and control characters, and drops an empty context", () => {
+    assert.equal(VoiceTranscription.normalizeTranscriptionContext(" a\u0000b\r\n  c\t"), "a b c");
+    assert.equal(VoiceTranscription.normalizeTranscriptionContext("  \n "), undefined);
+    assert.equal(VoiceTranscription.normalizeTranscriptionContext(undefined), undefined);
+  });
+
+  it("keeps the end of a long context, starting at a whole word", () => {
+    const long = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+    const kept = VoiceTranscription.normalizeTranscriptionContext(long) ?? "";
+    assert.isAtMost(kept.length, VOICE_TRANSCRIPTION_CONTEXT_MAX_CHARS);
+    assert.isTrue(long.endsWith(kept));
+    assert.match(kept, /^word\d+/);
   });
 });
 
@@ -259,6 +280,34 @@ describe("VoiceTranscription with a local Whisper server", () => {
         harness.captured.map((request) => request.prompt),
         ["T3 Code, Tailscale, Techloq.", "T3 Code, Tailscale, Techloq."],
       );
+    }),
+  );
+
+  it.effect("adds the recording's text so far after the vocabulary prompt on both backends", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        storedKey: "sk-stored",
+        env: {
+          T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650",
+          T3CODE_VOICE_TRANSCRIPTION_PROMPT: "T3 Code, Tailscale",
+        },
+        respond: (url) => (url === LOCAL_URL ? "unreachable" : Response.json({ text: "ok" })),
+      });
+      yield* harness.transcribe(undefined, undefined, "  First part,\nthen more ");
+      assert.deepEqual(
+        harness.captured.map((request) => request.prompt),
+        ["T3 Code, Tailscale. First part, then more", "T3 Code, Tailscale. First part, then more"],
+      );
+    }),
+  );
+
+  it.effect("uses the recording's text alone when no vocabulary prompt is set", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        env: { T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL: "http://127.0.0.1:8650" },
+      });
+      yield* harness.transcribe(undefined, undefined, "Move the migration step.");
+      assert.equal(harness.captured[0]?.prompt, "Move the migration step.");
     }),
   );
 

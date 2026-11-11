@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { formatVoiceDictationElapsed } from "./useVoiceDictation";
 import {
   describeVoiceTranscriptionFailure,
+  isRetryableVoiceTranscriptionFailure,
   transcribeVoiceRecording,
   VoiceTranscriptionRequestError,
 } from "./transcriptionClient";
@@ -43,6 +44,42 @@ describe("transcribeVoiceRecording", () => {
     expect(request.credentials).toBe("include");
     expect(request.headers.get("content-type")).toBe("audio/webm;codecs=opus");
     expect(new Uint8Array(await request.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("passes the text so far as the context parameter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ text: "more" }, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    stubBrowserPrimary();
+
+    await transcribeVoiceRecording(new Blob([new Uint8Array([1])], { type: "audio/wav" }), {
+      context: "Move the migration step & retry",
+    });
+
+    const request = new Request(fetchMock.mock.calls[0]?.[0], fetchMock.mock.calls[0]?.[1]);
+    expect(new URL(request.url).searchParams.get("context")).toBe(
+      "Move the migration step & retry",
+    );
+  });
+
+  it("marks failures worth retrying", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    stubBrowserPrimary();
+    const offline = await transcribeVoiceRecording(new Blob([new Uint8Array([1])])).catch(
+      (error: VoiceTranscriptionRequestError) => error,
+    );
+    expect((offline as VoiceTranscriptionRequestError).retryable).toBe(true);
+
+    expect(
+      isRetryableVoiceTranscriptionFailure(502, { reason: "upstream_error", message: "x" }),
+    ).toBe(true);
+    expect(
+      isRetryableVoiceTranscriptionFailure(503, { reason: "not_configured", message: "x" }),
+    ).toBe(false);
+    expect(
+      isRetryableVoiceTranscriptionFailure(413, { reason: "audio_too_large", message: "x" }),
+    ).toBe(false);
+    expect(isRetryableVoiceTranscriptionFailure(503, null)).toBe(true);
+    expect(isRetryableVoiceTranscriptionFailure(401, null)).toBe(false);
   });
 
   it("surfaces the server's failure message", async () => {

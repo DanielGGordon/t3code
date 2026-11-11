@@ -151,9 +151,15 @@ records a clip and has this server transcribe it. Tap it to record, then:
 - **↑ (send)** — stop and send the transcript straight away.
 - **✕** — stop and throw the recording away.
 
-The browser records the clip and uploads it to the server
-(`POST /api/fork/voice/transcribe`), which transcribes it — with a local Whisper
-server, OpenAI, or both — and returns the text. Recordings stop on their own after 10 minutes. Inserting a transcript does
+While you talk, the browser cuts the recording at pauses into pieces of 4–15 seconds
+and uploads each one as soon as it is cut (`POST /api/fork/voice/transcribe`). The server
+transcribes them — with a local Whisper server, OpenAI, or both — one after another,
+so when you tap ✓ or ↑ only the last piece is left to wait for (a couple of seconds,
+however long you talked). The text so far goes along with each piece as Whisper's prompt
+(`?context=`, last 400 characters), so sentences and capitalisation carry across the
+cuts. If a piece fails for good, the text that was transcribed is inserted for you to
+review instead of being sent. Browsers without Web Audio fall back to uploading one clip
+at the end. Recordings stop on their own after 10 minutes. Inserting a transcript does
 not focus the text box, so on a touch screen the on-screen keyboard stays down.
 
 ### Server setup
