@@ -1,19 +1,7 @@
 /**
- * Portable parser for Claude Code conversation transcripts (JSONL).
- *
- * Reads a `.jsonl` transcript (one JSON object per line) and extracts the
- * minimal data needed to import a conversation into another system.
- *
- * This module is intentionally dependency-free (pure parsing, no T3/Effect
- * imports) so it can be reused or extracted into its own package later.
- *
- * "Phase A minimal": text turns only. Tool calls, tool results and sub-agent
- * (sidechain) handling are deliberately deferred to a later phase. The code is
- * structured so that those extensions slot in cleanly:
- *  - Each emitted message keeps its `uuid` (future idempotency key).
- *  - We classify line types in one place so new types can be handled later.
- *  - We never reconstruct the parentUuid tree here (deferred to a later phase);
- *    we rely on natural file (append) order instead.
+ * Portable parser for Claude Code JSONL transcripts, dependency-free so it can be extracted.
+ * Text turns only for now; each message keeps its `uuid` (idempotency key), line types are classified
+ * in one place, and the parentUuid tree is never rebuilt: file append order is used instead.
  */
 
 export interface ParsedClaudeMessage {

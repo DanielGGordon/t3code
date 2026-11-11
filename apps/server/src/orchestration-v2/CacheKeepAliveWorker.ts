@@ -27,11 +27,9 @@ import * as ThreadManagement from "./ThreadManagementService.ts";
 /** The ping window is five minutes wide, so a sweep every 30 s is plenty. */
 const SWEEP_INTERVAL_MS = 30_000;
 /**
- * Pings tried per idle period: the first, and up to two retries after an
- * infrastructure failure (a busy database, say). Each attempt has its own
- * command id, since a failed command's receipt is permanent. A refusal from the
- * orchestrator's guard is final; it also guarantees one ping per idle period,
- * since an accepted ping starts a run and moves the thread on.
+ * Pings per idle period: the first plus up to two retries after an infrastructure failure, each with
+ * its own command id (a failed command's receipt is permanent). An orchestrator guard refusal is final
+ * and guarantees one ping per idle period.
  */
 const MAX_ATTEMPTS = 3;
 
@@ -133,13 +131,13 @@ const makeSweep = Effect.gen(function* () {
           }),
         );
       }).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
-            : Effect.logWarning("orchestration-v2.cache-keep-alive.sweep-failed", {
-                threadId,
-                cause,
-              }),
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) =>
+            Effect.logWarning("orchestration-v2.cache-keep-alive.sweep-failed", {
+              threadId,
+              cause,
+            }),
         ),
       );
     }

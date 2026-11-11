@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Tear down a test-deploy slot.
 //
 //   node scripts/test-teardown.ts --port <ext>                 # stop + release claim; KEEP base-dir

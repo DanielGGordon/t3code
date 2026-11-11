@@ -1,12 +1,7 @@
 /**
- * restartRequestClassifier - Heuristic detection of "please restart the
- * server/service" asks in assistant messages.
- *
- * The orchestration-v2 RestartRequestReactor runs this over completed assistant
- * messages to raise a non-blocking "restart requested" flag on the chat. Because
- * the resulting UI (sidebar pill + sibling banner) never blocks anyone, we
- * optimize for recall with a few negative guards rather than perfect precision;
- * a human can always dismiss a false positive.
+ * restartRequestClassifier: heuristic detection of "please restart the server" asks in assistant
+ * messages for RestartRequestReactor. The resulting UI never blocks, so it favors recall with a few
+ * negative guards; a human can dismiss a false positive.
  */
 
 export interface RestartRequestClassification {

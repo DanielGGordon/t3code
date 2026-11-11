@@ -53,6 +53,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.settle",
   "thread.snoozeHour",
   "thread.pin",
+  "thread.regenerateTitle",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
@@ -102,6 +103,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.sendAlternate",
   "composer.sendBackground",
   "composer.sendAndNewThread",
+  "composer.dictation",
   "composer.host",
   "composer.cycleHost",
   "composer.effort",

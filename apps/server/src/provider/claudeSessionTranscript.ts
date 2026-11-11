@@ -1,19 +1,9 @@
 import type { ThreadId } from "@t3tools/contracts";
 
 /**
- * Helpers for reasoning about where Claude Code keeps a session's transcript
- * and for recognising the CLI's "transcript is gone" resume failure.
- *
- * Claude Code persists each session as
- * `~/.claude/projects/<encoded cwd>/<session id>.jsonl`, where the encoding
- * replaces every character outside `[A-Za-z0-9]` with `-`. When T3 resumes a
- * thread it passes `--resume <session id>`; if that file no longer exists on
- * this machine (the thread was imported from elsewhere, the host was
- * reprovisioned, the file was pruned) the CLI answers with a `result` error
- * whose text starts with `No conversation found with session ID:`. Without
- * special handling that message is immediately buried under the generic
- * "Claude runtime stream failed." that follows when the process exits, so the
- * user never learns what actually happened or how to fix it.
+ * Where Claude Code keeps a session's transcript (`~/.claude/projects/<cwd with non-alphanumerics
+ * as '-'>/<session id>.jsonl`) and recognising the CLI's "No conversation found with session ID:"
+ * resume failure, which would otherwise be buried under the generic "Claude runtime stream failed."
  */
 
 export const CLAUDE_PROJECTS_DIR_DISPLAY = "~/.claude/projects";
@@ -54,11 +44,8 @@ export interface MissingResumeTranscriptDetail {
 }
 
 /**
- * Build the user-facing explanation for a resume that failed because the
- * transcript is missing. Deliberately does NOT clear or rewrite the resume
- * cursor: the transcript may still be recoverable from another machine, and
- * discarding the pointer would make that impossible. `t3 session reset` is
- * the explicit opt-in for starting over.
+ * User-facing explanation for a resume whose transcript is missing. Deliberately does NOT clear the
+ * resume cursor: the transcript may be recoverable elsewhere. `t3 session reset` is the opt-in.
  */
 export function describeMissingResumeTranscript(input: {
   readonly threadId: ThreadId;

@@ -1,35 +1,8 @@
 /**
- * Pure planning logic for incremental Claude transcript sync.
- *
- * Given a freshly parsed transcript and a view of the already-imported T3
- * thread (if any), decide what the importer should do:
- *
- *  - `create`: no thread yet — import everything.
- *  - `append`: thread exists and is still a pure import mirror — append only
- *    the transcript messages that have not been imported yet.
- *  - `unchanged`: thread exists and already contains every transcript message.
- *  - `skip-forked`: the thread has been continued inside T3 (it has provider
- *    turns, or messages that did not come from the import path). Appending
- *    original-session messages onto a forked thread would corrupt it, so the
- *    importer must permanently leave it alone.
- *  - `skip-deleted`: the thread was deleted in T3 — do not resurrect it.
- *    This covers BOTH a projection row with `deletedAt` set (the normal
- *    `thread.delete` soft delete) and a thread stream that EVER existed in
- *    `orchestration_events` but has no projection row anymore
- *    (`threadStreamEverExisted` tombstone — e.g. a purged or rebuilt
- *    projection). A deleted imported thread must stay deleted forever.
- *
- * Dedup strategy: imported messages use the transcript entry `uuid` as their
- * T3 message id (see `runImport` in `cli/import.ts`), so "already imported"
- * is an exact id-set membership check — no counters or timestamp cursors.
- *
- * Fork detection: imported messages always have `turnId === null` and ids
- * drawn from the transcript. Anything else on the thread (a latest turn, a
- * message bound to a turn, or a message id the transcript cannot explain)
- * can only have been produced by the normal T3 pipeline.
- *
- * This module is intentionally dependency-free (no Effect/T3 imports) so it
- * is trivially unit-testable, mirroring `claudeTranscript.ts`.
+ * Pure planning logic for incremental Claude transcript sync: `create`, `append`, `unchanged`,
+ * `skip-forked` (continued inside T3; appending would corrupt it) or `skip-deleted` (never resurrect,
+ * including a stream that existed but lost its projection row). Dedup is an exact id-set check on
+ * transcript uuids. Dependency-free (no Effect/T3 imports) so it can be extracted.
  */
 
 import type { ParsedClaudeMessage, ParsedClaudeSession } from "./claudeTranscript.ts";
@@ -122,20 +95,9 @@ export interface ResumeBindingView {
 }
 
 /**
- * Map of Claude session ids that are already owned by another T3 thread's
- * resume binding: sessionId -> owning threadId.
- *
- * A transcript whose session id appears here must NOT be imported as its own
- * thread — the conversation already exists in T3. Two ways this happens:
- *
- *  - Native sessions: T3 spawns `claude` for a regular thread, and the CLI
- *    writes a transcript under `~/.claude/projects` like any other session.
- *  - forkSession continuations: continuing an imported thread forks to a NEW
- *    Claude session id (whose transcript contains the full copied history);
- *    the imported thread's cursor advances to that fork id.
- *
- * A binding whose thread IS `claude-import-<sessionId>` does not own the
- * session in this sense — that is the import mirror itself.
+ * Map of Claude session ids already owned by another T3 thread's resume binding (sessionId ->
+ * threadId). Such a transcript must not be imported again: it is either a native session T3 spawned
+ * or a forkSession continuation id. A binding to `claude-import-<sessionId>` is the mirror itself.
  */
 export function buildOwnedSessionIdMap(
   bindings: Iterable<ResumeBindingView>,
@@ -159,17 +121,10 @@ export function buildOwnedSessionIdMap(
 export const COPY_SHARE_THRESHOLD = 0.5;
 
 /**
- * Detect a fork-copy transcript: one whose messages largely already live on
- * a DIFFERENT thread. Continuing a Claude session with forkSession copies
- * the entire history into a brand-new session id, so a naive sweep imports
- * the copy as a duplicate thread. The resume-cursor ownership check only
- * knows the LATEST fork id; this content check also catches intermediate
- * forks whose cursor pointer has since moved on.
- *
- * `messageOwnerIndex` maps already-imported message ids (transcript uuids)
- * to their thread id. Returns the majority owner when at least
- * `COPY_SHARE_THRESHOLD` of the transcript's messages belong to another
- * thread, else null.
+ * Detect a fork-copy transcript: one whose messages largely already live on a DIFFERENT thread
+ * (forkSession copies the whole history to a new session id; the cursor check only knows the latest
+ * fork). Returns the majority owner when at least `COPY_SHARE_THRESHOLD` of messages belong to
+ * another thread, else null.
  */
 export function detectForkCopy(input: {
   readonly sessionMessages: ReadonlyArray<{ readonly uuid: string }>;

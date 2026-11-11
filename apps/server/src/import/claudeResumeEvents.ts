@@ -1,13 +1,8 @@
 /**
- * Fork: shared building blocks for binding a v2 thread to an existing native
- * Claude session (`t3 import sync`, the legacy v1 resume restore, and
- * `t3 session reset`).
- *
- * The resume contract (see `ProviderTurnStartService.providerThreadHasImportedNativeHistory`):
- * a provider thread marked `nativeMetadata.importedNativeHistory`, with a strong
- * `nativeThreadRef` to Claude session X and `firstRunOrdinal: null`, set as the thread's `activeProviderThreadId`, makes
- * the next T3 turn open Claude with `resume: X` (in place — Claude appends
- * T3's turns to X's transcript).
+ * Fork: shared building blocks for binding a v2 thread to an existing native Claude session.
+ * Resume contract: `importedNativeHistory` metadata, a strong `nativeThreadRef` to session X and
+ * `firstRunOrdinal: null` on the active provider thread make the next turn open Claude with `resume: X`
+ * (in place; see `ProviderTurnStartService.providerThreadHasImportedNativeHistory`).
  */
 import {
   EventId,

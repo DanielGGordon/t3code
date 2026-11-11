@@ -1,12 +1,11 @@
 import * as Schema from "effect/Schema";
 
 /**
- * Voice input: the browser records a short clip and POSTs the raw audio bytes
- * (body = the recording, `Content-Type` = its MIME type) to this route on the
- * primary environment; the server transcribes it and answers with
- * `VoiceTranscriptionResult`. Failures answer `VoiceTranscriptionFailure`.
+ * Voice input: the browser POSTs the raw recording (`Content-Type` = its MIME type) here and gets
+ * `VoiceTranscriptionResult`, or `VoiceTranscriptionFailure`.
+ * Not `/api/voice/transcribe`: upstream serves that path with a raw-PCM body.
  */
-export const VOICE_TRANSCRIPTION_ROUTE_PATH = "/api/voice/transcribe";
+export const VOICE_TRANSCRIPTION_ROUTE_PATH = "/api/fork/voice/transcribe";
 
 /**
  * Optional query parameter on the route: the end of the text already transcribed from the same

@@ -96,6 +96,7 @@ export function useVoiceDictation(options: {
     );
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the elapsed-time interval is a timer that exists only while recording
   useEffect(() => {
     if (phase !== "recording") return;
     const interval = window.setInterval(() => {
@@ -107,6 +108,7 @@ export function useVoiceDictation(options: {
   }, [finish, phase]);
 
   // Release the microphone if the composer unmounts mid-recording.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the microphone held outside React until unmount
   useEffect(
     () => () => {
       generationRef.current += 1;

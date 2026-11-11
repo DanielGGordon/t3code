@@ -1,3 +1,4 @@
+// @effect-diagnostics globalConsole:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Top comments of a YouTube video from the command line.
 //
 //   node scripts/ytcomments.ts <url|id> [-n 20] [--newest] [--replies 2] [--json]

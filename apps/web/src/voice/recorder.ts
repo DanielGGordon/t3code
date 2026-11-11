@@ -2,6 +2,8 @@
  * Thin wrapper over getUserMedia + MediaRecorder for one voice clip.
  */
 
+import * as Schema from "effect/Schema";
+
 /** Containers in preference order; every one is accepted by the transcriber. */
 const PREFERRED_RECORDING_MIME_TYPES = [
   "audio/webm;codecs=opus",
@@ -41,9 +43,10 @@ export interface VoiceRecording {
 }
 
 /** A failure starting the microphone; `message` is safe to show the user. */
-export class VoiceRecordingStartError extends Error {
-  override readonly name = "VoiceRecordingStartError";
-}
+export class VoiceRecordingStartError extends Schema.TaggedError<VoiceRecordingStartError>()(
+  "VoiceRecordingStartError",
+  { message: Schema.String, cause: Schema.Defect() },
+) {}
 
 export function describeStartFailure(cause: unknown): string {
   const name = cause instanceof DOMException ? cause.name : "";
@@ -64,7 +67,7 @@ export async function startVoiceRecording(): Promise<VoiceRecording> {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (cause) {
-    throw new VoiceRecordingStartError(describeStartFailure(cause), { cause });
+    throw new VoiceRecordingStartError({ message: describeStartFailure(cause), cause });
   }
   const releaseMicrophone = () => {
     for (const track of stream.getTracks()) track.stop();
@@ -76,7 +79,7 @@ export async function startVoiceRecording(): Promise<VoiceRecording> {
     recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   } catch (cause) {
     releaseMicrophone();
-    throw new VoiceRecordingStartError("This browser cannot record audio.", { cause });
+    throw new VoiceRecordingStartError({ message: "This browser cannot record audio.", cause });
   }
 
   const chunks: Blob[] = [];

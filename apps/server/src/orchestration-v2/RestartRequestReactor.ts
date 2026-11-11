@@ -1,15 +1,7 @@
 /**
- * Fork: raises the "agent asked for a server restart" flag on a thread.
- *
- * Watches the v2 domain-event stream for finalized assistant messages
- * (`message.updated` with `streaming: false`) that belong to a run — imported
- * and legacy history carry `runId: null` and are skipped — and runs the
- * heuristic classifier over the message text (v2 events carry the full text,
- * so no projection read is needed). On a match it dispatches
- * `thread.restart-request.set { requesting: true, source: "auto" }` unless the
- * thread already has a pending request. The flag clears when the user sends a
- * message (Orchestrator `message.dispatch`) or unflags it from the UI.
- *
+ * Fork: raises the "agent asked for a server restart" flag on a thread when a finalized assistant
+ * message belonging to a run (imported/legacy history has `runId: null`) matches the classifier,
+ * unless a request is already pending. Cleared by the next user message or from the UI.
  * @module RestartRequestReactor
  */
 import {
@@ -21,7 +13,7 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
@@ -52,10 +44,10 @@ export const isClassifiableAssistantMessage = (
   event.payload.streaming === false &&
   event.payload.runId !== null;
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
 
   const seen = new Set<MessageId>();
   const markSeen = (messageId: MessageId): boolean => {
@@ -75,7 +67,7 @@ export const make = Effect.gen(function* () {
     if (!classification.matched) return;
     const shell = yield* orchestrator.getThreadShell(message.threadId);
     if (shell === null || shell.restartRequest != null || shell.archivedAt !== null) return;
-    const uuid = yield* crypto.randomUUIDv4();
+    const uuid = yield* random.uuidV4();
     yield* orchestrator.dispatch({
       type: "thread.restart-request.set",
       commandId: CommandId.make(`server:restart-request-detected:${uuid}`),
@@ -88,14 +80,14 @@ export const make = Effect.gen(function* () {
 
   const processMessageSafely = (message: OrchestrationV2ConversationMessage) =>
     processMessage(message).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("restart request reactor failed to process message", {
-              threadId: message.threadId,
-              messageId: message.id,
-              cause: Cause.pretty(cause),
-            }),
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterruptsOnly(cause),
+        (cause) =>
+          Effect.logWarning("restart request reactor failed to process message", {
+            threadId: message.threadId,
+            messageId: message.id,
+            cause: Cause.pretty(cause),
+          }),
       ),
     );
 
@@ -109,12 +101,12 @@ export const make = Effect.gen(function* () {
             ? worker.enqueue(event.payload)
             : Effect.void,
         ).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : Effect.logWarning("restart request reactor event stream failed", {
-                  cause: Cause.pretty(cause),
-                }),
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("restart request reactor event stream failed", {
+                cause: Cause.pretty(cause),
+              }),
           ),
         ),
       );

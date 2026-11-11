@@ -40,7 +40,7 @@ describe("transcribeVoiceRecording", () => {
     expect(text).toBe("run the tests");
     const request = new Request(fetchMock.mock.calls[0]?.[0], fetchMock.mock.calls[0]?.[1]);
     expect(request.method).toBe("POST");
-    expect(new URL(request.url).pathname).toBe("/api/voice/transcribe");
+    expect(new URL(request.url).pathname).toBe("/api/fork/voice/transcribe");
     expect(request.credentials).toBe("include");
     expect(request.headers.get("content-type")).toBe("audio/webm;codecs=opus");
     expect(new Uint8Array(await request.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));

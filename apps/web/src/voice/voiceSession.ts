@@ -3,6 +3,7 @@
  * recording is cut at pauses and the pieces are transcribed while the user is still talking, so
  * `finish()` only waits for the last piece. Elsewhere it records one clip and uploads it at the end.
  */
+import * as Schema from "effect/Schema";
 import { createChunkTranscriber, type ChunkTranscript } from "./chunkTranscriber";
 import {
   ChunkedRecordingUnavailableError,
@@ -11,6 +12,8 @@ import {
 } from "./chunkedRecorder";
 import { startVoiceRecording } from "./recorder";
 import { transcribeVoiceRecording } from "./transcriptionClient";
+
+const isChunkedRecordingUnavailable = Schema.is(ChunkedRecordingUnavailableError);
 
 export interface VoiceDictationSession {
   /** Stops recording and resolves with the text of everything recorded; never rejects. */
@@ -54,7 +57,7 @@ export async function startVoiceDictationSession(): Promise<VoiceDictationSessio
       },
     };
   } catch (cause) {
-    if (cause instanceof ChunkedRecordingUnavailableError) return startSingleClipSession();
+    if (isChunkedRecordingUnavailable(cause)) return startSingleClipSession();
     throw cause;
   }
 }

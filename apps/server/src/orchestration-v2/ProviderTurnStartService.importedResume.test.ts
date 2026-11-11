@@ -1,10 +1,6 @@
-// Fork: imported native history must be resumed, not re-created.
-//
-// A provider thread written by an importer (upstream's AgentSessionImporter,
-// the fork's `t3 import sync`, or the legacy v1 resume seeder) carries the
-// native Claude session id as a strong `nativeThreadRef` but has no T3 turns.
-// The first send in such a thread must open the native session with `resume:`
-// — `sessionId:` would fail with "already in use" (or silently fork history).
+// Fork: imported native history must be resumed, not re-created. A provider thread with a strong
+// `nativeThreadRef` and no T3 turns must open the session with `resume:`; `sessionId:` would fail
+// with "already in use" or silently fork history.
 import { assert, describe, it } from "@effect/vitest";
 import {
   CommandId,

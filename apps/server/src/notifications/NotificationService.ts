@@ -1,17 +1,8 @@
 /**
- * External notifications: plain-text cards outside services push in over
- * `/api/notifications` (see `./http.ts`), streamed live to every client.
- *
- * A notification is `open` until it is resolved, which is terminal: by the
- * source (`resolve`), by a user (`dismiss`, or `act` once the source accepts
- * the signed callback), or by the expiry sweep. Resolved rows stay for 7 days
- * so a late upsert from the source cannot reopen them.
- *
- * Config (read at startup):
- * - `T3_NOTIFICATION_CALLBACK_SECRET`: HMAC key for action callbacks. Unset
- *   means notifications with actions are accepted but acting fails.
- * - `T3_NOTIFICATION_CALLBACK_ORIGINS`: comma list of allowed callback
- *   origins. Empty means any notification with actions is rejected.
+ * External notifications: plain-text cards pushed over `/api/notifications` (see `./http.ts`).
+ * `open` until resolved (terminal); resolved rows stay 7 days so a late upsert cannot reopen them.
+ * `T3_NOTIFICATION_CALLBACK_SECRET` (HMAC for action callbacks) and `T3_NOTIFICATION_CALLBACK_ORIGINS`
+ * (allowed origins; empty rejects notifications with actions) are read at startup.
  */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no createHmac.
 import * as NodeCrypto from "node:crypto";
@@ -278,8 +269,8 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.mapError(storageError));
   });
 
-  const upsert: NotificationService["Service"]["upsert"] = ({ source, sourceId, request }) =>
-    Effect.gen(function* () {
+  const upsert: NotificationService["Service"]["upsert"] = Effect.fn("NotificationService.upsert")(
+    function* ({ source, sourceId, request }) {
       const id = yield* notificationIdFor(source, sourceId);
       const actions = request.actions ?? [];
       if (new Set(actions.map((action) => action.id)).size !== actions.length) {
@@ -314,21 +305,21 @@ const make = Effect.gen(function* () {
         yield* expireDue(now);
         // The WHERE on the conflict branch is what keeps a resolved row resolved.
         yield* sql`
-          INSERT INTO notifications (
-            notification_id, source, source_id, kind, title, body, body_trust, url,
-            actions_json, callback_url, state, created_at, updated_at, expires_at
-          ) VALUES (
-            ${id}, ${source}, ${sourceId}, ${request.kind}, ${request.title}, ${request.body},
-            ${request.bodyTrust}, ${request.url ?? null}, ${encodeActions(actions)}, ${callbackUrl},
-            'open', ${now}, ${now}, ${expiresAt}
-          )
-          ON CONFLICT (notification_id) DO UPDATE SET
-            kind = excluded.kind, title = excluded.title, body = excluded.body,
-            body_trust = excluded.body_trust, url = excluded.url,
-            actions_json = excluded.actions_json, callback_url = excluded.callback_url,
-            expires_at = excluded.expires_at, updated_at = excluded.updated_at
-          WHERE notifications.state = 'open'
-        `.pipe(Effect.mapError(storageError));
+        INSERT INTO notifications (
+          notification_id, source, source_id, kind, title, body, body_trust, url,
+          actions_json, callback_url, state, created_at, updated_at, expires_at
+        ) VALUES (
+          ${id}, ${source}, ${sourceId}, ${request.kind}, ${request.title}, ${request.body},
+          ${request.bodyTrust}, ${request.url ?? null}, ${encodeActions(actions)}, ${callbackUrl},
+          'open', ${now}, ${now}, ${expiresAt}
+        )
+        ON CONFLICT (notification_id) DO UPDATE SET
+          kind = excluded.kind, title = excluded.title, body = excluded.body,
+          body_trust = excluded.body_trust, url = excluded.url,
+          actions_json = excluded.actions_json, callback_url = excluded.callback_url,
+          expires_at = excluded.expires_at, updated_at = excluded.updated_at
+        WHERE notifications.state = 'open'
+      `.pipe(Effect.mapError(storageError));
         yield* expireDue(now);
         return yield* findRow(id);
       }).pipe(
@@ -340,43 +331,46 @@ const make = Effect.gen(function* () {
         id: NotificationId.make(id),
         state: row?.state === "open" ? ("open" as const) : ("resolved" as const),
       };
-    });
+    },
+  );
 
-  const resolve: NotificationService["Service"]["resolve"] = ({ source, sourceId, request }) =>
-    Effect.gen(function* () {
-      const id = yield* notificationIdFor(source, sourceId);
-      const now = yield* nowIso;
-      const row = yield* Effect.gen(function* () {
-        yield* markResolved({
-          id,
-          resolution: request.resolution,
-          resolvedBy: "source",
-          label: request.resolvedBy ?? null,
-          now,
-        });
-        return yield* findRow(id);
-      }).pipe(
-        sql.withTransaction,
-        Effect.mapError((error) => (isNotificationError(error) ? error : storageError(error))),
-      );
-      if (row === undefined) return yield* notFound(id);
-      return {
-        id: NotificationId.make(id),
-        state: row.state === "open" ? ("open" as const) : ("resolved" as const),
-      };
-    });
+  const resolve: NotificationService["Service"]["resolve"] = Effect.fn(
+    "NotificationService.resolve",
+  )(function* ({ source, sourceId, request }) {
+    const id = yield* notificationIdFor(source, sourceId);
+    const now = yield* nowIso;
+    const row = yield* Effect.gen(function* () {
+      yield* markResolved({
+        id,
+        resolution: request.resolution,
+        resolvedBy: "source",
+        label: request.resolvedBy ?? null,
+        now,
+      });
+      return yield* findRow(id);
+    }).pipe(
+      sql.withTransaction,
+      Effect.mapError((error) => (isNotificationError(error) ? error : storageError(error))),
+    );
+    if (row === undefined) return yield* notFound(id);
+    return {
+      id: NotificationId.make(id),
+      state: row.state === "open" ? ("open" as const) : ("resolved" as const),
+    };
+  });
 
-  const list: NotificationService["Service"]["list"] = () =>
-    Effect.gen(function* () {
+  const list: NotificationService["Service"]["list"] = Effect.fn("NotificationService.list")(
+    function* () {
       const now = yield* nowIso;
       // Expired rows the sweep has not reached yet are hidden, not rewritten, on read.
       const rows = yield* sql<NotificationRow>`
-        SELECT * FROM notifications
-        WHERE state = 'open' AND (expires_at IS NULL OR expires_at > ${now})
-        ORDER BY created_at DESC, notification_id
-      `.pipe(Effect.mapError(storageError));
+      SELECT * FROM notifications
+      WHERE state = 'open' AND (expires_at IS NULL OR expires_at > ${now})
+      ORDER BY created_at DESC, notification_id
+    `.pipe(Effect.mapError(storageError));
       return { notifications: rows.map(toNotification) };
-    });
+    },
+  );
 
   const subscribeList: NotificationService["Service"]["subscribeList"] = () =>
     Stream.unwrap(
@@ -390,106 +384,106 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const dismiss: NotificationService["Service"]["dismiss"] = ({ id }) =>
-    Effect.gen(function* () {
-      // Resolving mid-delivery would let the source accept an action on a card already dismissed.
-      if ((yield* Ref.get(inFlight)).has(id)) {
-        return yield* new NotificationError({
-          message: "An action on this notification is being delivered.",
-          reason: "in_flight",
-          notificationId: id,
-        });
-      }
-      yield* markResolved({
-        id,
-        resolution: "dismissed",
-        resolvedBy: "t3",
-        label: null,
-        now: yield* nowIso,
+  const dismiss: NotificationService["Service"]["dismiss"] = Effect.fn(
+    "NotificationService.dismiss",
+  )(function* ({ id }) {
+    // Resolving mid-delivery would let the source accept an action on a card already dismissed.
+    if ((yield* Ref.get(inFlight)).has(id)) {
+      return yield* new NotificationError({
+        message: "An action on this notification is being delivered.",
+        reason: "in_flight",
+        notificationId: id,
       });
-      const row = yield* findRow(id);
-      if (row === undefined) return yield* notFound(id);
-      return mutationResult(row);
+    }
+    yield* markResolved({
+      id,
+      resolution: "dismissed",
+      resolvedBy: "t3",
+      label: null,
+      now: yield* nowIso,
     });
+    const row = yield* findRow(id);
+    if (row === undefined) return yield* notFound(id);
+    return mutationResult(row);
+  });
 
   /** Carries no cause: HTTP client errors embed the callback URL, which clients never see. */
   const deliveryFailed = (id: NotificationId, label: string) =>
     new NotificationError({
-      message: `Could not deliver '${label}' — try again.`,
+      message: `Could not deliver '${label}'. Try again.`,
       reason: "delivery_failed",
       notificationId: id,
     });
 
   /** Sends the callback; `Some(resolution)` when the source accepted or had already resolved it. */
-  const deliver = (input: {
+  const deliver = Effect.fn("NotificationService.deliver")(function* (input: {
     readonly row: NotificationRow;
     readonly action: NotificationAction;
     readonly callbackUrl: string;
     readonly secret: string;
-  }) =>
-    Effect.gen(function* () {
-      const { row, action } = input;
-      const id = NotificationId.make(row.notification_id);
-      const nowMs = yield* Clock.currentTimeMillis;
-      const rawBody = encodeCallbackBody({
-        notificationId: row.notification_id,
-        source: row.source,
-        sourceId: row.source_id,
-        actionId: action.id,
-        actedAt: isoAt(nowMs),
-      });
-      const request = HttpClientRequest.post(input.callbackUrl).pipe(
-        HttpClientRequest.bodyText(rawBody, "application/json"),
-        HttpClientRequest.setHeader(
-          NOTIFICATION_SIGNATURE_HEADER,
-          signNotificationCallback(input.secret, Math.floor(nowMs / 1000), rawBody),
-        ),
-      );
-      const outcome = yield* httpClient.execute(request).pipe(
-        Effect.flatMap((response) => {
-          if (response.status >= 200 && response.status < 300) {
-            return Effect.succeedSome(action.id);
-          }
-          if (response.status !== 404 && response.status !== 409) {
-            return Effect.succeed(Option.none<string>());
-          }
-          return response.json.pipe(
-            Effect.map((body) =>
-              typeof body === "object" &&
-              body !== null &&
-              (body as { readonly status?: unknown }).status === "already_resolved"
-                ? Option.some("external")
-                : Option.none<string>(),
-            ),
-            Effect.orElseSucceed(() => Option.none<string>()),
-          );
-        }),
-        // A redirect would carry the signed body somewhere the allowlist never saw.
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-        Effect.timeoutOption(CALLBACK_TIMEOUT),
-        // Log the failure kind only: the URL and body stay out of the log line.
-        Effect.tapError((error) =>
-          Effect.logWarning("Notification action could not reach its source", {
-            notificationId: row.notification_id,
-            actionId: action.id,
-            outcome: error.reason._tag,
-          }),
-        ),
-        Effect.mapError(() => deliveryFailed(id, action.label)),
-      );
-      if (Option.isNone(outcome) || Option.isNone(outcome.value)) {
-        yield* Effect.logWarning("Notification action was not accepted by its source", {
+  }) {
+    const { row, action } = input;
+    const id = NotificationId.make(row.notification_id);
+    const nowMs = yield* Clock.currentTimeMillis;
+    const rawBody = encodeCallbackBody({
+      notificationId: row.notification_id,
+      source: row.source,
+      sourceId: row.source_id,
+      actionId: action.id,
+      actedAt: isoAt(nowMs),
+    });
+    const request = HttpClientRequest.post(input.callbackUrl).pipe(
+      HttpClientRequest.bodyText(rawBody, "application/json"),
+      HttpClientRequest.setHeader(
+        NOTIFICATION_SIGNATURE_HEADER,
+        signNotificationCallback(input.secret, Math.floor(nowMs / 1000), rawBody),
+      ),
+    );
+    const outcome = yield* httpClient.execute(request).pipe(
+      Effect.flatMap((response) => {
+        if (response.status >= 200 && response.status < 300) {
+          return Effect.succeedSome(action.id);
+        }
+        if (response.status !== 404 && response.status !== 409) {
+          return Effect.succeed(Option.none<string>());
+        }
+        return response.json.pipe(
+          Effect.map((body) =>
+            typeof body === "object" &&
+            body !== null &&
+            (body as { readonly status?: unknown }).status === "already_resolved"
+              ? Option.some("external")
+              : Option.none<string>(),
+          ),
+          Effect.orElseSucceed(() => Option.none<string>()),
+        );
+      }),
+      // A redirect would carry the signed body somewhere the allowlist never saw.
+      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+      Effect.timeoutOption(CALLBACK_TIMEOUT),
+      // Log the failure kind only: the URL and body stay out of the log line.
+      Effect.tapError((error) =>
+        Effect.logWarning("Notification action could not reach its source", {
           notificationId: row.notification_id,
           actionId: action.id,
-          outcome: Option.isNone(outcome) ? "timeout" : "rejected",
-        });
-        return yield* deliveryFailed(id, action.label);
-      }
-      return outcome.value.value;
-    });
+          outcome: error.reason._tag,
+        }),
+      ),
+      Effect.mapError(() => deliveryFailed(id, action.label)),
+    );
+    if (Option.isNone(outcome) || Option.isNone(outcome.value)) {
+      yield* Effect.logWarning("Notification action was not accepted by its source", {
+        notificationId: row.notification_id,
+        actionId: action.id,
+        outcome: Option.isNone(outcome) ? "timeout" : "rejected",
+      });
+      return yield* deliveryFailed(id, action.label);
+    }
+    return outcome.value.value;
+  });
 
-  const act: NotificationService["Service"]["act"] = ({ id, actionId }) =>
-    Effect.gen(function* () {
+  const act: NotificationService["Service"]["act"] = Effect.fn("NotificationService.act")(
+    function* ({ id, actionId }) {
       yield* expireDue(yield* nowIso);
       const row = yield* findRow(id);
       if (row === undefined) return yield* notFound(id);
@@ -555,7 +549,8 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-    });
+    },
+  );
 
   yield* forkParked(
     sweep.pipe(

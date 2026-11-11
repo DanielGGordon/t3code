@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Concurrent /redeploy calls must collapse into one deploy. Runs the real redeploy.sh against
 // a throwaway origin + deploy checkout, with fake systemctl/systemd-run/pnpm/curl/mise on PATH
 // so nothing here can touch the real service. See .agents/skills/redeploy/redeploy.sh.
@@ -6,7 +7,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vite-plus/test";
 
 const SCRIPT = NodePath.resolve(import.meta.dirname, "../.agents/skills/redeploy/redeploy.sh");
 

@@ -1,11 +1,8 @@
 /**
- * `t3 session audit|reset` — inspect and repair which native Claude session a
- * thread resumes. Logic lives in `import/ClaudeResumeBindings.ts`.
- *
- * `audit` is read-only SQL + filesystem checks, safe while the server runs.
- * `reset` writes an event, so it goes through the running server when there
- * is one (`cli/forkLive.ts`). The ClaudeAdapterV2 missing-transcript error
- * tells users to run `t3 session reset <threadId>`; keep the command names.
+ * `t3 session audit|reset`: inspect and repair which native Claude session a thread resumes
+ * (logic in `import/ClaudeResumeBindings.ts`). `reset` writes an event, so it goes through the
+ * running server when there is one. ClaudeAdapterV2's error names `t3 session reset <threadId>`:
+ * keep the command names.
  */
 import { ThreadId } from "@t3tools/contracts";
 import * as Console from "effect/Console";

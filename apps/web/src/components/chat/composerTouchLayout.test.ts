@@ -2,20 +2,18 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildComposerControlsSummary,
-  formatComposerInteractionModeLabel,
   resolveComposerFooterCompactness,
 } from "./composerTouchLayout";
 
 describe("buildComposerControlsSummary", () => {
-  it("joins model, traits, access and mode", () => {
+  it("joins model, traits and access", () => {
     expect(
       buildComposerControlsSummary({
         modelLabel: "Opus",
         traitsLabel: "High · 1M",
         runtimeMode: "full-access",
-        interactionMode: "default",
       }),
-    ).toBe("Opus · High · 1M · Full · Build");
+    ).toBe("Opus · High · 1M · Full");
   });
 
   it("skips missing parts", () => {
@@ -23,7 +21,6 @@ describe("buildComposerControlsSummary", () => {
       buildComposerControlsSummary({
         traitsLabel: "  ",
         runtimeMode: "approval-required",
-        interactionMode: null,
       }),
     ).toBe("Supervised");
     expect(
@@ -31,16 +28,8 @@ describe("buildComposerControlsSummary", () => {
         modelLabel: null,
         traitsLabel: "Medium",
         runtimeMode: "auto-accept-edits",
-        interactionMode: "plan",
       }),
-    ).toBe("Medium · Auto-edits · Plan");
-  });
-});
-
-describe("formatComposerInteractionModeLabel", () => {
-  it("names the default mode Build", () => {
-    expect(formatComposerInteractionModeLabel("default")).toBe("Build");
-    expect(formatComposerInteractionModeLabel("plan")).toBe("Plan");
+    ).toBe("Medium · Auto-edits");
   });
 });
 

@@ -12,20 +12,11 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import * as PrimaryEnvironmentHttp from "../environments/primary/httpLayer";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 
-/**
- * A transcription request that failed; `message` is safe to show the user. `retryable` says that
- * trying the same audio again may work (the server was unreachable or busy), as opposed to a
- * missing configuration or an expired session.
- */
-export class VoiceTranscriptionRequestError extends Error {
-  override readonly name = "VoiceTranscriptionRequestError";
-  readonly retryable: boolean;
-
-  constructor(message: string, options: { readonly retryable?: boolean } = {}) {
-    super(message);
-    this.retryable = options.retryable ?? false;
-  }
-}
+/** A transcription request that failed; `message` is safe to show the user. `retryable` says the same audio may work on a retry. */
+export class VoiceTranscriptionRequestError extends Schema.TaggedError<VoiceTranscriptionRequestError>()(
+  "VoiceTranscriptionRequestError",
+  { message: Schema.String, retryable: Schema.Boolean },
+) {}
 
 const DEFAULT_RECORDING_MIME_TYPE = "audio/webm";
 const decodeResult = Schema.decodeUnknownOption(VoiceTranscriptionResult);
@@ -47,7 +38,7 @@ export function isRetryableVoiceTranscriptionFailure(status: number, body: unkno
 }
 
 /**
- * Upload a recording to the primary environment's `/api/voice/transcribe`
+ * Upload a recording to the primary environment's `/api/fork/voice/transcribe`
  * and return the transcript. Auth comes from the shared primary-environment
  * HTTP layer. `context` is the text already transcribed from the same recording.
  */
@@ -70,7 +61,8 @@ export function transcribeVoiceRecording(
       const response = yield* client.execute(request).pipe(
         Effect.mapError(
           () =>
-            new VoiceTranscriptionRequestError("Could not reach the server to transcribe.", {
+            new VoiceTranscriptionRequestError({
+              message: "Could not reach the server to transcribe.",
               retryable: true,
             }),
         ),
@@ -78,12 +70,10 @@ export function transcribeVoiceRecording(
       const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
       const result = response.status === 200 ? decodeResult(body) : Option.none();
       if (Option.isSome(result)) return result.value.text;
-      return yield* Effect.fail(
-        new VoiceTranscriptionRequestError(
-          describeVoiceTranscriptionFailure(response.status, body),
-          { retryable: isRetryableVoiceTranscriptionFailure(response.status, body) },
-        ),
-      );
+      return yield* new VoiceTranscriptionRequestError({
+        message: describeVoiceTranscriptionFailure(response.status, body),
+        retryable: isRetryableVoiceTranscriptionFailure(response.status, body),
+      });
     }).pipe(Effect.provide(PrimaryEnvironmentHttp.layer)),
   );
 }

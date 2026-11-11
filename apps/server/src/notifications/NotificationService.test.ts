@@ -431,7 +431,7 @@ it.effect("keeps the notification open when delivery fails or times out", () =>
       (yield* Effect.promise(() => callbacks.nextRequest())).respond(500, { error: "boom" });
       const failed = failureOf(yield* Fiber.join(failing));
       expect(failed.reason).toBe("delivery_failed");
-      expect(failed.message).toBe("Could not deliver 'Approve' — try again.");
+      expect(failed.message).toBe("Could not deliver 'Approve'. Try again.");
 
       // A 404 without the already_resolved marker is a failure, not a resolution.
       const missingRoute = yield* service

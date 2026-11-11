@@ -3,11 +3,8 @@ export type LogThrottleDecision =
   | { readonly log: false };
 
 /**
- * Lets a repeated log line through once per key per window. A client retrying a
- * revoked credential can hit the server hundreds of times a minute; logging every
- * attempt floods journald and rotates real evidence out of it. A logged line
- * reports how many repeats of its key were dropped since the previous one.
- *
+ * Lets a repeated log line through once per key per window, so a client retrying a revoked
+ * credential cannot flood journald. A logged line reports how many repeats were dropped.
  * Holds at most `maxKeys` keys, so a flood of distinct keys stays bounded too.
  */
 export function makeLogThrottle(options: { readonly windowMs: number; readonly maxKeys: number }) {

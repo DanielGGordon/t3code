@@ -49,7 +49,7 @@ const makeHandler = () =>
   });
 
 const post = (body: Uint8Array, contentType: string, token?: string, query = "") =>
-  new Request(`http://127.0.0.1/api/voice/transcribe${query}`, {
+  new Request(`http://127.0.0.1/api/fork/voice/transcribe${query}`, {
     method: "POST",
     headers: {
       "content-type": contentType,

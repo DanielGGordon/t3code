@@ -3,6 +3,7 @@
  * MediaRecorder slices are not playable on their own, so this captures raw audio with Web Audio
  * (an AudioWorklet, or a ScriptProcessor without worklets), downsamples to 16 kHz and cuts at pauses.
  */
+import * as Schema from "effect/Schema";
 import { PauseChunker, type PauseChunkerOptions } from "./pauseChunker";
 import { encodeWav, Resampler } from "./pcm";
 import { describeStartFailure, VoiceRecordingStartError } from "./recorder";
@@ -31,9 +32,10 @@ registerProcessor("${WORKLET_NAME}", T3PcmCapture);
 `;
 
 /** The audio graph could not be set up (the microphone itself is fine); the caller can record the old way. */
-export class ChunkedRecordingUnavailableError extends Error {
-  override readonly name = "ChunkedRecordingUnavailableError";
-}
+export class ChunkedRecordingUnavailableError extends Schema.TaggedError<ChunkedRecordingUnavailableError>()(
+  "ChunkedRecordingUnavailableError",
+  { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {}
 
 export interface ChunkedVoiceRecording {
   /** Stop capturing and hand over the last piece, if it holds speech. */
@@ -63,7 +65,8 @@ export async function startChunkedVoiceRecording(
   chunkerOptions?: PauseChunkerOptions,
 ): Promise<ChunkedVoiceRecording> {
   const Context = audioContextConstructor();
-  if (!Context) throw new ChunkedRecordingUnavailableError("Web Audio is not available.");
+  if (!Context)
+    throw new ChunkedRecordingUnavailableError({ message: "Web Audio is not available." });
   // Created before the permission prompt so it starts inside the user's click.
   const context = new Context();
 
@@ -72,7 +75,7 @@ export async function startChunkedVoiceRecording(
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (cause) {
     void context.close();
-    throw new VoiceRecordingStartError(describeStartFailure(cause), { cause });
+    throw new VoiceRecordingStartError({ message: describeStartFailure(cause), cause });
   }
 
   const resampler = new Resampler(context.sampleRate);
@@ -134,7 +137,10 @@ export async function startChunkedVoiceRecording(
     }
   } catch (cause) {
     release();
-    throw new ChunkedRecordingUnavailableError("Could not set up Web Audio capture.", { cause });
+    throw new ChunkedRecordingUnavailableError({
+      message: "Could not set up Web Audio capture.",
+      cause,
+    });
   }
 
   return {

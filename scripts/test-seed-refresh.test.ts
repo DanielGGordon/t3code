@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 import {
   cpSync,
   existsSync,

@@ -1,34 +1,8 @@
 /**
- * Name-aware repair of the `effect_sql_migrations` ledger, run before the
- * Migrator on every startup.
- *
- * Effect's Migrator is purely ordinal: it skips every migration whose id is
- * <= the ledger's max id and never compares names. This fork owns id 33
- * (`ProjectionThreadRestartRequest`) and runs every upstream migration >= 33
- * one id higher, so a ledger written by a stock-numbered build disagrees with
- * ours by name at the same ids. Left alone, the Migrator would silently skip
- * whole migrations (production lost upstream's `ProjectionThreadTitleRegeneration`
- * this way; a stock-created database would lose the fork's 033).
- *
- * This reconcile:
- * 1. Is a read-only no-op when every recorded (id, name) is canonical and no
- *    canonical id at or below the ledger max is missing (the common case).
- * 2. Otherwise, in one IMMEDIATE transaction, renumbers each recorded name to
- *    this build's id for that name (via negative temporary ids, so primary keys
- *    never collide), keeping its original `created_at`.
- * 3. Runs every canonical migration that is now a "gap" — absent from the
- *    ledger yet at or below its max id — in id order, and records it.
- *
- * Unknown names (no canonical migration of that name) are never guessed at:
- * - above this build's last id, or alongside a ledger that needs renumbering,
- *   they fail startup with an actionable error and no writes;
- * - otherwise they are upstream's tolerated "site-local" rows: the id stays
- *   consumed and the shared-id divergence warning in `runMigrations` reports it.
- *
- * Gap safety: see UPSTREAM_DIVERGENCE.md (2026-10-06, "Migration numbering").
- * Every fork/upstream migration that can plausibly be a gap is column-, table-
- * or index-guarded, or an idempotent data repair; the few unguarded ones fail
- * loudly (rolling the whole reconcile back) rather than corrupting anything.
+ * Name-aware repair of the `effect_sql_migrations` ledger, run before the Migrator on every startup.
+ * Effect's Migrator is ordinal and never compares names, but this fork owns id 33 and shifts upstream's
+ * ids >= 33 up by one, so a stock-numbered ledger would silently skip migrations. Renumbers by name in
+ * one transaction, runs gap migrations, and fails on unknown names; see UPSTREAM_DIVERGENCE.md (2026-10-06).
  */
 import * as Effect from "effect/Effect";
 import * as Migrator from "effect/sql/Migrator";
@@ -58,56 +32,55 @@ interface LedgerPlan<E> {
 
 const badState = (message: string) => new Migrator.MigrationError({ kind: "BadState", message });
 
-const planLedger = <E>(
+const planLedger = Effect.fn("reconcileMigrationLedger.planLedger")(function* <E>(
   canonical: ReadonlyArray<CanonicalMigration<E>>,
   rows: ReadonlyArray<LedgerRow>,
-): Effect.Effect<LedgerPlan<E>, Migrator.MigrationError> =>
-  Effect.gen(function* () {
-    const idByName = new Map(canonical.map(([id, name]) => [name, id] as const));
-    const lastCanonicalId = Math.max(0, ...canonical.map(([id]) => id));
+) {
+  const idByName = new Map(canonical.map(([id, name]) => [name, id] as const));
+  const lastCanonicalId = Math.max(0, ...canonical.map(([id]) => id));
 
-    const seenNames = new Set<string>();
-    const duplicates = rows.filter((row) => {
-      const duplicate = seenNames.has(row.name);
-      seenNames.add(row.name);
-      return duplicate;
-    });
-    if (duplicates.length > 0) {
-      return yield* badState(
-        `Migration ledger records the same migration name under several ids (${duplicates
-          .map((row) => `${row.migration_id}:${row.name}`)
-          .join(", ")}); cannot reconcile it by name. Inspect effect_sql_migrations by hand.`,
-      );
-    }
-
-    const unknown = rows.filter((row) => !idByName.has(row.name));
-    const renumber = rows.flatMap((row) => {
-      const to = idByName.get(row.name);
-      return to === undefined || to === row.migration_id
-        ? []
-        : [{ from: row.migration_id, to, name: row.name }];
-    });
-
-    const beyondBuild = unknown.filter((row) => row.migration_id > lastCanonicalId);
-    if (beyondBuild.length > 0 || (renumber.length > 0 && unknown.length > 0)) {
-      const offending = beyondBuild.length > 0 ? beyondBuild : unknown;
-      return yield* badState(
-        `Database migration ledger contains migrations unknown to this build (${offending
-          .map((row) => `${row.migration_id}:${row.name}`)
-          .join(", ")}). It was migrated by a newer or foreign T3 Code build; refusing to ` +
-          `reconcile it by name. Run a build that knows these migrations, or restore a ` +
-          `database written by this fork.`,
-      );
-    }
-
-    // Ids after renumbering; unknown (site-local) rows keep consuming their id.
-    const recordedIds = new Set(rows.map((row) => idByName.get(row.name) ?? row.migration_id));
-    const maxRecordedId = Math.max(0, ...recordedIds);
-    const gaps = canonical
-      .filter(([id]) => id <= maxRecordedId && !recordedIds.has(id))
-      .sort(([a], [b]) => a - b);
-    return { renumber, gaps };
+  const seenNames = new Set<string>();
+  const duplicates = rows.filter((row) => {
+    const duplicate = seenNames.has(row.name);
+    seenNames.add(row.name);
+    return duplicate;
   });
+  if (duplicates.length > 0) {
+    return yield* badState(
+      `Migration ledger records the same migration name under several ids (${duplicates
+        .map((row) => `${row.migration_id}:${row.name}`)
+        .join(", ")}); cannot reconcile it by name. Inspect effect_sql_migrations by hand.`,
+    );
+  }
+
+  const unknown = rows.filter((row) => !idByName.has(row.name));
+  const renumber = rows.flatMap((row) => {
+    const to = idByName.get(row.name);
+    return to === undefined || to === row.migration_id
+      ? []
+      : [{ from: row.migration_id, to, name: row.name }];
+  });
+
+  const beyondBuild = unknown.filter((row) => row.migration_id > lastCanonicalId);
+  if (beyondBuild.length > 0 || (renumber.length > 0 && unknown.length > 0)) {
+    const offending = beyondBuild.length > 0 ? beyondBuild : unknown;
+    return yield* badState(
+      `Database migration ledger contains migrations unknown to this build (${offending
+        .map((row) => `${row.migration_id}:${row.name}`)
+        .join(", ")}). It was migrated by a newer or foreign T3 Code build; refusing to ` +
+        `reconcile it by name. Run a build that knows these migrations, or restore a ` +
+        `database written by this fork.`,
+    );
+  }
+
+  // Ids after renumbering; unknown (site-local) rows keep consuming their id.
+  const recordedIds = new Set(rows.map((row) => idByName.get(row.name) ?? row.migration_id));
+  const maxRecordedId = Math.max(0, ...recordedIds);
+  const gaps = canonical
+    .filter(([id]) => id <= maxRecordedId && !recordedIds.has(id))
+    .sort(([a], [b]) => a - b);
+  return { renumber, gaps } satisfies LedgerPlan<E>;
+});
 
 const ledgerExists = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
