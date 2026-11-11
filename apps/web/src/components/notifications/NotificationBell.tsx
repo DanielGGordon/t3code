@@ -86,15 +86,53 @@ export function NotificationBell() {
 }
 
 function NotificationList(props: { readonly notifications: ReadonlyArray<Notification> }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const dismiss = useAtomCommand(serverEnvironment.dismissNotification, { reportFailure: false });
+  const [dismissingAll, setDismissingAll] = useState(false);
   if (props.notifications.length === 0) {
     return <p className="py-3 text-center text-sm text-muted-foreground">No open notifications.</p>;
   }
+
+  const dismissAll = async (): Promise<void> => {
+    if (environmentId === null) return;
+    setDismissingAll(true);
+    const results = await Promise.all(
+      props.notifications.map((notification) =>
+        dismiss({ environmentId, input: { id: notification.id } }),
+      ),
+    ).finally(() => setDismissingAll(false));
+    const failed = results.filter(
+      (result) => result._tag === "Failure" && !isAtomCommandInterrupted(result),
+    ).length;
+    if (failed > 0) {
+      toastManager.add({
+        type: "error",
+        title: `Could not dismiss ${failed} of ${results.length} notifications.`,
+      });
+    }
+  };
+
   return (
-    <ul className="-my-1 flex max-h-96 flex-col divide-y divide-border overflow-y-auto">
-      {props.notifications.map((notification) => (
-        <NotificationItem key={notification.id} notification={notification} />
-      ))}
-    </ul>
+    <div className="flex flex-col">
+      {props.notifications.length > 1 ? (
+        <div className="flex justify-end pb-1">
+          <Button
+            variant="ghost-muted"
+            size="sm"
+            type="button"
+            disabled={dismissingAll}
+            onClick={() => void dismissAll()}
+          >
+            Dismiss all
+          </Button>
+        </div>
+      ) : null}
+      <ul className="-my-1 flex max-h-96 flex-col divide-y divide-border overflow-y-auto">
+        {props.notifications.map((notification) => (
+          <NotificationItem key={notification.id} notification={notification} />
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -150,13 +188,13 @@ function NotificationItem(props: { readonly notification: Notification }) {
         </div>
         <Button
           variant="ghost-muted"
-          size="icon-micro"
+          size="icon-lg"
           type="button"
           aria-label="Dismiss notification"
           disabled={busy}
           onClick={() => void run(() => dismiss({ environmentId, input: { id: notification.id } }))}
         >
-          <XIcon aria-hidden />
+          <XIcon aria-hidden className="size-5" />
         </Button>
       </div>
       {notification.body.length > 0 ? (
