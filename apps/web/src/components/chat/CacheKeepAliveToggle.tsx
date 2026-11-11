@@ -85,38 +85,80 @@ const CLICK_OUTCOME: Record<ToggleChoice, string> = {
   "warm-then-compact": `keep it warm, then compact when the ${MAX} pings run out`,
 };
 
+const MODE_LABEL: Record<CacheKeepAliveMode, string> = {
+  warm: "Keep cache warm",
+  compact: "Compact before the cache expires",
+  "warm-then-compact": "Keep cache warm, then compact",
+};
+
+// What each mode does once on; the tooltip's title names it.
+const MODE_SUMMARY: Record<CacheKeepAliveMode, string> = {
+  warm: `Pings shortly before the one-hour prompt cache expires, so your next message stays cheap. Stops after ${MAX} pings with no message from you.`,
+  compact: "Compacts once, shortly before the prompt cache expires, unless you write first.",
+  "warm-then-compact": `Pings like Keep cache warm. When the ${MAX} pings with no message from you run out, it compacts before the last cache expires instead of letting it lapse.`,
+};
+
+interface TooltipContent {
+  readonly title: string;
+  readonly body: string;
+}
+
 function describe(
   state: CacheKeepAliveState,
   mode: CacheKeepAliveMode,
   formatTime: (ms: number) => string,
   next: ToggleChoice,
-): string {
-  const click = ` Click to ${CLICK_OUTCOME[next]}.`;
-  const then =
-    mode === "warm-then-compact" ? " Then it compacts before the last cache expires." : "";
+): TooltipContent {
+  const click = `Click to ${CLICK_OUTCOME[next]}.`;
+  const title = MODE_LABEL[mode];
+  const summary = MODE_SUMMARY[mode];
   switch (state.kind) {
     case "off":
-      return `Keep cache warm: ping this Claude thread shortly before its one-hour prompt cache expires, so your next message stays cheap. Stops after ${MAX} pings with no message from you. Click to ${CLICK_OUTCOME[next]}.`;
+      return { title: MODE_LABEL.warm, body: `Off. ${MODE_SUMMARY.warm} ${click}` };
     case "paused":
-      return `Keep cache warm is paused after ${state.nudgeCount} pings with no message from you. Send a message or click to resume.`;
+      return {
+        title: `${title} (paused)`,
+        body: `Paused after ${state.nudgeCount} pings with no message from you. Send a message or click to resume.`,
+      };
     case "unsupported":
-      return `This is on, but no Claude session on this thread's current provider holds the conversation (for example after switching provider or account), so there is no cache to keep yet.${click}`;
+      return {
+        title,
+        body: `On, but no Claude session on this thread's current provider holds the conversation (for example after switching provider or account), so there is no cache to keep yet. ${click}`,
+      };
     case "parked":
-      return `This is on, but this thread is archived, settled or snoozed, so it is left alone.${click}`;
+      return {
+        title,
+        body: `On, but this thread is archived, settled or snoozed, so it is left alone. ${click}`,
+      };
     case "busy":
-      return `Keeping the prompt cache warm. The next step is scheduled once this turn finishes and nothing waits on you.${click}`;
+      return {
+        title,
+        body: `On. The next step is scheduled once this turn finishes and nothing waits on you. ${summary} ${click}`,
+      };
     case "cold":
-      return `This is on, but there is no live cache right now; it resumes after the next turn.${click}`;
+      return {
+        title,
+        body: `On, but there is no live cache right now; it resumes after the next turn. ${summary} ${click}`,
+      };
     case "scheduled":
-      return `Keeping the prompt cache warm. Next ping around ${formatTime(state.nudgeAtMs)} (${state.nudgeCount} of ${MAX} sent since your last message).${then}${click}`;
+      return {
+        title,
+        body: `Next ping around ${formatTime(state.nudgeAtMs)} (${state.nudgeCount} of ${MAX} sent since your last message). ${summary} ${click}`,
+      };
     case "due":
-      return `Keeping the prompt cache warm. Sending a ping now.${click}`;
+      return { title, body: `Sending a ping now. ${summary} ${click}` };
     case "compact-scheduled":
-      return `Will compact this conversation around ${formatTime(state.compactAtMs)}, shortly before its prompt cache expires, unless you write first.${click}`;
+      return {
+        title,
+        body: `Will compact around ${formatTime(state.compactAtMs)}, shortly before the prompt cache expires, unless you write first. ${click}`,
+      };
     case "compact-due":
-      return `Compacting now, while the prompt cache is still warm.${click}`;
+      return { title, body: `Compacting now, while the prompt cache is still warm. ${click}` };
     case "compacted":
-      return `Compacted before the cache expired. Nothing more happens until you write again.${click}`;
+      return {
+        title,
+        body: `Compacted before the cache expired. Nothing more happens until you write again. ${click}`,
+      };
   }
 }
 
@@ -140,32 +182,40 @@ function CacheKeepAliveTooltipText(props: {
 }) {
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const state = cacheKeepAliveState(props);
+  let content: TooltipContent;
   if (props.heartbeat) {
     const alsoOn = state.kind !== "off" && state.kind !== "paused";
-    return `Kept warm by the subagent heartbeat. ${HEARTBEAT_EXPLANATION}${alsoOn ? " Keep cache warm is also on and takes over after that." : ""}`;
+    content = {
+      title: "Kept warm by the subagent heartbeat",
+      body: `${HEARTBEAT_EXPLANATION}${alsoOn ? " Keep cache warm is also on and takes over after that." : ""}`,
+    };
+  } else {
+    const mode = cacheKeepAliveMode(props.thread.cacheKeepAlive);
+    const current: ToggleChoice = cacheKeepAliveActive(props.thread.cacheKeepAlive) ? mode : "off";
+    content = describe(
+      state,
+      mode,
+      (ms) => formatShortTimestamp(new Date(ms).toISOString(), timestampFormat),
+      nextChoice(current, props.compactModes),
+    );
   }
-  const mode = cacheKeepAliveMode(props.thread.cacheKeepAlive);
-  const current: ToggleChoice = cacheKeepAliveActive(props.thread.cacheKeepAlive) ? mode : "off";
-  const text = describe(
-    state,
-    mode,
-    (ms) => formatShortTimestamp(new Date(ms).toISOString(), timestampFormat),
-    nextChoice(current, props.compactModes),
+  const expiresAtMs = props.heartbeat ? null : promptCacheExpiresAtMs(props);
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="font-semibold">{content.title}</p>
+      <p>
+        {expiresAtMs === null
+          ? content.body
+          : `Prompt cache expires around ${formatShortTimestamp(new Date(expiresAtMs).toISOString(), timestampFormat)}. ${content.body}`}
+      </p>
+    </div>
   );
-  const expiresAtMs = promptCacheExpiresAtMs(props);
-  return expiresAtMs === null
-    ? text
-    : `Prompt cache expires around ${formatShortTimestamp(new Date(expiresAtMs).toISOString(), timestampFormat)}. ${text}`;
 }
 
 /**
- * Fork: the per-thread "Keep cache warm" toggle. The server sends the pings
- * and compactions (with the browser closed too); this only flips the persisted
- * toggle and explains where the thread stands. A click steps through off, keep
- * warm, compact before the cache expires, and keep warm then compact. While the subagent heartbeat is armed the
- * cache stays warm regardless, so the control reads as on and a click explains
- * why instead. `placement` picks the chrome: a header toggle button, or a
- * composer-footer control that sits next to the access mode.
+ * Fork: the per-thread "Keep cache warm" toggle. The server sends the pings and compactions;
+ * a click steps through the modes. While the subagent heartbeat is armed it reads as on.
+ * `placement` picks a header toggle or a composer-footer control.
  */
 export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   readonly environmentId: EnvironmentId;
@@ -230,13 +280,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   const pressed = heartbeat || keepAliveActive;
   const style = MODES[keepAliveActive ? mode : "warm"];
   const Icon = paused ? CirclePauseIcon : style.icon;
-  const modeLabel = !keepAliveActive
-    ? "Keep cache warm"
-    : mode === "compact"
-      ? "Compact before the cache expires"
-      : mode === "warm-then-compact"
-        ? "Keep cache warm, then compact"
-        : "Keep cache warm";
+  const modeLabel = MODE_LABEL[keepAliveActive ? mode : "warm"];
   const label = `${paused ? "Resume keeping the prompt cache warm" : modeLabel}${
     expiryLabel === null ? "" : `, cache expires in ${expiryLabel}`
   }`;
