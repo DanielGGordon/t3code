@@ -66,7 +66,7 @@ it.layer(NodeServices.layer)("SecurityAlerts", (it) => {
       expect(SecurityAlerts.formatSecurityAlert(pairedAlert, "t3-host")).toBe(
         [
           ":rotating_light: *T3 Code security* (t3-host): a new device paired.",
-          '• Device: "Dan\'s &lt;!channel&gt; phone" — mobile, iOS, Safari',
+          '• Device: "Dan\'s &lt;!channel&gt; phone": mobile, iOS, Safari',
           "• IP: 203.0.113.7",
           "• Session: 1a2b3c4d (browser-session-cookie)",
           "• User agent: Mozilla/5.0 (iPhone)",
@@ -86,7 +86,7 @@ it.layer(NodeServices.layer)("SecurityAlerts", (it) => {
         ).split("\n"),
       ).toEqual([
         ":warning: *T3 Code security* (t3-host): a known session connected from a new IP.",
-        "• Device: unlabeled — unknown",
+        "• Device: unlabeled: unknown",
         "• IP: 198.51.100.4 (previously 203.0.113.7)",
         "• Session: 1a2b3c4d (bearer-access-token)",
         "• User agent: unknown",
@@ -191,7 +191,7 @@ it.layer(NodeServices.layer)("SecurityAlerts", (it) => {
         kind: "security",
         title: "New device connected to T3 Code",
         body: expect.stringContaining(
-          'Device: "Dan\'s &lt;!channel&gt; phone" — mobile, iOS, Safari',
+          'Device: "Dan\'s &lt;!channel&gt; phone": mobile, iOS, Safari',
         ),
         bodyTrust: "external",
       });

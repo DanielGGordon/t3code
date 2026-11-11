@@ -1,5 +1,6 @@
 // Fork (F7 thread spend): finished provider turns without an adapter-reported
 // cost are priced by TurnCostEstimator during ingestion.
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -42,7 +43,7 @@ const layerEventSink = EventSink.layer.pipe(
 );
 const layerGit = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "ingestor-cost-git-" })),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const layerIngestor = (estimator: TurnCostEstimator.TurnCostEstimatorShape) =>
   Layer.mergeAll(
@@ -57,8 +58,7 @@ const layerIngestor = (estimator: TurnCostEstimator.TurnCostEstimatorShape) =>
           layerGit,
           Layer.succeed(TurnCostEstimator.TurnCostEstimator, estimator),
           Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-            // @effect-diagnostics-next-line effectSucceedWithVoid:off - Optional instances require undefined rather than void.
-            getInstance: () => Effect.succeed(undefined),
+            getInstance: () => Effect.undefined,
           }),
         ),
       ),
@@ -163,5 +163,5 @@ it.effect("leaves turns untouched with the default (no-op) estimator", () =>
   Effect.gen(function* () {
     const priced = yield* normalizeTurn(usage, "completed");
     assert.deepEqual(priced, usage);
-  }).pipe(Effect.provide(layerIngestor({ estimate: () => Effect.succeed(undefined) }))),
+  }).pipe(Effect.provide(layerIngestor({ estimate: () => Effect.undefined }))),
 );

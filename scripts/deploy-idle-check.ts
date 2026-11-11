@@ -1,3 +1,4 @@
+// @effect-diagnostics globalConsole:off nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Is any T3 conversation doing work right now? Used by the redeploy skill's
 // idle gate (always on) to hold a restart until the server is quiet.
 //

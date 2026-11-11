@@ -1,31 +1,8 @@
 /**
- * Fork: mirror Claude Code transcripts (`~/.claude/projects/<cwd>/<id>.jsonl`)
- * into T3 as backdated, resumable v2 threads (`t3 import sync|claude`).
- *
- * Each session maps to thread `claude-import-<sessionId>`. Creation writes v2
- * events directly (same shapes as upstream's `AgentSessionImporter`):
- * `thread.created` (`historyOrigin: "v1_import"`, settled), one
- * `message.updated` + `turn-item.updated` per transcript message (message id =
- * transcript uuid, so dedupe and fork-copy detection are id-set checks), and a
- * `provider-thread.updated` binding the thread to the native session so the
- * first T3 send resumes it in place (see `claudeResumeEvents.ts`).
- *
- * Guards (all re-sourced from the v2 tables):
- *  - tombstones: a thread stream that ever existed but has no live projection
- *    row is never recreated; a projection row with `deleted_at` stays deleted.
- *  - skipped-owned: the session id is the native session of another thread
- *    (v2 provider threads, or a legacy v1 resume cursor).
- *  - skipped-worktree: the transcript cwd is inside T3's worktrees dir.
- *  - skipped-copy: most of the transcript's message uuids already live on
- *    another thread (a forkSession copy).
- *  - skipped-forked: T3 has run turns in the thread (or it holds messages the
- *    transcript cannot explain) — resume is in place, so Claude appends T3's
- *    own turns to the transcript and mirroring them again would duplicate.
- *
- * In production this runs inside the serving process (`POST
- * /api/fork/import/claude-sync`, see `fork/http.ts`) so events reach live
- * clients; the CLI only falls back to running it in-process when no server
- * is running.
+ * Fork: mirror Claude Code transcripts into T3 as backdated, resumable v2 threads
+ * (`claude-import-<sessionId>`, message id = transcript uuid, so dedupe is an id-set check).
+ * Skips deleted, owned, worktree, copy and forked threads (see `syncPlan.ts`). Runs inside the
+ * serving process so live clients see events; the CLI only runs it in-process with no server.
  */
 import {
   CommandId,

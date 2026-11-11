@@ -46,17 +46,18 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
   };
 }
 
-/** Highest server migration id, from the `NNN_Name.ts` files the server registers. */
-const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* () {
+/** Fork: highest id in `migrationEntries`; the fork registers upstream files at shifted ids. */
+export const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const dir = yield* path.fromFileUrl(
-    new URL("../apps/server/src/persistence/Migrations/", import.meta.url),
+  const registry = yield* fs.readFileString(
+    yield* path.fromFileUrl(
+      new URL("../apps/server/src/persistence/Migrations.ts", import.meta.url),
+    ),
   );
-  const ids = (yield* fs.readDirectory(dir)).flatMap((name) => {
-    const id = /^(\d+)_\w+\.ts$/.exec(name)?.[1];
-    return id === undefined ? [] : [Number(id)];
-  });
+  const ids = Array.from(registry.matchAll(/^\s*\[(\d+), "\w+", Migration\d+\],$/gm), (match) =>
+    Number(match[1]),
+  );
   return Math.max(0, ...ids);
 });
 

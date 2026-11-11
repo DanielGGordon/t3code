@@ -1,10 +1,6 @@
 /**
- * `t3 import sync|claude` — mirror Claude Code transcripts into T3 as
- * resumable threads. The work happens in `import/ClaudeTranscriptSync.ts`,
- * inside the running server when there is one (see `cli/forkLive.ts`).
- *
- * Production runs `t3 import sync` every 15 minutes from a systemd user timer
- * (`t3-claude-import.timer`); keep the output format (`<outcome> sessionId=…`
+ * `t3 import sync|claude`: mirror Claude Code transcripts into T3 (work in `import/ClaudeTranscriptSync.ts`).
+ * A systemd user timer runs it every 15 minutes: keep the output format (`<outcome> sessionId=…`
  * lines plus a final `summary …` line) stable for its journal.
  */
 import * as Console from "effect/Console";

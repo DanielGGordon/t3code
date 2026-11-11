@@ -5,8 +5,9 @@ import * as Schema from "effect/Schema";
  * (body = the recording, `Content-Type` = its MIME type) to this route on the
  * primary environment; the server transcribes it and answers with
  * `VoiceTranscriptionResult`. Failures answer `VoiceTranscriptionFailure`.
+ * Not `/api/voice/transcribe`: upstream serves that path with a raw-PCM body.
  */
-export const VOICE_TRANSCRIPTION_ROUTE_PATH = "/api/voice/transcribe";
+export const VOICE_TRANSCRIPTION_ROUTE_PATH = "/api/fork/voice/transcribe";
 
 /** Matches the transcription API's own upload limit. */
 export const VOICE_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;

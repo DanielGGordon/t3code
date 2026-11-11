@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Plain Node script that deliberately avoids the Effect toolchain.
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 

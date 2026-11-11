@@ -56,7 +56,10 @@ export function SidebarSectionPlaceholder(props: {
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
       className="relative mx-0.5 -mb-px h-0"
-      revealOverflow={props.marker === "settled-placeholder" && props.showHint}
+      // Revealing on every drag scrolls the list out from under the pointer.
+      revealOverflow={
+        props.marker === "settled-placeholder" && props.showHint && props.isDropTarget
+      }
     >
       {props.showHint ? (
         <div
@@ -134,8 +137,6 @@ export function SidebarSectionHeader(props: {
       )}
     >
       <CollapsibleSectionHeader
-        role="treeitem"
-        tabIndex={-1}
         data-sidebar-row={`shelf:${shelf}`}
         onClick={props.toggle.onToggle}
         expanded={props.toggle.expanded}

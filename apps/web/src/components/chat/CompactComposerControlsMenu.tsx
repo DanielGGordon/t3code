@@ -1,29 +1,18 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { RuntimeMode } from "@t3tools/contracts";
 import { memo, useRef } from "react";
 import { ChevronUpIcon, EllipsisIcon, HandIcon, PaperclipIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { openTouchGestures } from "../TouchGesturesDialog";
 import { ComposerTouchButton } from "./ComposerTouchButton";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator as MenuDivider,
-  MenuTrigger,
-} from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator as MenuDivider, MenuTrigger } from "../ui/menu";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
-import { formatComposerInteractionModeLabel } from "./composerTouchLayout";
 import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFooterControls";
 
 // Touch layout: every row in the popup becomes a >=48px target.
 const TOUCH_MENU_POPUP_CLASS_NAME =
   "touch:min-w-72 touch:[&_[data-slot=menu-item]]:min-h-12 touch:[&_[data-slot=menu-radio-item]]:min-h-12 touch:[&_[data-slot=menu-checkbox-item]]:min-h-12";
-const SECTION_LABEL_CLASS_NAME =
-  "px-2 py-1.5 font-medium text-muted-foreground text-xs touch:text-sm";
 
 /**
  * Touch layout folds every control but the model picker in here, plus "Attach files"; the
@@ -32,15 +21,12 @@ const SECTION_LABEL_CLASS_NAME =
  * Permission changes stay two taps deep (open, then pick).
  */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
-  interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
-  showInteractionModeToggle: boolean;
-  showPermissions?: boolean;
+  showPermissions: boolean;
   size?: "sm" | "xs";
   /** Close the portaled popup when its trigger hides. */
   hidden?: boolean;
-  onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   /** Touch layout: a big labelled pill that opens upward. */
   touchLayout?: boolean;
@@ -55,7 +41,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const shortcut = props.showPermissions !== false ? "composer.mode" : undefined;
+  const shortcut = props.showPermissions ? "composer.mode" : undefined;
 
   return (
     <Menu
@@ -125,31 +111,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider className="md:hidden drive:block short:block" />
           </>
         ) : null}
-        {props.showInteractionModeToggle ? (
-          <>
-            <div className={SECTION_LABEL_CLASS_NAME}>Mode</div>
-            <MenuRadioGroup
-              value={props.interactionMode}
-              onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
-              }}
-            >
-              <MenuRadioItem value="default">
-                {props.touchLayout ? formatComposerInteractionModeLabel("default") : "Chat"}
-              </MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-            </MenuRadioGroup>
-            {props.showPermissions !== false ? <MenuDivider /> : null}
-          </>
-        ) : null}
-        {props.showPermissions === false ? null : (
+        {props.showPermissions ? (
           <ComposerPermissionsSection
             runtimeMode={props.runtimeMode}
             runtimeModeOptions={props.runtimeModeOptions}
             onRuntimeModeChange={props.onRuntimeModeChange}
           />
-        )}
+        ) : null}
         {props.onAttach ? (
           <>
             <MenuDivider />

@@ -1,4 +1,4 @@
-import type { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { RuntimeMode } from "@t3tools/contracts";
 
 /**
  * Short runtime-mode labels for the touch layout's folded controls trigger,
@@ -11,27 +11,17 @@ const RUNTIME_MODE_SHORT_LABELS: Record<RuntimeMode, string> = {
   "full-access": "Full",
 };
 
-export function formatComposerInteractionModeLabel(mode: ProviderInteractionMode): string {
-  return mode === "plan" ? "Plan" : "Build";
-}
-
 /**
  * Summary shown on the touch layout's folded controls trigger, e.g.
- * "High · 1M · Full · Build". The model name is left out when the model
+ * "High · 1M · Full". The model name is left out when the model
  * picker sits beside the trigger as its own segment.
  */
 export function buildComposerControlsSummary(input: {
   modelLabel?: string | null | undefined;
   traitsLabel?: string | null | undefined;
   runtimeMode: RuntimeMode;
-  interactionMode: ProviderInteractionMode | null;
 }): string {
-  const parts = [
-    input.modelLabel,
-    input.traitsLabel,
-    RUNTIME_MODE_SHORT_LABELS[input.runtimeMode],
-    input.interactionMode ? formatComposerInteractionModeLabel(input.interactionMode) : null,
-  ];
+  const parts = [input.modelLabel, input.traitsLabel, RUNTIME_MODE_SHORT_LABELS[input.runtimeMode]];
   return parts
     .map((part) => part?.trim())
     .filter((part): part is string => Boolean(part))

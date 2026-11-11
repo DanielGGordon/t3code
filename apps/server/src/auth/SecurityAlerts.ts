@@ -1,21 +1,8 @@
 /**
- * Out-of-band alerts for security-relevant session events: a device pairing,
- * or a known session connecting from an address it has never used.
- *
- * Every alert is written to the server log. Delivery beyond the log is opt-in
- * through the environment and off when both are unset:
- *
- * - `T3CODE_SECURITY_ALERT_WEBHOOK_URL`: POSTs `{"text": "<alert>"}`, the body
- *   a Slack incoming webhook accepts.
- * - `T3CODE_SECURITY_ALERT_COMMAND`: runs through the system shell with the
- *   alert in `$T3CODE_SECURITY_ALERT_TEXT`, e.g.
- *   `slack-send C0123 "$T3CODE_SECURITY_ALERT_TEXT"`.
- *
- * Inside a running server every alert also becomes a card in the notification
- * bell (source `security`), independent of those two settings.
- *
- * Delivery runs in the background so it never delays a pairing or a connect,
- * and a failing endpoint is logged (throttled) and otherwise ignored.
+ * Out-of-band alerts for security-relevant session events (device pairing, a known session from a new
+ * address). Always logged and shown in the notification bell; opt-in delivery through
+ * `T3CODE_SECURITY_ALERT_WEBHOOK_URL` (Slack-style `{"text"}` POST) or `T3CODE_SECURITY_ALERT_COMMAND`
+ * (shell, alert in `$T3CODE_SECURITY_ALERT_TEXT`). Runs in the background; failures are logged, throttled.
  */
 import type {
   AuthClientMetadata,
@@ -89,7 +76,7 @@ export function formatSecurityAlert(alert: SecurityAlert, host: string): string 
     [client.deviceType, clean(client.os), clean(client.browser)]
       .filter((part) => part !== undefined)
       .join(", "),
-  ].join(" — ");
+  ].join(": ");
   const ip = clean(client.ipAddress) ?? "unknown";
   const lines =
     alert.kind === "session-paired"
@@ -122,7 +109,7 @@ export function formatSecurityNotification(alert: SecurityAlert, host: string) {
     [client.deviceType, clean(client.os), clean(client.browser)]
       .filter((part) => part !== undefined)
       .join(", "),
-  ].join(" — ");
+  ].join(": ");
   const ip = clean(client.ipAddress) ?? "unknown";
   const paired = alert.kind === "session-paired";
   return {
@@ -165,19 +152,21 @@ const make = Effect.gen(function* () {
     maxKeys: 10,
   });
 
-  const logDeliveryFailure = (channel: "webhook" | "command" | "notification", reason: string) =>
-    Effect.gen(function* () {
-      const decision = shouldLogFailure(channel, yield* Clock.currentTimeMillis);
-      if (!decision.log) return;
-      yield* Effect.logWarning(
-        [
-          "Security alert delivery failed.",
-          `channel=${channel}`,
-          `reason="${reason}"`,
-          ...(decision.suppressed > 0 ? [`failures_suppressed=${decision.suppressed}`] : []),
-        ].join(" "),
-      );
-    });
+  const logDeliveryFailure = Effect.fn("SecurityAlerts.logDeliveryFailure")(function* (
+    channel: "webhook" | "command" | "notification",
+    reason: string,
+  ) {
+    const decision = shouldLogFailure(channel, yield* Clock.currentTimeMillis);
+    if (!decision.log) return;
+    yield* Effect.logWarning(
+      [
+        "Security alert delivery failed.",
+        `channel=${channel}`,
+        `reason="${reason}"`,
+        ...(decision.suppressed > 0 ? [`failures_suppressed=${decision.suppressed}`] : []),
+      ].join(" "),
+    );
+  });
 
   const postWebhook = (url: string, text: string) =>
     HttpClientRequest.post(url).pipe(
@@ -240,18 +229,18 @@ const make = Effect.gen(function* () {
   const postNotification = (alert: SecurityAlert) =>
     Option.match(notifications, {
       onNone: () => Effect.void,
-      onSome: (service) =>
-        Effect.gen(function* () {
+      onSome: Effect.fn("SecurityAlerts.postNotification")(
+        function* (service) {
           const card = formatSecurityNotification(alert, host);
           yield* service.upsert({
             source: "security",
             sourceId: notificationSourceId(alert, yield* Clock.currentTimeMillis),
             request: { kind: "security", ...card, bodyTrust: "external" },
           });
-        }).pipe(
-          Effect.catch((error) => logDeliveryFailure("notification", error._tag)),
-          Effect.catchDefect(() => logDeliveryFailure("notification", "defect")),
-        ),
+        },
+        Effect.catch((error) => logDeliveryFailure("notification", error._tag)),
+        Effect.catchDefect(() => logDeliveryFailure("notification", "defect")),
+      ),
     });
 
   const notify: SecurityAlerts["Service"]["notify"] = (alert) => {

@@ -1,19 +1,8 @@
 /**
- * Speech-to-text for the composer's voice input.
- *
- * The browser records a clip and the `/api/voice/transcribe` route hands its
- * bytes here; we forward them to an OpenAI-compatible transcription endpoint
- * and return the text.
- *
- * When `T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL` points at a self-hosted Whisper
- * server (e.g. Speaches), it is tried first and OpenAI only serves as the
- * fallback when it fails. The OpenAI key comes from the server secret store
- * (`secrets/voice-transcription-openai-api-key.bin`, re-read on every request
- * so it can be set without a restart) and falls back to `OPENAI_API_KEY`.
- *
- * `T3CODE_VOICE_TRANSCRIPTION_PROMPT` is forwarded to both backends as
- * Whisper's `prompt`: a vocabulary hint that biases spelling toward project and
- * product names a general model would otherwise mishear.
+ * Speech-to-text for the composer's voice input: forwards the clip to an OpenAI-compatible endpoint.
+ * `T3CODE_VOICE_TRANSCRIPTION_LOCAL_URL` (self-hosted Whisper) is tried first, OpenAI is the fallback;
+ * the key is re-read on every request so it can change without a restart.
+ * `T3CODE_VOICE_TRANSCRIPTION_PROMPT` goes to both backends as Whisper's `prompt` vocabulary hint.
  */
 import {
   type VoiceTranscriptionFailureReason,

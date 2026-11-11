@@ -1,13 +1,7 @@
 /**
- * Fork-only raw HTTP routes used by the `t3` CLI while a server is running.
- *
- * `t3 import sync|claude` and `t3 session reset` write v2 orchestration
- * events. Doing that from a second process would bypass the server's live
- * event publication (clients would not see the change until a reload) and
- * race its writers, so when a server is up the CLI asks it to do the work
- * here; the CLI only runs the same services in-process when no server runs.
- *
- * Auth: an operate-scoped session, like the other raw routes.
+ * Fork-only raw HTTP routes used by the `t3` CLI while a server runs (`t3 import`, `t3 session reset`).
+ * A second process writing v2 events would bypass live publication and race the server's writers, so
+ * the server does the work here. Auth: an operate-scoped session.
  */
 import { AuthOrchestrationOperateScope, CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -241,43 +235,42 @@ const noticeRoute = HttpRouter.add(
 );
 
 /** Queue `message` on each thread as a system notification; a thread that cannot take it is reported. */
-const nudgeThreads = (input: {
+const nudgeThreads = Effect.fn("forkHttp.nudgeThreads")(function* (input: {
   readonly threadIds: ReadonlyArray<string>;
   readonly message: string;
   readonly nudgeId: string;
   readonly summary: string;
-}) =>
-  Effect.gen(function* () {
-    const threads = yield* ThreadManagementService.ThreadManagementService;
-    return yield* Effect.forEach(input.threadIds, (rawId) => {
-      const threadId = ThreadId.make(rawId.trim());
-      return threads.getThreadRecords(threadId, []).pipe(
-        Effect.flatMap(() =>
-          threads.dispatch({
-            type: "message.dispatch",
-            commandId: CommandId.make(`command:nudge:${input.nudgeId}:${threadId}`),
-            threadId,
-            messageId: MessageId.make(`message:nudge:${input.nudgeId}:${threadId}`),
-            text: input.message,
-            notification: {
-              source: { kind: "system" },
-              outcome: "updated",
-              summary: input.summary,
-              detail: input.message,
-            },
-            attachments: [],
-            dispatchMode: { type: "queue_after_active" },
-            createdBy: "agent",
-            creationSource: "server",
-          }),
-        ),
-        Effect.map(() => ({ threadId, sent: true, detail: "queued" })),
-        Effect.catch((error: { readonly message: string }) =>
-          Effect.succeed({ threadId, sent: false, detail: error.message }),
-        ),
-      );
-    });
+}) {
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  return yield* Effect.forEach(input.threadIds, (rawId) => {
+    const threadId = ThreadId.make(rawId.trim());
+    return threads.getThreadRecords(threadId, []).pipe(
+      Effect.flatMap(() =>
+        threads.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`command:nudge:${input.nudgeId}:${threadId}`),
+          threadId,
+          messageId: MessageId.make(`message:nudge:${input.nudgeId}:${threadId}`),
+          text: input.message,
+          notification: {
+            source: { kind: "system" },
+            outcome: "updated",
+            summary: input.summary,
+            detail: input.message,
+          },
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "server",
+        }),
+      ),
+      Effect.map(() => ({ threadId, sent: true, detail: "queued" })),
+      Effect.catch((error: { readonly message: string }) =>
+        Effect.succeed({ threadId, sent: false, detail: error.message }),
+      ),
+    );
   });
+});
 
 /**
  * `POST /api/fork/thread/nudge` — body `NudgeRequest`. Queues `message` on each thread as a

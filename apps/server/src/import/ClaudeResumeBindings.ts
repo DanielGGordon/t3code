@@ -1,20 +1,8 @@
 /**
- * Fork: inspect and repair which native Claude session a thread resumes.
- *
- *  - `audit` (`t3 session audit`): read-only. Lists Claude threads whose next
- *    send will `--resume` a session whose transcript is missing on this host
- *    (Claude then fails with "No conversation found with session ID"). Safe
- *    while serving.
- *  - `reset` (`t3 session reset <threadId> --yes`): detaches the thread from
- *    its native session (`activeProviderThreadId: null`), so the next send
- *    starts a fresh Claude session with the thread's history handed off as
- *    context. The old provider thread is kept, so the binding is auditable.
- *  - `restoreLegacyResume` (server startup): v1 → v2 cutover imports every v1
- *    thread with no provider thread, which would drop native resume for every
- *    old Claude thread (incl. `claude-import-*`). This binds each such thread
- *    to the session its v1 `provider_session_runtime` cursor pointed at.
- *    Idempotent; a missing transcript is NOT a reason to skip (the user
- *    restores transcripts and finds the stragglers with `audit`).
+ * Fork: inspect and repair which native Claude session a thread resumes (`audit`, `reset`,
+ * `restoreLegacyResume` at startup). `audit` is read-only. A missing transcript is never a reason to
+ * skip a restore: the user restores transcripts and finds the stragglers with `audit`. `reset` keeps
+ * the old provider thread so the binding stays auditable.
  */
 import { EventId, type ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -288,25 +276,25 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const eventSink = yield* EventSink.EventSinkV2;
 
-  const reset: ClaudeResumeBindingsShape["reset"] = ({ threadId, apply }) =>
-    Effect.gen(function* () {
+  const reset: ClaudeResumeBindingsShape["reset"] = Effect.fn("ClaudeResumeBindings.reset")(
+    function* ({ threadId, apply }) {
       const rows = yield* sql<{
         readonly payload_json: string;
         readonly provider_thread_id: string | null;
         readonly driver: string | null;
         readonly native_id: string | null;
       }>`
-        SELECT
-          thread.payload_json,
-          provider.provider_thread_id,
-          provider.driver,
-          json_extract(provider.payload_json, '$.nativeThreadRef.nativeId') AS native_id
-        FROM orchestration_v2_projection_threads AS thread
-        LEFT JOIN orchestration_v2_projection_provider_threads AS provider
-          ON provider.provider_thread_id = thread.active_provider_thread_id
-        WHERE thread.thread_id = ${threadId}
-        LIMIT 1
-      `.pipe(mapFailure("Failed to read the thread"));
+      SELECT
+        thread.payload_json,
+        provider.provider_thread_id,
+        provider.driver,
+        json_extract(provider.payload_json, '$.nativeThreadRef.nativeId') AS native_id
+      FROM orchestration_v2_projection_threads AS thread
+      LEFT JOIN orchestration_v2_projection_provider_threads AS provider
+        ON provider.provider_thread_id = thread.active_provider_thread_id
+      WHERE thread.thread_id = ${threadId}
+      LIMIT 1
+    `.pipe(mapFailure("Failed to read the thread"));
       const row = rows[0];
       const thread = row === undefined ? undefined : decodeStoredAppThread(row.payload_json);
       if (row === undefined || thread === undefined) {
@@ -322,10 +310,10 @@ export const make = Effect.gen(function* () {
       }
       const statuses = BLOCKING_RUN_STATUSES as ReadonlyArray<string>;
       const busy = yield* sql<{ readonly count: number }>`
-        SELECT COUNT(*) AS count
-        FROM orchestration_v2_projection_runs
-        WHERE thread_id = ${threadId} AND status IN ${sql.in(statuses)}
-      `.pipe(mapFailure("Failed to read the thread's runs"));
+      SELECT COUNT(*) AS count
+      FROM orchestration_v2_projection_runs
+      WHERE thread_id = ${threadId} AND status IN ${sql.in(statuses)}
+    `.pipe(mapFailure("Failed to read the thread's runs"));
       const lines = [
         `Thread ${threadId} (${row.driver ?? "unknown driver"}, instance ${thread.providerInstanceId})`,
         `  provider thread: ${thread.activeProviderThreadId}`,
@@ -337,33 +325,31 @@ export const make = Effect.gen(function* () {
           detail: `${lines.join("\n")}\nThread ${threadId} has a run in progress or queued; stop it before resetting.`,
         });
       }
-      // Any later `provider-thread.updated` for the old provider thread points
-      // the app thread back at it, silently undoing the reset. Those come from
-      // a loaded provider session (live adapter events) and from startup
-      // recovery of provider threads still marked active or waiting on
-      // background tasks — so refuse while either could still happen.
+      // A later `provider-thread.updated` for the old provider thread silently undoes the reset, and those
+      // come from a loaded session or startup recovery of active/waiting provider threads, so refuse
+      // while either could still happen.
       const liveSessions = yield* sql<{ readonly count: number }>`
-        SELECT COUNT(*) AS count
-        FROM orchestration_v2_projection_provider_sessions AS session
-        WHERE session.status NOT IN ('stopped', 'error')
-          AND (
-            session.thread_id = ${threadId}
-            OR EXISTS (
-              SELECT 1 FROM orchestration_v2_projection_provider_session_bindings AS binding
-              WHERE binding.provider_session_id = session.provider_session_id
-                AND binding.thread_id = ${threadId}
-            )
+      SELECT COUNT(*) AS count
+      FROM orchestration_v2_projection_provider_sessions AS session
+      WHERE session.status NOT IN ('stopped', 'error')
+        AND (
+          session.thread_id = ${threadId}
+          OR EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_provider_session_bindings AS binding
+            WHERE binding.provider_session_id = session.provider_session_id
+              AND binding.thread_id = ${threadId}
           )
-      `.pipe(mapFailure("Failed to read the thread's provider sessions"));
+        )
+    `.pipe(mapFailure("Failed to read the thread's provider sessions"));
       const unsettledProviderThreads = yield* sql<{ readonly count: number }>`
-        SELECT COUNT(*) AS count
-        FROM orchestration_v2_projection_provider_threads
-        WHERE thread_id = ${threadId}
-          AND (
-            status = 'active'
-            OR COALESCE(json_array_length(payload_json, '$.pendingBackgroundTasks'), 0) > 0
-          )
-      `.pipe(mapFailure("Failed to read the thread's provider threads"));
+      SELECT COUNT(*) AS count
+      FROM orchestration_v2_projection_provider_threads
+      WHERE thread_id = ${threadId}
+        AND (
+          status = 'active'
+          OR COALESCE(json_array_length(payload_json, '$.pendingBackgroundTasks'), 0) > 0
+        )
+    `.pipe(mapFailure("Failed to read the thread's provider threads"));
       if ((liveSessions[0]?.count ?? 0) > 0 || (unsettledProviderThreads[0]?.count ?? 0) > 0) {
         return yield* new ClaudeResumeBindingError({
           detail:
@@ -406,7 +392,8 @@ export const make = Effect.gen(function* () {
         ],
         reset: true,
       };
-    });
+    },
+  );
 
   const restoreLegacyResume: ClaudeResumeBindingsShape["restoreLegacyResume"] = Effect.gen(
     function* () {

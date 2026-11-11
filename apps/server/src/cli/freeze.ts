@@ -1,10 +1,7 @@
 /**
- * `t3 freeze` / `t3 thaw` — stop every conversation on the running server so one measured task is
- * the only thing drawing on the Claude subscription, then bring the rest back.
- *
- * Freeze stops each working thread like the Stop button (background agents and commands included,
- * queues held) and disables scheduled tasks. What it touched is written to a manifest so `thaw` can
- * undo exactly that. Exit code 1 means something was still working when the wait ran out.
+ * `t3 freeze` / `t3 thaw`: stop every conversation on the running server so one measured task is the
+ * only thing drawing on the Claude subscription, then bring the rest back. A manifest records what
+ * freeze touched so `thaw` undoes exactly that. Exit code 1 means something was still working.
  */
 import * as NodeOS from "node:os";
 
@@ -47,12 +44,11 @@ const manifestFlag = Flag.String("manifest").pipe(
 );
 
 /** The recorded freeze, or null when there is none (or it is unreadable). */
-const readManifest = (path: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const text = yield* fs.readFileString(path).pipe(Effect.option);
-    return Option.getOrNull(Option.flatMap(text, decodeManifest));
-  });
+const readManifest = Effect.fn("freezeCli.readManifest")(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const text = yield* fs.readFileString(path).pipe(Effect.option);
+  return Option.getOrNull(Option.flatMap(text, decodeManifest));
+});
 
 const quoted = (text: string) => JSON.stringify(text);
 

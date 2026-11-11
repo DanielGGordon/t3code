@@ -23,6 +23,60 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-11-10 — True merge of upstream through `08af12da4` (2026-11-10)
+
+939 upstream commits since `4a5251b1c` (Effect 4.1.2 / `@effect/tsgo` toolchain, plan mode removed
+from the composer (#33131), upstream dictation mic + speech setup, `/welcome` host restructure,
+generic event-store prune, scheduled-task thread mode, many fixes). 43 files conflicted; nothing
+in `apps/mobile` conflicted.
+
+### Migration numbering (offset +4 continues)
+
+Upstream's 077 `RepairBooleanSettledOverride` … 080 `ScheduledTaskThreadMode` run at fork ids
+**81–84**. Ledger tests list through 84; `077_RepairBooleanSettledOverride.test.ts` uses fork ids.
+`scripts/build-npm-launcher.ts` now reads the head from `migrationEntries` (84), not from file names (80).
+
+### Resolutions worth knowing
+
+- **Effect 4.1.2:** `effect/Crypto` is gone. Fork code uses `effect/crypto/SecureRandom`; fork tests
+  that touch it provide `NodeCrypto.layer`. The language service now reports as errors, so fork
+  code was moved to `Effect.fn`, `catchCauseIf`, and `Schema.TaggedError` for voice errors;
+  plain-Node fork scripts carry a per-file `// @effect-diagnostics … :off` header (upstream's pattern).
+  `DeviceStoppedError.name` is suppressed for now; renaming it to `deviceName` is a follow-up.
+- **Auth:** `authenticateBrowserSession` retired. MCP approval goes through `authenticateHttpRequest`,
+  which keeps the fork's 48 h two-factor gate. `SessionStore` signs with upstream's `PayloadSigner`.
+  Security-alert device separator is now `": "` (em-dash lint rule).
+- **CLI:** `layerProjectCliRuntime` and `forkLive` load their runtime layer lazily so upstream's
+  deferred CLI imports keep working.
+- **Event store:** upstream's generic prune replaces the fork's two compaction-list entries
+  (`thread.restart-request-updated`, `thread.cache-keep-alive-updated`). The Claude import tombstone
+  survives because `thread.created` is never pruned.
+- **V2 seed:** upstream's `V2DatabaseImportError` pass-through combined with the fork's
+  `V2DatabaseNotInitializedError`.
+- **Defaults:** `sidebarAutoSettleAfterDays` is now upstream's 7 (was 3; the fork never set it).
+- **Plan mode retired** from the touch controls menu and primary actions, following upstream.
+- **Composer:** `lib/contextWindow.ts` layers the fork's spend/total-token fields on upstream's
+  client-runtime snapshot. The footer context meter went with upstream's deletion (header usage
+  stats remain). The fork's "Auto hidden unless enabled" filter is one helper,
+  `filterAutoRuntimeModeOption`, used by the composer and the context-strip menu.
+- **Voice route:** the fork's `POST /api/voice/transcribe` (compressed audio) moved to `/api/fork/voice/transcribe`; upstream's dictation owns the old path (raw PCM). The duplicate registration crashed the server on boot.
+- **Two mics (open decision):** the fork's server Whisper/OpenAI voice button (`composerVoiceInput`)
+  and upstream's dictation mic both render on desktop; in touch layout only the fork's shows.
+- **Shell:** the fork's notification hosts moved into upstream's `appHosts`, so they also mount on
+  `/welcome`. Sidebar open state uses upstream's localStorage key; the car full-screen sheet sits on
+  top. The project-filter settings gear is `touch:visible` (the car reports `pointer: fine`).
+- **Styles:** the fork's Solarized scrollbar overrides use upstream's `:where(:not(iframe))` guard.
+- **Voice docs:** upstream's dictation doc and the fork's server voice button documented side by side.
+
+### Known baseline failures (not caused by this merge)
+
+`runtimeLayer.test.ts` "recovers only reconstructable user questions…", `GuestPage.browser.test.tsx`
+(`.messages-timeline-scroll`), sleep/polling lint in `RestartRequestReactor.test.ts` and
+`CacheKeepAliveWorker.test.ts`, and `ProjectionStore.test.ts` "fixed SQL turn-item window" (host
+Node 24.22.1 lacks `statement.stat`).
+
+---
+
 ## 2026-11-02 — True merge of upstream through `4a5251b1c` (2026-11-01)
 
 911 upstream commits since `5211acfe9` (managed policy, side chats, combined model+effort picker,

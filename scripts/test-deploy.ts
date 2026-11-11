@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off - Plain Node script that deliberately avoids the Effect toolchain.
 // Deploy the current worktree branch to a disposable local test instance.
 //
 //   node scripts/test-deploy.ts \
