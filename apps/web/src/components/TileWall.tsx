@@ -16,9 +16,9 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, LayoutGridIcon, XIcon } from "lucide-react";
+import { CheckIcon, CoinsIcon, LayoutGridIcon, XIcon } from "lucide-react";
 import { use, useEffect, useLayoutEffect, useState } from "react";
 
 import { RegistryContext } from "@effect/atom-react";
@@ -26,6 +26,11 @@ import { RegistryContext } from "@effect/atom-react";
 import { useClientSettings } from "../hooks/useSettings";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { cn } from "../lib/utils";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
+  latestProviderTurnTokenUsage,
+} from "../lib/contextWindow";
 import { makePausableAtomRegistry } from "../lib/pausableAtomRegistry";
 import { observeResize } from "../lib/observeResize";
 import {
@@ -43,6 +48,8 @@ import {
   useAllEnvironmentShellsBootstrapped,
   useDelegatedUnderParent,
   useProject,
+  useQuietThreadProjection,
+  useQuietThreadVisibleTurnItems,
   useServerConfigs,
   useThreadShells,
 } from "../state/entities";
@@ -104,6 +111,39 @@ function reportTileActionFailure(title: string, result: AtomCommandResult<unknow
       title,
       description: error instanceof Error ? error.message : "An error occurred.",
     }),
+  );
+}
+
+/** Its own component so streaming usage updates re-render this badge, not the whole tile. */
+function TileTokenCount({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+  const projection = useQuietThreadProjection(threadRef)?.projection ?? null;
+  const items = useQuietThreadVisibleTurnItems(threadRef);
+  const providerThread = projection?.providerThreads.find(
+    (candidate) => candidate.id === projection.thread.activeProviderThreadId,
+  );
+  const usage = deriveLatestContextWindowSnapshot(
+    items,
+    latestProviderTurnTokenUsage(projection?.providerTurns ?? [], projection, providerThread),
+    providerThread,
+    projection?.providerTurns ?? [],
+  );
+  if (usage === null) return null;
+  const tokens = formatContextWindowTokens(usage.threadTotalTokens);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums opacity-75"
+            aria-label={`Thread token usage ${tokens} tokens`}
+          />
+        }
+      >
+        <CoinsIcon className="size-3" />
+        {tokens}
+      </TooltipTrigger>
+      <TooltipPopup>Thread token usage: {tokens} tokens</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -201,6 +241,7 @@ function TileWallTile({
         {project ? (
           <span className="max-w-[30%] shrink-0 truncate text-xs opacity-75">{project.title}</span>
         ) : null}
+        <TileTokenCount threadRef={threadRef} />
         <span className="shrink-0 rounded-sm bg-background/25 px-1.5 py-0.5 text-2xs font-bold tracking-wide uppercase">
           {state.label}
         </span>
