@@ -60,8 +60,10 @@ Upstream's 077 `RepairBooleanSettledOverride` … 080 `ScheduledTaskThreadMode` 
   stats remain). The fork's "Auto hidden unless enabled" filter is one helper,
   `filterAutoRuntimeModeOption`, used by the composer and the context-strip menu.
 - **Voice route:** the fork's `POST /api/voice/transcribe` (compressed audio) moved to `/api/fork/voice/transcribe`; upstream's dictation owns the old path (raw PCM). The duplicate registration crashed the server on boot.
-- **Two mics (open decision):** the fork's server Whisper/OpenAI voice button (`composerVoiceInput`)
-  and upstream's dictation mic both render on desktop; in touch layout only the fork's shows.
+- **One mic:** upstream's dictation mic (`ComposerSpeechButton`, recording pill, `VoiceInputSetup`) is no
+  longer rendered in the composer and its shortcut is disabled; the fork's server voice button
+  (`composerVoiceInput`, via the Parakeet gateway) is the only composer mic. Upstream's speech hooks and
+  Settings → Voice remain in the tree so later syncs stay clean.
 - **Shell:** the fork's notification hosts moved into upstream's `appHosts`, so they also mount on
   `/welcome`. Sidebar open state uses upstream's localStorage key; the car full-screen sheet sits on
   top. The project-filter settings gear is `touch:visible` (the car reports `pointer: fine`).

@@ -1,4 +1,3 @@
-import { VoiceInputSetup } from "./VoiceInputSetup";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -136,7 +135,6 @@ import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
 import { useDictationShortcut } from "../../speech/useDictationShortcut";
 import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmissionShortcut";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
-import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand } from "../../keybindings";
 import {
@@ -1869,10 +1867,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { blocksSubmission: voiceInputActive, submitAfterDictation } = speechInput;
   const voiceSendDisabledReason =
     sendDisabledReason ?? (speechInput.preparing ? "Preparing voice input" : null);
-  const dictationShortcutLabel = useDictationShortcut({
+  // Upstream's dictation UI is hidden on this fork; its shortcut must not start a recording nothing shows.
+  useDictationShortcut({
     keybindings,
     speech: speechInput,
-    disabled: dictationDisabled,
+    disabled: true,
     terminalOpen,
     modelPickerOpen: isComposerModelPickerOpen,
     ...(backgroundThread ? { targetRef: composerFormRef } : {}),
@@ -3346,50 +3345,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       compactBeforeSendTokens={props.resumeCompactionTokens}
       keepFullHistory={props.keepFullHistory}
       onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-    >
-      {speechInput.available ? (
-        <>
-          <ComposerSpeechRecordingPill
-            state={speechInput.state}
-            progress={null}
-            finishShortcutLabel={dictationShortcutLabel}
-            cancelShortcutLabel="Esc"
-            level={speechInput.level}
-            disabled={dictationDisabled}
-            onStart={() => void speechInput.start()}
-            onStop={() => void speechInput.stop()}
-            onCancel={() => speechInput.cancel()}
-            onSkipPostProcessing={() => speechInput.skipPostProcessing()}
-          />
-          {/* Touch layout: the fork's Speak button owns the mic; the pill still shows a shortcut-started recording. */}
-          {touchLayout ? null : (
-            <ComposerSpeechButton
-              state={speechInput.state}
-              progress={null}
-              shortcutLabel={dictationShortcutLabel}
-              disabled={dictationDisabled}
-              onStart={() => void speechInput.start()}
-              onCancel={() => speechInput.cancel()}
-            />
-          )}
-        </>
-      ) : null}
-      <VoiceInputSetup
-        environmentId={speechInput.transcriptionEnvironmentId}
-        open={speechInput.setup.open}
-        step={speechInput.setup.step}
-        status={speechInput.status}
-        model={speechInput.setup.model}
-        language={speechInput.setup.language}
-        downloading={speechInput.setup.downloading}
-        error={speechInput.setup.error}
-        onOpenChange={speechInput.setup.setOpen}
-        onRetryCatalog={speechInput.setup.retryCatalog}
-        onDownload={() => void speechInput.setup.download()}
-        onCancelDownload={() => void speechInput.setup.cancelDownload()}
-        onStartRecording={() => void speechInput.setup.startRecording()}
-      />
-    </ComposerFooterPrimaryActions>
+    ></ComposerFooterPrimaryActions>
   );
   // Touch layout footer: Speak and the keyboard toggle on the driver's (left) side, every
   // rarely-changed control folded into one pill beside them, send / stop at the far right.
