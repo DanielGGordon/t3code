@@ -4,6 +4,7 @@
  * (an AudioWorklet, or a ScriptProcessor without worklets), downsamples to 16 kHz and cuts at pauses.
  */
 import * as Schema from "effect/Schema";
+import type { VoiceCaptureDiagnostics } from "./captureDiagnostics";
 import { PauseChunker, type PauseChunkerOptions } from "./pauseChunker";
 import { encodeWav, Resampler } from "./pcm";
 import { describeStartFailure, VoiceRecordingStartError } from "./recorder";
@@ -42,6 +43,8 @@ export interface ChunkedVoiceRecording {
   readonly stop: () => void;
   /** Stop capturing and drop what is left. */
   readonly cancel: () => void;
+  /** What the microphone delivered so far; read it after `stop` to explain an empty recording. */
+  readonly diagnostics: () => VoiceCaptureDiagnostics;
 }
 
 function audioContextConstructor(): typeof AudioContext | undefined {
@@ -81,8 +84,11 @@ export async function startChunkedVoiceRecording(
   const resampler = new Resampler(context.sampleRate);
   const chunker = new PauseChunker(chunkerOptions);
   let active = true;
+  let samplesReceived = 0;
+  let interrupted = false;
   const handleSamples = (samples: Float32Array) => {
     if (!active) return;
+    samplesReceived += samples.length;
     const pcm = resampler.process(samples);
     for (const piece of chunker.push(pcm))
       onPiece(new Blob([encodeWav(piece)], { type: "audio/wav" }));
@@ -101,6 +107,24 @@ export async function startChunkedVoiceRecording(
     for (const track of stream.getTracks()) track.stop();
     void context.close();
   };
+
+  const [track] = stream.getAudioTracks();
+  // Phones pause audio contexts (a call, a notification, the screen dimming) and mute the track
+  // when another app takes the microphone; both leave the recording running but silent.
+  const resumeIfPaused = () => {
+    if (!active || context.state === "running") return;
+    interrupted = true;
+    context.resume().catch(() => {});
+  };
+  context.addEventListener("statechange", resumeIfPaused);
+  cleanups.push(() => context.removeEventListener("statechange", resumeIfPaused));
+  if (track) {
+    const markMuted = () => {
+      if (active) interrupted = true;
+    };
+    track.addEventListener("mute", markMuted);
+    cleanups.push(() => track.removeEventListener("mute", markMuted));
+  }
 
   try {
     await context.resume();
@@ -153,5 +177,11 @@ export async function startChunkedVoiceRecording(
     cancel: () => {
       if (active) release();
     },
+    diagnostics: () => ({
+      inputLabel: track?.label ?? "",
+      samplesReceived,
+      loudestDb: chunker.loudestDb,
+      interrupted,
+    }),
   };
 }

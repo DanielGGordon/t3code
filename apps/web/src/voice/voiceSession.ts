@@ -4,6 +4,7 @@
  * `finish()` only waits for the last piece. Elsewhere it records one clip and uploads it at the end.
  */
 import * as Schema from "effect/Schema";
+import { describeEmptyRecording } from "./captureDiagnostics";
 import { createChunkTranscriber, type ChunkTranscript } from "./chunkTranscriber";
 import {
   ChunkedRecordingUnavailableError,
@@ -47,9 +48,15 @@ export async function startVoiceDictationSession(): Promise<VoiceDictationSessio
   try {
     const recording = await startChunkedVoiceRecording((wav) => transcriber.add(wav));
     return {
-      finish: () => {
+      finish: async () => {
         recording.stop();
-        return transcriber.finish();
+        const transcript = await transcriber.finish();
+        if (transcript.text.length > 0 || transcript.error) return transcript;
+        // Nothing was sent or nothing came back: say what the microphone did instead of a bare "no speech".
+        return {
+          text: "",
+          error: new Error(describeEmptyRecording(recording.diagnostics())),
+        };
       },
       cancel: () => {
         transcriber.cancel();

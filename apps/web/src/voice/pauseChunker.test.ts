@@ -71,6 +71,13 @@ describe("PauseChunker", () => {
     expect(chunker.flush()).toBeNull();
   });
 
+  it("reports the loudest frame even when nothing counts as speech", () => {
+    const chunker = new PauseChunker();
+    expect(chunker.loudestDb).toBe(-90);
+    feed(chunker, silence(500), speech(60), silence(500));
+    expect(chunker.loudestDb).toBeCloseTo(20 * Math.log10(8_000 / 32_768), 0);
+  });
+
   it("keeps a short word at the end of the recording", () => {
     const chunker = new PauseChunker();
     expect(feed(chunker, silence(1_000), speech(300))).toEqual([]);
