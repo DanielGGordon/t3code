@@ -71,25 +71,25 @@ describe("034_035 fork migration offset", () => {
 
       const executed = yield* runMigrations();
       // Every upstream migration from upstream-35 (TitleRegeneration) on runs,
-      // none is skipped, and the ids are contiguous 36..84.
+      // none is skipped, and the ids are contiguous 36..92.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        Array.from({ length: 84 - 35 }, (_, index) => 36 + index),
+        Array.from({ length: 92 - 35 }, (_, index) => 36 + index),
       );
       assert.deepStrictEqual(executed[0], [36, "ProjectionThreadTitleRegeneration"]);
       assert.deepStrictEqual(
         executed.find(([, name]) => name === "OrchestrationV2"),
         [56, "OrchestrationV2"],
       );
-      assert.deepStrictEqual(executed.at(-23), [62, "PullRequestReviewGuides"]);
-      assert.deepStrictEqual(executed.at(-22), [63, "AuthSessionClientIps"]);
-      assert.deepStrictEqual(executed.at(-20), [65, "Notifications"]);
-      assert.deepStrictEqual(executed.at(-19), [66, "ThreadFailureLookupIndex"]);
-      assert.deepStrictEqual(executed.at(-17), [68, "CanonicalizeThreadPullRequestLinks"]);
-      assert.deepStrictEqual(executed.at(-16), [69, "CodexUsageNativeTurnIndex"]);
-      assert.deepStrictEqual(executed.at(-9), [76, "WaitingLinkRequestIndex"]);
-      assert.deepStrictEqual(executed.at(-5), [80, "ProjectionProjectsPinArchive"]);
-      assert.deepStrictEqual(executed.at(-1), [84, "ScheduledTaskThreadMode"]);
+      assert.deepStrictEqual(executed.at(-31), [62, "PullRequestReviewGuides"]);
+      assert.deepStrictEqual(executed.at(-30), [63, "AuthSessionClientIps"]);
+      assert.deepStrictEqual(executed.at(-28), [65, "Notifications"]);
+      assert.deepStrictEqual(executed.at(-27), [66, "ThreadFailureLookupIndex"]);
+      assert.deepStrictEqual(executed.at(-25), [68, "CanonicalizeThreadPullRequestLinks"]);
+      assert.deepStrictEqual(executed.at(-24), [69, "CodexUsageNativeTurnIndex"]);
+      assert.deepStrictEqual(executed.at(-17), [76, "WaitingLinkRequestIndex"]);
+      assert.deepStrictEqual(executed.at(-13), [80, "ProjectionProjectsPinArchive"]);
+      assert.deepStrictEqual(executed.at(-1), [92, "TurnItemTypeStatusIndex"]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       // The recorded ledger equals this build's manifest (no divergence warning).
