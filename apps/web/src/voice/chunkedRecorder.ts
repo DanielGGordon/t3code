@@ -7,7 +7,12 @@ import * as Schema from "effect/Schema";
 import type { VoiceCaptureDiagnostics } from "./captureDiagnostics";
 import { PauseChunker, type PauseChunkerOptions } from "./pauseChunker";
 import { encodeWav, Resampler } from "./pcm";
-import { describeStartFailure, VoiceRecordingStartError } from "./recorder";
+import {
+  describeStartFailure,
+  recordMediaStream,
+  VoiceRecordingStartError,
+  type VoiceRecording,
+} from "./recorder";
 
 const WORKLET_NAME = "t3-pcm-capture";
 // Batches ~21 ms of audio per message; the processor runs every 2.7 ms and would flood the port.
@@ -43,6 +48,11 @@ export interface ChunkedVoiceRecording {
   readonly stop: () => void;
   /** Stop capturing and drop what is left. */
   readonly cancel: () => void;
+  /**
+   * The whole recording as one clip from a MediaRecorder on the same microphone stream, which does not
+   * depend on Web Audio. Call after `stop`; null where MediaRecorder is missing or failed.
+   */
+  readonly fullClip: () => Promise<Blob | null>;
   /** What the microphone delivered so far; read it after `stop` to explain an empty recording. */
   readonly diagnostics: () => VoiceCaptureDiagnostics;
 }
@@ -110,6 +120,15 @@ export async function startChunkedVoiceRecording(
   };
 
   const [track] = stream.getAudioTracks();
+  // Phones can stall Web Audio mid-recording (the context pauses and stays paused); this recorder
+  // is the fallback for that.
+  let clip: VoiceRecording | null = null;
+  try {
+    clip = recordMediaStream(stream);
+  } catch {
+    // no MediaRecorder: the Web Audio pieces are all there is
+  }
+  let clipResult: Promise<Blob | null> = Promise.resolve(null);
   // Phones pause audio contexts (a call, a notification, the screen dimming) and mute the track
   // when another app takes the microphone; both leave the recording running but silent.
   const resumeIfPaused = () => {
@@ -171,13 +190,17 @@ export async function startChunkedVoiceRecording(
   return {
     stop: () => {
       if (!active) return;
+      // Stop the clip before the tracks end so its last data is flushed.
+      clipResult = clip ? clip.stop().catch(() => null) : clipResult;
       release();
       const last = chunker.flush();
       if (last) onPiece(new Blob([encodeWav(last)], { type: "audio/wav" }));
     },
     cancel: () => {
+      clip?.cancel();
       if (active) release();
     },
+    fullClip: () => clipResult,
     diagnostics: () => ({
       inputLabel: track?.label ?? "",
       samplesReceived,

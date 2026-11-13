@@ -51,11 +51,25 @@ export async function startVoiceDictationSession(): Promise<VoiceDictationSessio
       finish: async () => {
         recording.stop();
         const transcript = await transcriber.finish();
+        const diagnostics = recording.diagnostics();
+        // Web Audio can stall on a phone: the context pauses and the rest of the recording never
+        // arrives. The plain clip recorded alongside has all of it.
+        if (diagnostics.contextPauses > 0 || (transcript.text.length === 0 && !transcript.error)) {
+          const clip = await recording.fullClip();
+          if (clip && clip.size > 0) {
+            try {
+              const text = (await transcribeVoiceRecording(clip)).trim();
+              if (text.length > 0) return { text, error: null };
+            } catch {
+              // keep what the pieces gave
+            }
+          }
+        }
         if (transcript.text.length > 0 || transcript.error) return transcript;
         // Nothing was sent or nothing came back: say what the microphone did instead of a bare "no speech".
         return {
           text: "",
-          error: new Error(describeEmptyRecording(recording.diagnostics())),
+          error: new Error(describeEmptyRecording(diagnostics)),
         };
       },
       cancel: () => {
