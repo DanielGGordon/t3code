@@ -85,7 +85,8 @@ export async function startChunkedVoiceRecording(
   const chunker = new PauseChunker(chunkerOptions);
   let active = true;
   let samplesReceived = 0;
-  let interrupted = false;
+  let contextPauses = 0;
+  let muteEvents = 0;
   const handleSamples = (samples: Float32Array) => {
     if (!active) return;
     samplesReceived += samples.length;
@@ -113,14 +114,14 @@ export async function startChunkedVoiceRecording(
   // when another app takes the microphone; both leave the recording running but silent.
   const resumeIfPaused = () => {
     if (!active || context.state === "running") return;
-    interrupted = true;
+    contextPauses += 1;
     context.resume().catch(() => {});
   };
   context.addEventListener("statechange", resumeIfPaused);
   cleanups.push(() => context.removeEventListener("statechange", resumeIfPaused));
   if (track) {
     const markMuted = () => {
-      if (active) interrupted = true;
+      if (active) muteEvents += 1;
     };
     track.addEventListener("mute", markMuted);
     cleanups.push(() => track.removeEventListener("mute", markMuted));
@@ -181,7 +182,10 @@ export async function startChunkedVoiceRecording(
       inputLabel: track?.label ?? "",
       samplesReceived,
       loudestDb: chunker.loudestDb,
-      interrupted,
+      contextPauses,
+      muteEvents,
+      mutedAtStop: track?.muted ?? false,
+      sampleRate: context.sampleRate,
     }),
   };
 }
