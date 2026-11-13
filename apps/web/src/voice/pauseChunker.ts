@@ -14,6 +14,7 @@ const FORCED_CUT_WINDOW_FRAMES = 150; // 3 s
 const NOISE_MARGIN_DB = 12;
 const SPEECH_THRESHOLD_FLOOR_DB = -52;
 const SPEECH_THRESHOLD_CEILING_DB = -30;
+const SILENCE_DB = -90;
 
 export interface PauseChunkerOptions {
   readonly minChunkMs?: number;
@@ -39,12 +40,18 @@ export class PauseChunker {
   /** The last second or two of levels, kept across cuts to estimate the room's noise. */
   private readonly recent: number[] = [];
   private silent = 0;
+  private loudest = SILENCE_DB;
 
   constructor(options: PauseChunkerOptions = {}) {
     const { minChunkMs, maxChunkMs, pauseMs } = { ...DEFAULT_PAUSE_CHUNKER_OPTIONS, ...options };
     this.minFrames = Math.floor(minChunkMs / FRAME_MS);
     this.maxFrames = Math.max(this.minFrames, Math.floor(maxChunkMs / FRAME_MS));
     this.pauseFrames = Math.max(1, Math.floor(pauseMs / FRAME_MS));
+  }
+
+  /** The loudest 20 ms frame of the whole recording in dBFS, or -90 for digital silence. */
+  get loudestDb(): number {
+    return this.loudest;
   }
 
   /** Adds audio; returns the pieces that were completed by it, in order. */
@@ -77,7 +84,8 @@ export class PauseChunker {
       const value = Math.abs(this.pcm[i] ?? 0);
       if (value > peak) peak = value;
     }
-    const level = peak < 2 ? -90 : 20 * Math.log10(peak / 32_768);
+    const level = peak < 2 ? SILENCE_DB : 20 * Math.log10(peak / 32_768);
+    if (level > this.loudest) this.loudest = level;
     this.levels.push(level);
     this.recent.push(level);
     if (this.recent.length > NOISE_WINDOW_FRAMES) this.recent.shift();

@@ -62,25 +62,13 @@ export function describeStartFailure(cause: unknown): string {
   return "Could not start the microphone.";
 }
 
-export async function startVoiceRecording(): Promise<VoiceRecording> {
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (cause) {
-    throw new VoiceRecordingStartError({ message: describeStartFailure(cause), cause });
-  }
-  const releaseMicrophone = () => {
-    for (const track of stream.getTracks()) track.stop();
-  };
-
-  let recorder: MediaRecorder;
-  try {
-    const mimeType = pickVoiceRecordingMimeType((type) => MediaRecorder.isTypeSupported(type));
-    recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  } catch (cause) {
-    releaseMicrophone();
-    throw new VoiceRecordingStartError({ message: "This browser cannot record audio.", cause });
-  }
+/**
+ * Records `stream` as one clip. The stream's tracks are left running for the caller to release;
+ * `stop` resolves once the recorder has flushed, even if the tracks already ended.
+ */
+export function recordMediaStream(stream: MediaStream): VoiceRecording {
+  const mimeType = pickVoiceRecordingMimeType((type) => MediaRecorder.isTypeSupported(type));
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 
   const chunks: Blob[] = [];
   recorder.addEventListener("dataavailable", (event) => {
@@ -95,7 +83,6 @@ export async function startVoiceRecording(): Promise<VoiceRecording> {
 
   const stopRecorder = () => {
     if (recorder.state !== "inactive") recorder.stop();
-    releaseMicrophone();
   };
 
   return {
@@ -107,6 +94,38 @@ export async function startVoiceRecording(): Promise<VoiceRecording> {
     cancel: () => {
       stopRecorder();
       chunks.length = 0;
+    },
+  };
+}
+
+export async function startVoiceRecording(): Promise<VoiceRecording> {
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (cause) {
+    throw new VoiceRecordingStartError({ message: describeStartFailure(cause), cause });
+  }
+  const releaseMicrophone = () => {
+    for (const track of stream.getTracks()) track.stop();
+  };
+
+  let recording: VoiceRecording;
+  try {
+    recording = recordMediaStream(stream);
+  } catch (cause) {
+    releaseMicrophone();
+    throw new VoiceRecordingStartError({ message: "This browser cannot record audio.", cause });
+  }
+
+  return {
+    stop: async () => {
+      const clip = recording.stop();
+      releaseMicrophone();
+      return clip;
+    },
+    cancel: () => {
+      recording.cancel();
+      releaseMicrophone();
     },
   };
 }
