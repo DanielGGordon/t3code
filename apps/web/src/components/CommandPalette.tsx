@@ -898,54 +898,61 @@ function OpenCommandPaletteDialog(props: {
   const hiddenArchivedCount = includeArchivedProjects
     ? 0
     : archivedPickerProjects.filter((project) => !isScratch(project)).length;
-  const openingOrderThreadItems = useOrderWhileOpen(
-    [
-      ...(() => {
-        const projectItems = buildThreadInItems(pickerProjects);
-        if (scratchTargetEnvironmentId === null) return projectItems;
+  const openThreadInItems = useOrderWhileOpen(
+    (() => {
+      const projectItems = buildThreadInItems(pickerProjects);
+      if (scratchTargetEnvironmentId === null) return projectItems;
 
-        const noProjectIndex = newThreadNoProjectIndex(
-          projectPickerEntries.map(({ group, targetProject, isPreferred }) => ({
-            isScratch: isScratchProject(
-              targetProject,
-              scratchWorkspaceRootFor(targetProject.environmentId),
-            ),
-            pinned: group.pinned,
-            isPreferred,
-          })),
-        );
-        return [
-          ...projectItems.slice(0, noProjectIndex),
-          {
-            kind: "action" as const,
-            value: NEW_THREAD_NO_PROJECT_VALUE,
-            searchTerms: ["no project", "without project", "none"],
-            title: "No project",
-            icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
-            shortcutCommand: "chat.newWithoutProject" as const,
-            run: () => startScratchThread(scratchTargetEnvironmentId),
-          },
-          ...projectItems.slice(noProjectIndex),
-        ];
-      })(),
-      ...archivedThreadInItems,
-      ...(hiddenArchivedCount > 0
-        ? [
-            {
-              kind: "action" as const,
-              value: SHOW_ARCHIVED_PROJECTS_VALUE,
-              searchTerms: ["archived"],
-              title: `Show archived projects (${hiddenArchivedCount})`,
-              icon: <ArchiveIcon className={ITEM_ICON_CLASS} />,
-              keepOpen: true,
-              run: async () => setShowArchivedProjects(true),
-            },
-          ]
-        : []),
-    ],
+      const noProjectIndex = newThreadNoProjectIndex(
+        projectPickerEntries.map(({ group, targetProject, isPreferred }) => ({
+          isScratch: isScratchProject(
+            targetProject,
+            scratchWorkspaceRootFor(targetProject.environmentId),
+          ),
+          pinned: group.pinned,
+          isPreferred,
+        })),
+      );
+      return [
+        ...projectItems.slice(0, noProjectIndex),
+        {
+          kind: "action" as const,
+          value: NEW_THREAD_NO_PROJECT_VALUE,
+          searchTerms: ["no project", "without project", "none"],
+          title: "No project",
+          icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+          shortcutCommand: "chat.newWithoutProject" as const,
+          run: () => startScratchThread(scratchTargetEnvironmentId),
+        },
+        ...projectItems.slice(noProjectIndex),
+      ];
+    })(),
     rowOrderKey("new-thread-in"),
     true,
   );
+  // Archived rows always follow the open ones, so "Show archived" reveals them where it was.
+  const archivedOrderThreadItems = useOrderWhileOpen(
+    archivedThreadInItems,
+    rowOrderKey("new-thread-in"),
+    true,
+  );
+  const openingOrderThreadItems = [
+    ...openThreadInItems,
+    ...archivedOrderThreadItems,
+    ...(hiddenArchivedCount > 0
+      ? [
+          {
+            kind: "action" as const,
+            value: SHOW_ARCHIVED_PROJECTS_VALUE,
+            searchTerms: ["archived"],
+            title: `Show archived projects (${hiddenArchivedCount})`,
+            icon: <ArchiveIcon className={ITEM_ICON_CLASS} />,
+            keepOpen: true,
+            run: async () => setShowArchivedProjects(true),
+          },
+        ]
+      : []),
+  ];
   // Jump shortcuts follow the rows as shown, so a pin cannot move a number to another row.
   // Archived rows only show on request, so they take no number.
   const archivedThreadInValues = new Set(archivedThreadInItems.map((item) => item.value));
