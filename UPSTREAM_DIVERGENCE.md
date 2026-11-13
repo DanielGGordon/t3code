@@ -23,6 +23,59 @@ already made, and so anyone reading the fork understands how it diverges.
 
 ---
 
+## 2026-11-13 — True merge of upstream through `43ce39595` (2026-11-12)
+
+964 upstream commits since `08af12da4` (UI language switching with 8 translations, computer-awake
+while agents work, watched-PR check-suite reactions, drop folders to add projects, assistant-reply
+quoting, antigravity/codex managed updates, per-migration transactions, many fixes). 42 files
+conflicted; nothing in `apps/mobile` or `apps/desktop` conflicted. Android and the Windows desktop
+app were not reviewed.
+
+### Migration numbering (offset +4 continues)
+
+Upstream's 081 `ProjectionMessageSearchText` … 088 `TurnItemTypeStatusIndex` run at fork ids
+**85–92**. Ledger tests list through 92; the upstream-numbered migration tests (081, 085, 087,
+`064_CanonicalizeThreadPullRequestLinks`, and the two new `Migrations.test.ts` cases) use fork ids.
+`runMigrations` now runs one transaction per migration (upstream) after the fork's preview and
+name-aware ledger reconciles, so the fork's `ledgerGapMigrations` stay in the executed list.
+
+### Resolutions worth knowing
+
+- **Orchestrator:** `shouldPrepareLegacyImportHandoff` takes both upstream's `hasNativeHistory` and
+  the fork's imported-native-history flag. Dispatch reads a compacted projection (upstream) and the
+  fork's cache-keep-alive checks run on it, with `cacheKeepAliveOfRunId` added to the kept runs so the
+  keep-alive run's user message stays loaded.
+- **Title regeneration:** upstream's `renamed` / `unchanged` / `failed` outcomes with the fork's
+  unusable-title rejection and trimmed title. A regeneration retries only a rejected title (upstream
+  reports a failing provider at once and its test asserts one call); an initial title still retries
+  twice.
+- **Usage rates:** upstream's `loadSavedRates` (saved snapshot read outside the rates lock) replaces
+  the fork's `loadRatesFromDisk`; `pricingTables` still reads it first and refreshes in the background.
+- **Claude adapter:** the fork's per-turn spend attribution sits beside upstream's assistant text
+  coalescer; the missing-transcript explanation wraps upstream's `claudeProcessExitFailure`.
+- **Project CLI:** upstream's `readLiveServerRuntimeState` (dead pids filtered) with the fork's
+  live-but-unresponsive error kept.
+- **Workspace paths:** upstream stops trimming the relative path (file names with spaces); the fork's
+  `~` expansion of the workspace root stays.
+- **Project delete:** upstream's newest-first thread order; the fork's rule that only live threads
+  require `force` stays.
+- **Web:** upstream dropped `MorphIcon` for plain lucide icons, so the fork's `touch:` classes sit on
+  those. The composer keeps the fork's server voice button as the only mic (upstream's speech pill and
+  `VoiceInputSetup` stay unrendered); `ComposerPrimaryActions` takes upstream's stop button and
+  `useStopPhase`. `ui/sidebar.tsx` takes upstream's animated mobile sheet with the fork's full-screen
+  toggle on top. `FilePreviewPanel` keeps the fork's worker pool, invert-theme toggle and re-rooted
+  explorer with upstream's editor-change and focus hand-off. Fork-only settings labels are plain
+  strings next to upstream's `msg()` labels.
+- **README / voice docs:** upstream's README with the fork section re-inserted; the fork's quick voice
+  button sections appended to upstream's dictation doc.
+
+### Known baseline failures (not caused by this merge)
+
+`RepositoryIdentityResolver.test.ts` (two cases) fails where the host's global git config rewrites
+GitHub URLs (`url.https://github.com/.insteadOf`); it asserts the unrewritten remote.
+
+---
+
 ## 2026-11-10 — True merge of upstream through `08af12da4` (2026-11-10)
 
 939 upstream commits since `4a5251b1c` (Effect 4.1.2 / `@effect/tsgo` toolchain, plan mode removed
