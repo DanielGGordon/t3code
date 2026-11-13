@@ -204,6 +204,7 @@ import {
   resolveSidebarReorderableThreadKeys,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
+  newThreadScopeProject,
   shouldNavigateAfterThreadPark,
   sidebarListItemId,
   sidebarThreadKeyAtY,
@@ -243,7 +244,12 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { Button } from "./ui/button";
-import { isProjectPinShortcut, ProjectPinButton } from "./ProjectPinButton";
+import {
+  isProjectArchiveShortcut,
+  isProjectPinShortcut,
+  ProjectArchiveButton,
+  ProjectPinButton,
+} from "./ProjectPinButton";
 import {
   Combobox,
   ComboboxEmpty,
@@ -1242,6 +1248,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     canPinProjectGroup: canPinProject,
     setProjectGroupPinned,
     toggleProjectGroupPin,
+    setProjectGroupArchived,
   } = useProjectPin();
   const handleProjectSettings = useStableCallback(
     (
@@ -1274,6 +1281,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     group.pinned
                       ? { id: "unpin", label: "Unpin project", icon: "pin-off" }
                       : { id: "pin", label: "Pin project", icon: "pin" },
+                    group.archived
+                      ? { id: "unarchive", label: "Unarchive project", icon: "archive" }
+                      : { id: "archive", label: "Archive project", icon: "archive" },
                   ]
                 : []),
               { id: "project-settings", label: "Project settings", icon: "settings" },
@@ -1292,6 +1302,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           case "pin":
           case "unpin":
             setProjectGroupPinned(group, clicked.value === "pin");
+            return;
+          case "archive":
+          case "unarchive":
+            setProjectGroupArchived(group, clicked.value === "archive");
             return;
           case "project-settings":
             openProjectSettings(group);
@@ -3002,7 +3016,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
 
+  const scopedNewThreadProject = newThreadScopeProject(projectGroups, chosenProjectScopeKeys);
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (scopedNewThreadProject && !event?.shiftKey) {
+      startThreadInProjectFolder(scopedNewThreadProject);
+      return;
+    }
     if (
       shouldCreateNewThreadInCurrentProject(
         event?.shiftKey ?? false,
@@ -3149,6 +3168,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           toggleProjectGroupPin(project);
                           return;
                         }
+                        if (
+                          project &&
+                          canPinProject(project) &&
+                          isProjectArchiveShortcut(event, keybindings)
+                        ) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setProjectGroupArchived(project, true);
+                          return;
+                        }
                         if (event.ctrlKey || event.altKey || event.metaKey) return;
                         if (event.shiftKey && event.key === "Enter") {
                           if (!project) return;
@@ -3210,6 +3239,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             ) : null}
                             {project ? (
                               <ProjectRowActions
+                                archive={
+                                  canPinProject(project) ? (
+                                    <ProjectArchiveButton
+                                      name={project.displayName}
+                                      archived={false}
+                                      shortcutLabel={shortcutLabelForCommand(
+                                        keybindings,
+                                        "thread.settle",
+                                      )}
+                                      onToggle={() => setProjectGroupArchived(project, true)}
+                                    />
+                                  ) : null
+                                }
                                 pin={
                                   canPinProject(project) ? (
                                     <ProjectPinButton
@@ -3256,6 +3298,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
+              newThreadScopeProjectName={scopedNewThreadProject?.displayName ?? null}
               showNewThreadInProjectHint={
                 !shouldCreateNewThreadInCurrentProject(
                   false,

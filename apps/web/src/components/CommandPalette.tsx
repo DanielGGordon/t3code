@@ -55,6 +55,8 @@ import {
 } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ArrowLeftIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
@@ -308,6 +310,7 @@ function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPalette
 }
 
 const NEW_THREAD_NO_PROJECT_VALUE = "new-thread-in:no-project";
+const SHOW_ARCHIVED_PROJECTS_VALUE = "new-thread-in:show-archived";
 
 export function CommandPalette({ children }: { children: ReactNode }) {
   useCommandPaletteMount();
@@ -555,28 +558,47 @@ function OpenCommandPaletteDialog(props: {
     groups: pickableProjectGroups(projectGroups),
     preferredProjectRef: contextualProjectRef,
   });
-  const pickerProjects = projectPickerEntries.map(({ group, targetProject }) => ({
+  const archivedPickerEntries = buildSidebarProjectPickerEntries({
+    groups: projectGroups.filter((group) => group.archived),
+    preferredProjectRef: contextualProjectRef,
+  });
+  const toPickerProject = ({ group, targetProject }: (typeof projectPickerEntries)[number]) => ({
     ...targetProject,
     displayName: group.displayName,
-  }));
+  });
+  const pickerProjects = projectPickerEntries.map(toPickerProject);
+  const archivedPickerProjects = archivedPickerEntries.map(toPickerProject);
+  // Archived projects stay out of the list until a search or "Show archived" asks for them.
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  const includeArchivedProjects = showArchivedProjects || deferredQuery.trim().length > 0;
   const projectGroupByTargetKey = new Map(
-    projectPickerEntries.map(({ group, targetProject }) => [
+    [...projectPickerEntries, ...archivedPickerEntries].map(({ group, targetProject }) => [
       `${targetProject.environmentId}:${targetProject.id}`,
       group,
     ]),
   );
-  const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
+  const { canPinProjectGroup, toggleProjectGroupPin, setProjectGroupArchived } = useProjectPin();
   // A row's target record can change when another machine's copy loads, so the kept
   // order follows the project group instead.
   const rowOrderKey = (prefix: string) => (item: CommandPaletteActionItem) =>
     projectGroupByTargetKey.get(item.value.slice(prefix.length + 1))?.projectKey ?? item.value;
   const projectPin = (project: CommandPaletteProject) => {
     const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-    return group && canPinProjectGroup(group)
+    return group && !group.archived && canPinProjectGroup(group)
       ? {
           name: group.displayName,
           pinned: group.pinned,
           toggle: () => toggleProjectGroupPin(group),
+        }
+      : null;
+  };
+  const projectArchive = (project: CommandPaletteProject) => {
+    const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+    return group && canPinProjectGroup(group)
+      ? {
+          name: group.displayName,
+          archived: group.archived,
+          toggle: () => setProjectGroupArchived(group, !group.archived),
         }
       : null;
   };
@@ -827,48 +849,58 @@ function OpenCommandPaletteDialog(props: {
   // Pinning from a row keeps rows in place while the palette is open.
   const projectSearchItems = useOrderWhileOpen(
     buildProjectSearchItems({
-      projects: pickerProjects,
+      projects: [...pickerProjects, ...archivedPickerProjects],
       projectGroupByTargetKey,
       locationByEnvironmentId: projectEnvironmentLocationById,
       runProject: openProjectFromSearch,
       pin: projectPin,
+      archive: projectArchive,
     }),
     rowOrderKey("project"),
     true,
   );
 
-  const openingOrderThreadItems = useOrderWhileOpen(
-    (() => {
-      const isScratch = (project: CommandPaletteProject) =>
-        isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
-      const currentEntry =
-        currentProjectId === null
-          ? undefined
-          : projectPickerEntries.find((entry) => entry.isPreferred);
-      const projectItems = buildNewThreadInProjectItems({
-        projects: pickerProjects.filter((project) => !isScratch(project)),
-        currentProjectKey: currentEntry
-          ? `${currentEntry.targetProject.environmentId}:${currentEntry.targetProject.id}`
-          : null,
-        projectGroupByTargetKey,
-        locationByEnvironmentId: projectEnvironmentLocationById,
-        pin: projectPin,
-        runProject: async (project) => {
-          const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-          const contextualRefBelongsToGroup =
-            contextualProjectRef !== null &&
-            group?.memberProjectRefs.some(
-              (projectRef) =>
-                projectRef.environmentId === contextualProjectRef.environmentId &&
-                projectRef.projectId === contextualProjectRef.projectId,
-            );
-          await handleNewThread(
-            contextualRefBelongsToGroup
-              ? contextualProjectRef
-              : scopeProjectRef(project.environmentId, project.id),
+  const isScratch = (project: CommandPaletteProject) =>
+    isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
+  const currentEntry =
+    currentProjectId === null
+      ? undefined
+      : [...projectPickerEntries, ...archivedPickerEntries].find((entry) => entry.isPreferred);
+  const buildThreadInItems = (projects: ReadonlyArray<CommandPaletteProject>) =>
+    buildNewThreadInProjectItems({
+      projects: projects.filter((project) => !isScratch(project)),
+      currentProjectKey: currentEntry
+        ? `${currentEntry.targetProject.environmentId}:${currentEntry.targetProject.id}`
+        : null,
+      projectGroupByTargetKey,
+      locationByEnvironmentId: projectEnvironmentLocationById,
+      pin: projectPin,
+      archive: projectArchive,
+      runProject: async (project) => {
+        const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+        const contextualRefBelongsToGroup =
+          contextualProjectRef !== null &&
+          group?.memberProjectRefs.some(
+            (projectRef) =>
+              projectRef.environmentId === contextualProjectRef.environmentId &&
+              projectRef.projectId === contextualProjectRef.projectId,
           );
-        },
-      });
+        await handleNewThread(
+          contextualRefBelongsToGroup
+            ? contextualProjectRef
+            : scopeProjectRef(project.environmentId, project.id),
+        );
+      },
+    });
+  const archivedThreadInItems = includeArchivedProjects
+    ? buildThreadInItems(archivedPickerProjects)
+    : [];
+  const hiddenArchivedCount = includeArchivedProjects
+    ? 0
+    : archivedPickerProjects.filter((project) => !isScratch(project)).length;
+  const openThreadInItems = useOrderWhileOpen(
+    (() => {
+      const projectItems = buildThreadInItems(pickerProjects);
       if (scratchTargetEnvironmentId === null) return projectItems;
 
       const noProjectIndex = newThreadNoProjectIndex(
@@ -898,10 +930,40 @@ function OpenCommandPaletteDialog(props: {
     rowOrderKey("new-thread-in"),
     true,
   );
+  // Archived rows always follow the open ones, so "Show archived" reveals them where it was.
+  const archivedOrderThreadItems = useOrderWhileOpen(
+    archivedThreadInItems,
+    rowOrderKey("new-thread-in"),
+    true,
+  );
+  const openingOrderThreadItems = [
+    ...openThreadInItems,
+    ...archivedOrderThreadItems,
+    ...(hiddenArchivedCount > 0
+      ? [
+          {
+            kind: "action" as const,
+            value: SHOW_ARCHIVED_PROJECTS_VALUE,
+            searchTerms: ["archived"],
+            title: `Show archived projects (${hiddenArchivedCount})`,
+            icon: <ArchiveIcon className={ITEM_ICON_CLASS} />,
+            keepOpen: true,
+            run: async () => setShowArchivedProjects(true),
+          },
+        ]
+      : []),
+  ];
   // Jump shortcuts follow the rows as shown, so a pin cannot move a number to another row.
+  // Archived rows only show on request, so they take no number.
+  const archivedThreadInValues = new Set(archivedThreadInItems.map((item) => item.value));
   const projectJumpItems = new Map(
     enumerateCommandPaletteItems(
-      openingOrderThreadItems.filter((item) => item.value !== NEW_THREAD_NO_PROJECT_VALUE),
+      openingOrderThreadItems.filter(
+        (item) =>
+          item.value !== NEW_THREAD_NO_PROJECT_VALUE &&
+          item.value !== SHOW_ARCHIVED_PROJECTS_VALUE &&
+          !archivedThreadInValues.has(item.value),
+      ),
     ).map((item) => [item.value, item] as const),
   );
   const projectThreadItems = openingOrderThreadItems.map(
@@ -1719,6 +1781,19 @@ function OpenCommandPaletteDialog(props: {
         <PinIcon className={ITEM_ICON_CLASS} />
       ),
       run: async () => toggleProjectGroupPin(currentProjectGroup),
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:project-archive",
+      searchTerms: ["archive", "unarchive", "hide", "project"],
+      title: currentProjectGroup.archived ? "Unarchive project" : "Archive project",
+      description: currentProjectGroup.displayName,
+      icon: currentProjectGroup.archived ? (
+        <ArchiveRestoreIcon className={ITEM_ICON_CLASS} />
+      ) : (
+        <ArchiveIcon className={ITEM_ICON_CLASS} />
+      ),
+      run: async () => setProjectGroupArchived(currentProjectGroup, !currentProjectGroup.archived),
     });
   }
   const contextualProjectGroup = currentProjectGroup ?? projectGroups[0] ?? null;
@@ -2544,6 +2619,19 @@ function OpenCommandPaletteDialog(props: {
         event.preventDefault();
         event.stopPropagation();
         highlightedItem.pin.toggle();
+        return;
+      }
+    }
+    if (command === "thread.settle") {
+      const highlightedItem = findHighlightedCommandPaletteItem(
+        displayedGroups,
+        highlightedItemValue ??
+          (autoHighlightsFirstRow ? (resultRows.itemValues[0] ?? null) : null),
+      );
+      if (highlightedItem?.kind === "action" && highlightedItem.archive) {
+        event.preventDefault();
+        event.stopPropagation();
+        highlightedItem.archive.toggle();
         return;
       }
     }

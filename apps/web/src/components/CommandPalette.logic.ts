@@ -216,11 +216,19 @@ export interface CommandPaletteActionItem extends CommandPaletteItem {
   readonly run: () => Promise<void>;
   /** A pin toggle on the row, also reached with the pin shortcut while the row is highlighted. */
   readonly pin?: CommandPaletteItemPin;
+  /** An archive toggle on the row, also reached with the settle shortcut while the row is highlighted. */
+  readonly archive?: CommandPaletteItemArchive;
 }
 
 export interface CommandPaletteItemPin {
   readonly name: string;
   readonly pinned: boolean;
+  readonly toggle: () => void;
+}
+
+export interface CommandPaletteItemArchive {
+  readonly name: string;
+  readonly archived: boolean;
   readonly toggle: () => void;
 }
 
@@ -379,9 +387,11 @@ export function buildProjectActionItems(input: {
   renderDescription?: (project: CommandPaletteProject) => ReactNode;
   shortcutCommand?: KeybindingCommand;
   pin?: (project: CommandPaletteProject) => CommandPaletteItemPin | null;
+  archive?: (project: CommandPaletteProject) => CommandPaletteItemArchive | null;
 }): CommandPaletteActionItem[] {
   return input.projects.map((project) => {
     const pin = input.pin?.(project) ?? null;
+    const archive = input.archive?.(project) ?? null;
     return {
       kind: "action",
       value: `${input.valuePrefix}:${project.environmentId}:${project.id}`,
@@ -396,6 +406,7 @@ export function buildProjectActionItems(input: {
       icon: input.icon(project),
       ...(input.shortcutCommand !== undefined ? { shortcutCommand: input.shortcutCommand } : {}),
       ...(pin ? { pin } : {}),
+      ...(archive ? { archive } : {}),
       run: async () => {
         await input.runProject(project);
       },

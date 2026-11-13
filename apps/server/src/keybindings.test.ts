@@ -325,6 +325,25 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("puts a preferred late default after the persisted rules", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const when = "!terminalFocus";
+      const existing = { key: "mod+shift+n", command: "chat.newLocal", when } as const;
+      const other = { key: "mod+shift+y", command: "terminal.toggle" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing, other]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(persisted.slice(-3), [
+        existing,
+        other,
+        { key: "alt+shift+n", command: "chat.newLocal", when },
+      ]);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

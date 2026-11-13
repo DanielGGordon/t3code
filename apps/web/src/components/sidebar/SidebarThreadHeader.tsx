@@ -20,6 +20,8 @@ export interface SidebarThreadHeaderProps {
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
+  /** The project a narrowed sidebar starts new threads in. */
+  newThreadScopeProjectName: string | null;
   showNewThreadInProjectHint: boolean;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
@@ -39,6 +41,7 @@ export function SidebarThreadHeader({
   newThreadDisabled,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
+  newThreadScopeProjectName,
   showNewThreadInProjectHint,
   searchInputRef,
   searchQuery,
@@ -108,7 +111,9 @@ export function SidebarThreadHeader({
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={
-            showNewThreadInProjectHint ? (
+            newThreadScopeProjectName ? (
+              `New thread in ${newThreadScopeProjectName}`
+            ) : showNewThreadInProjectHint ? (
               <span className="flex flex-col gap-0.5">
                 <span>{newThreadLabel}</span>
                 <span className="text-muted-foreground">

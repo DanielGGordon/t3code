@@ -98,6 +98,8 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly id: string;
   readonly alongside: KeybindingRule;
   readonly rule: KeybindingRule;
+  /** Goes after the persisted rules, so labels show it ahead of `alongside`. */
+  readonly preferred?: true;
 }> = [
   {
     id: "composer.sendBackground:mod+enter",
@@ -111,6 +113,13 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
       command: "composer.sendBackground",
       when: "composerFocus && draftThreadRoute",
     },
+  },
+  {
+    // Browsers keep mod+shift+n for a private window, so the page never sees it.
+    id: "chat.newLocal:alt+shift+n",
+    alongside: { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+    rule: { key: "alt+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+    preferred: true,
   },
 ];
 
@@ -485,6 +494,7 @@ const make = Effect.gen(function* () {
       const customConfig = runtimeConfig.keybindings;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
+      const preferredLateDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
         defaultCommand: KeybindingRule["command"];
         conflictingCommand: KeybindingRule["command"];
@@ -509,12 +519,12 @@ const make = Effect.gen(function* () {
         }
         missingDefaults.push(defaultRule);
       }
-      for (const { alongside, rule } of pendingLateDefaults) {
+      for (const { alongside, rule, preferred } of pendingLateDefaults) {
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
           !customConfig.some((entry) => hasSameShortcutContext(entry, rule))
         ) {
-          missingDefaults.push(rule);
+          (preferred ? preferredLateDefaults : missingDefaults).push(rule);
         }
       }
       for (const conflict of shortcutConflictWarnings) {
@@ -543,8 +553,9 @@ const make = Effect.gen(function* () {
 
       // Put defaults before persisted rules so custom shortcuts win overlapping conditions.
       const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length);
-      const defaultsToAppend = missingDefaults.slice(0, availableSlots);
-      const skippedDefaults = missingDefaults.slice(availableSlots);
+      const additions = [...missingDefaults, ...preferredLateDefaults];
+      const acceptedDefaults = additions.slice(0, availableSlots);
+      const skippedDefaults = additions.slice(availableSlots);
       if (skippedDefaults.length > 0) {
         yield* Effect.logWarning("skipping default keybinding backfill at max entries", {
           path: keybindingsConfigPath,
@@ -552,8 +563,12 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length > 0) {
-        yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
+      if (acceptedDefaults.length > 0) {
+        yield* writeConfigAtomically([
+          ...acceptedDefaults.filter((rule) => !preferredLateDefaults.includes(rule)),
+          ...customConfig,
+          ...acceptedDefaults.filter((rule) => preferredLateDefaults.includes(rule)),
+        ]);
       }
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),

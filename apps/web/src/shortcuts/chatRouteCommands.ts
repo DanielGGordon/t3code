@@ -14,7 +14,10 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { dispatchPreviewAction, type PreviewAction } from "../components/preview/previewActionBus";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
-import { shouldCreateNewThreadInCurrentProject } from "../components/Sidebar.logic";
+import {
+  newThreadScopeProject,
+  shouldCreateNewThreadInCurrentProject,
+} from "../components/Sidebar.logic";
 import {
   createNewThreadHandler,
   readLastUsedProjectKey,
@@ -26,7 +29,10 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
+import {
+  buildSidebarProjectSnapshots,
+  resolveSidebarProjectScopeKeys,
+} from "../sidebarProjectGrouping";
 import { readProjects, readThreadShell } from "../state/entities";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
 import { environmentPresentations } from "../state/presentation";
@@ -195,6 +201,19 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       },
       "chat.new": (event) => {
         const groups = readProjectGroups();
+        const scopeProject = newThreadScopeProject(
+          groups,
+          resolveSidebarProjectScopeKeys({
+            groups,
+            keys: useUiStateStore.getState().sidebarProjectScopeKeys,
+            settings: selectProjectGroupingSettings(getClientSettings()),
+          }),
+        );
+        if (scopeProject) {
+          claim(event);
+          void handleNewThread(scopeProjectRef(scopeProject.environmentId, scopeProject.id));
+          return;
+        }
         if (
           !shouldCreateNewThreadInCurrentProject(
             false,

@@ -118,6 +118,45 @@ describe("CommandPalette open intents", () => {
     await expect.element(page.getByRole("option").nth(1)).not.toHaveAttribute("data-highlighted");
   });
 
+  it("lists archived projects in New thread in... only when searched for or shown", async () => {
+    const environmentId = EnvironmentId.make("local");
+    const project = (id: string, title: string, archivedAt: string | null = null): Project => ({
+      id: ProjectId.make(id),
+      environmentId,
+      title,
+      workspaceRoot: `/work/${id}`,
+      repositoryIdentity: null,
+      defaultModelSelection: null,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      scripts: [],
+      archivedAt,
+    });
+    setup({
+      projects: [
+        project("acme", "Acme"),
+        project("attic", "Attic", "2026-11-01T00:00:00.000Z"),
+        project("annex", "Annex", "2026-11-02T00:00:00.000Z"),
+      ],
+    });
+    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+
+    openCommandPalette({ open: "new-thread-in" });
+    const input = page.getByPlaceholder("Search...");
+    await expect.element(page.getByRole("option", { name: /^Acme/ })).toBeVisible();
+    await expect.element(page.getByRole("option", { name: /^Attic/ })).not.toBeInTheDocument();
+
+    await userEvent.type(input, "att");
+    await expect.element(page.getByRole("option", { name: /^Attic/ })).toBeVisible();
+    await expect.element(page.getByRole("option", { name: /^Annex/ })).not.toBeInTheDocument();
+
+    await userEvent.clear(input);
+    await expect.element(page.getByRole("option", { name: /^Attic/ })).not.toBeInTheDocument();
+    await page.getByRole("option", { name: "Show archived projects (2)" }).click();
+    await expect.element(page.getByRole("option", { name: /^Attic/ })).toBeVisible();
+    await expect.element(page.getByRole("option", { name: /^Annex/ })).toBeVisible();
+  });
+
   it("opens a search intent with its query in the focused input", async () => {
     setup();
     await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
