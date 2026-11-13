@@ -118,10 +118,34 @@ export function useProjectPin() {
       pinned ? "Failed to pin project" : "Failed to unpin project",
     );
   };
+  const setProjectGroupArchived = (
+    group: Pick<PinnableGroup, "memberProjects"> & { readonly displayName: string },
+    archived: boolean,
+  ) => {
+    void updateProjectGroup(
+      group.memberProjects,
+      { archived },
+      archived ? "Failed to archive project" : "Failed to unarchive project",
+    ).then((result) => {
+      if (result._tag !== "Success" || !archived) return;
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: `Archived ${group.displayName}`,
+          description: "It stays out of project lists until you search for it.",
+          actionProps: {
+            children: "Undo",
+            onClick: () => setProjectGroupArchived(group, false),
+          },
+        }),
+      );
+    });
+  };
   return {
     canPinProjectGroup,
     setProjectGroupPinned,
     toggleProjectGroupPin: (group: PinnableGroup) => setProjectGroupPinned(group, !group.pinned),
+    setProjectGroupArchived,
   };
 }
 

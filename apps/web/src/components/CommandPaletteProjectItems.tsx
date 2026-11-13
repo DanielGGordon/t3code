@@ -5,6 +5,7 @@ import type { Project } from "../types";
 import {
   buildCommandPaletteProjectMetadata,
   buildProjectActionItems,
+  type CommandPaletteItemArchive,
   type CommandPaletteItemPin,
   type CommandPaletteProject,
   ITEM_ICON_CLASS,
@@ -31,6 +32,7 @@ interface ProjectItemsInput {
   readonly locationByEnvironmentId: ReadonlyMap<EnvironmentId, CommandPaletteProjectLocation>;
   readonly runProject: (project: CommandPaletteProject) => Promise<void>;
   readonly pin?: (project: CommandPaletteProject) => CommandPaletteItemPin | null;
+  readonly archive?: (project: CommandPaletteProject) => CommandPaletteItemArchive | null;
 }
 
 function projectFaviconIcon(project: Project) {
@@ -58,17 +60,24 @@ export function buildProjectSearchItems(input: ProjectItemsInput) {
         locationByEnvironmentId: input.locationByEnvironmentId,
       });
       return members.length > 1 ? (
-        <span className="truncate">{metadata.environmentLabels.join(" · ")}</span>
+        <span className="truncate">
+          {[
+            ...(isArchived(input, project) ? ["Archived"] : []),
+            ...metadata.environmentLabels,
+          ].join(" · ")}
+        </span>
       ) : (
         <ProjectLocationDescription
           location={input.locationByEnvironmentId.get(project.environmentId)}
           workspaceRoot={project.workspaceRoot}
+          archived={isArchived(input, project)}
         />
       );
     },
     icon: projectFaviconIcon,
     runProject: input.runProject,
     ...(input.pin ? { pin: input.pin } : {}),
+    ...(input.archive ? { archive: input.archive } : {}),
   });
 }
 
@@ -92,18 +101,25 @@ export function buildNewThreadInProjectItems(
         location={input.locationByEnvironmentId.get(project.environmentId)}
         workspaceRoot={project.workspaceRoot}
         current={input.currentProjectKey === `${project.environmentId}:${project.id}`}
+        archived={isArchived(input, project)}
       />
     ),
     icon: projectFaviconIcon,
     runProject: input.runProject,
     ...(input.pin ? { pin: input.pin } : {}),
+    ...(input.archive ? { archive: input.archive } : {}),
   });
+}
+
+function isArchived(input: ProjectItemsInput, project: CommandPaletteProject) {
+  return input.projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)?.archived;
 }
 
 function ProjectLocationDescription(props: {
   readonly location: CommandPaletteProjectLocation | undefined;
   readonly workspaceRoot: string;
   readonly current?: boolean;
+  readonly archived?: boolean | undefined;
 }) {
   const location = props.location ?? UNKNOWN_PROJECT_LOCATION;
   return (
@@ -111,6 +127,12 @@ function ProjectLocationDescription(props: {
       {props.current ? (
         <>
           <span className="shrink-0">Current</span>
+          <CommandPaletteMetaDot />
+        </>
+      ) : null}
+      {props.archived ? (
+        <>
+          <span className="shrink-0">Archived</span>
           <CommandPaletteMetaDot />
         </>
       ) : null}

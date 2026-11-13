@@ -3,7 +3,7 @@ import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDr
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { ChevronDownIcon, FolderPlusIcon } from "lucide-react";
+import { ArchiveIcon, ChevronDownIcon, FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 
@@ -37,7 +37,12 @@ import {
 } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { isProjectPinShortcut, ProjectPinButton } from "../ProjectPinButton";
+import {
+  isProjectArchiveShortcut,
+  isProjectPinShortcut,
+  ProjectArchiveButton,
+  ProjectPinButton,
+} from "../ProjectPinButton";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Combobox,
@@ -50,7 +55,7 @@ import {
   useComboboxFilter,
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { InlineButton } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { DraftProjectName } from "./DraftProjectName";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
@@ -113,7 +118,8 @@ export function DraftHeroHeadline({
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
   const highlightedPickerValueRef = useRef<string | null>(null);
-  const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  const { canPinProjectGroup, toggleProjectGroupPin, setProjectGroupArchived } = useProjectPin();
 
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
@@ -142,8 +148,14 @@ export function DraftHeroHeadline({
     groups: pickableProjectGroups(projectGroups),
     preferredProjectRef: activeProjectRef,
   });
+  const archivedPickerEntries = buildSidebarProjectPickerEntries({
+    groups: projectGroups.filter((group) => group.archived),
+    preferredProjectRef: activeProjectRef,
+  });
   const projectEntryByKey = new Map(
-    projectPickerEntries.map((entry) => [entry.group.projectKey, entry] as const),
+    [...projectPickerEntries, ...archivedPickerEntries].map(
+      (entry) => [entry.group.projectKey, entry] as const,
+    ),
   );
   const activeProjectGroup =
     activeProjectRef === null
@@ -157,10 +169,10 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
-  const menuEntries = projectPickerEntries.filter(
-    ({ targetProject }) =>
-      !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
-  );
+  const isMenuEntry = ({ targetProject }: (typeof projectPickerEntries)[number]) =>
+    !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId));
+  const menuEntries = projectPickerEntries.filter(isMenuEntry);
+  const archivedMenuEntries = archivedPickerEntries.filter(isMenuEntry);
   const activeProject =
     activeProjectRef === null
       ? null
@@ -175,16 +187,25 @@ export function DraftHeroHeadline({
     activeProject !== null &&
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
 
+  const pickerSearch = pickerQuery.trim();
+  // Archived projects stay out of the list until a search or "Show archived" asks for them.
+  const includeArchivedProjects = showArchivedProjects || pickerSearch.length > 0;
+  const hiddenArchivedCount = includeArchivedProjects ? 0 : archivedMenuEntries.length;
+  const toPickerItem = ({ group }: (typeof projectPickerEntries)[number]) => ({
+    value: group.projectKey,
+    label: group.displayName,
+  });
   // Pinning from a row keeps rows in place while the picker is open.
-  const pickerItems: readonly PickerItem[] = useOrderWhileOpen(
-    [
-      ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-      { value: ADD_PROJECT_VALUE, label: "Add project" },
-    ],
+  const openPickerItems = useOrderWhileOpen(
+    menuEntries.map(toPickerItem),
     (item) => item.value,
     pickerOpen,
   );
-  const pickerSearch = pickerQuery.trim();
+  const pickerItems: readonly PickerItem[] = [
+    ...openPickerItems,
+    ...(includeArchivedProjects ? archivedMenuEntries.map(toPickerItem) : []),
+    { value: ADD_PROJECT_VALUE, label: "Add project" },
+  ];
   const filteredPickerItems =
     pickerSearch.length === 0
       ? pickerItems
@@ -288,6 +309,7 @@ export function DraftHeroHeadline({
       onOpenChange={(open) => {
         setPickerOpen(open);
         setPickerQuery("");
+        setShowArchivedProjects(false);
       }}
       value={selectedPickerItem}
       onValueChange={(item) => {
@@ -342,12 +364,16 @@ export function DraftHeroHeadline({
           onKeyDown={(event) => {
             const highlighted = highlightedPickerValueRef.current;
             const group = highlighted ? projectEntryByKey.get(highlighted)?.group : undefined;
-            if (!group || !canPinProjectGroup(group) || !isProjectPinShortcut(event, keybindings)) {
-              return;
+            if (!group || !canPinProjectGroup(group)) return;
+            if (!group.archived && isProjectPinShortcut(event, keybindings)) {
+              event.preventDefault();
+              event.stopPropagation();
+              toggleProjectGroupPin(group);
+            } else if (isProjectArchiveShortcut(event, keybindings)) {
+              event.preventDefault();
+              event.stopPropagation();
+              setProjectGroupArchived(group, !group.archived);
             }
-            event.preventDefault();
-            event.stopPropagation();
-            toggleProjectGroupPin(group);
           }}
         />
         <ComboboxEmpty>No matching projects.</ComboboxEmpty>
@@ -372,12 +398,20 @@ export function DraftHeroHeadline({
                   </TooltipTrigger>
                   <TooltipPopup side="top">{item.label}</TooltipPopup>
                 </Tooltip>
-                {entry && canPinProjectGroup(entry.group) ? (
+                {entry && !entry.group.archived && canPinProjectGroup(entry.group) ? (
                   <ProjectPinButton
                     name={entry.group.displayName}
                     pinned={entry.group.pinned}
                     shortcutLabel={shortcutLabelForCommand(keybindings, "thread.pin")}
                     onToggle={() => toggleProjectGroupPin(entry.group)}
+                  />
+                ) : null}
+                {entry && canPinProjectGroup(entry.group) ? (
+                  <ProjectArchiveButton
+                    name={entry.group.displayName}
+                    archived={entry.group.archived}
+                    shortcutLabel={shortcutLabelForCommand(keybindings, "thread.settle")}
+                    onToggle={() => setProjectGroupArchived(entry.group, !entry.group.archived)}
                   />
                 ) : null}
                 {entry && showProjectEnvironments ? (
@@ -391,6 +425,14 @@ export function DraftHeroHeadline({
             );
           }}
         </ComboboxList>
+        {hiddenArchivedCount > 0 ? (
+          <div className="border-t p-1">
+            <Button variant="ghost-muted" size="sm" onClick={() => setShowArchivedProjects(true)}>
+              <ArchiveIcon />
+              Show archived projects ({hiddenArchivedCount})
+            </Button>
+          </div>
+        ) : null}
       </ComboboxPopup>
     </Combobox>
   ) : (

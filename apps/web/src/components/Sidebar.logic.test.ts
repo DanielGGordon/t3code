@@ -7,6 +7,7 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
   shouldCreateNewThreadInCurrentProject,
+  newThreadScopeProject,
   deleteSelectedThreadEntries,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
@@ -1668,5 +1669,18 @@ describe("shouldCreateNewThreadInCurrentProject", () => {
     expect(shouldCreateNewThreadInCurrentProject(false, 1, 3)).toBe(true);
     expect(shouldCreateNewThreadInCurrentProject(false, 0, 0)).toBe(true);
     expect(shouldCreateNewThreadInCurrentProject(true, 2, 2)).toBe(true);
+  });
+
+  it("starts in the one open project the sidebar is narrowed to", () => {
+    const groups = [
+      { projectKey: "a", archived: false },
+      { projectKey: "b", archived: false },
+      { projectKey: "old", archived: true },
+    ];
+    expect(newThreadScopeProject(groups, ["b"])).toBe(groups[1]);
+    expect(newThreadScopeProject(groups, ["b", "old"])).toBe(groups[1]);
+    expect(newThreadScopeProject(groups, [])).toBeNull();
+    expect(newThreadScopeProject(groups, ["a", "b"])).toBeNull();
+    expect(newThreadScopeProject(groups, ["old"])).toBeNull();
   });
 });

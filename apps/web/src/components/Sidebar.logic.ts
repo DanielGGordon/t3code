@@ -755,6 +755,14 @@ export function shouldCreateNewThreadInCurrentProject(
   return shiftKey || openProjectGroupCount === 1 || projectGroupCount === 0;
 }
 
+/** A sidebar narrowed to exactly one open project starts New thread there, without the picker. */
+export function newThreadScopeProject<
+  TGroup extends { readonly projectKey: string; readonly archived: boolean },
+>(groups: ReadonlyArray<TGroup>, scopeKeys: ReadonlyArray<string>): TGroup | null {
+  const scoped = groups.filter((group) => !group.archived && scopeKeys.includes(group.projectKey));
+  return scoped.length === 1 ? scoped[0]! : null;
+}
+
 export function orderItemsByPreferredIds<TItem, TId>(input: {
   items: readonly TItem[];
   preferredIds: readonly TId[];

@@ -4,9 +4,11 @@ import type { ReactNode } from "react";
 export function ProjectRowActions(props: {
   readonly settings?: ReactNode;
   readonly pin?: ReactNode;
+  readonly archive?: ReactNode;
 }) {
   return (
     <span className="ml-auto flex shrink-0 items-center pointer-coarse:gap-1">
+      {props.archive}
       {props.settings ? (
         <span className="flex pointer-fine:invisible pointer-fine:in-data-highlighted:visible touch:visible">
           {props.settings}
