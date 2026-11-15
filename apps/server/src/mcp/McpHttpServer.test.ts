@@ -238,6 +238,7 @@ it.effect.each([
           Layer.provide(
             Layer.mock(DeviceService.DeviceService)({
               locateSession: () => Effect.succeedNone,
+              stoppedSessionsForThread: () => Effect.succeed([]),
               sessionsForThread: () =>
                 Effect.succeed(
                   open

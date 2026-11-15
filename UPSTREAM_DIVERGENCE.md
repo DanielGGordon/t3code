@@ -73,6 +73,22 @@ name-aware ledger reconciles, so the fork's `ledgerGapMigrations` stay in the ex
 
 `RepositoryIdentityResolver.test.ts` (two cases) fails where the host's global git config rewrites
 GitHub URLs (`url.https://github.com/.insteadOf`); it asserts the unrewritten remote.
+`ProjectionStore.test.ts` "reads a fixed SQL turn-item window" fails on upstream too, where the host
+Node's `node:sqlite` has no `StatementSync.stat`.
+
+### Tests adapted to the fork after the full server run
+
+- Upstream's declined-steer (`SteeringCompletion.integration.test.ts`) and recovered-question
+  (`runtimeLayer.test.ts`) tests list a command's outbox effects. The fork re-titles a thread on its
+  second user message, so both now ignore `thread-title.generate`.
+- `migrate-dev-db.test.ts` and `servicePreflight.test.ts` use the fork's migration ids (55/56/61,
+  71–74). The preflight test drops upstream's V2-preview ledger case: the fork never recorded one,
+  its V2 migration is already id 56.
+- `McpHttpServer.test.ts` mocks `stoppedSessionsForThread`, which the fork's `device_screenshot` calls.
+- `agentContextBudget.json` `mcpToolListJsonBytes` is 48649: the fork's keep-alive `t3_thread_organize`
+  actions and `device_close` text add 550 bytes over upstream's budget.
+- Fix: `defaultModelSelection` joins `ATOMIC_SETTINGS_KEYS` in `serverSettings.ts`. The fork's non-null
+  default made it strip field by field, so saving a model on the default provider failed to encode.
 
 ---
 

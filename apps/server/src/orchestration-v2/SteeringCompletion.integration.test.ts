@@ -1488,7 +1488,9 @@ it.effect.each(["complete", "stop-before-decline", "stop-after-decline", "queued
             CommandId.make("steer"),
           );
           assert.deepEqual(
-            effects.map((effect) => [effect.request.type, effect.status]),
+            effects
+              .filter((effect) => effect.request.type !== "thread-title.generate")
+              .map((effect) => [effect.request.type, effect.status]),
             [["provider-turn.steer", "succeeded"]],
           );
           assert.equal(started.length, 1);

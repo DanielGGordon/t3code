@@ -1988,7 +1988,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         assert.deepEqual(
           (yield* (yield* EffectOutbox.EffectOutboxV2).listByCommandId(
             CommandId.make(`recovery-answer-${trigger}-${scope}`),
-          )).map((effect) => effect.request.type),
+          ))
+            .map((effect) => effect.request.type)
+            .filter((type) => type !== "thread-title.generate"),
           ["provider-turn.start"],
         );
       }),

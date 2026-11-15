@@ -319,13 +319,13 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       const stateDir = path.join(sourceDir, "userdata");
       const source = path.join(stateDir, "statev2.sqlite");
       yield* fs.makeDirectory(stateDir, { recursive: true });
-      yield* withDatabase(source, runMigrations({ toMigrationInclusive: 54 }));
+      yield* withDatabase(source, runMigrations({ toMigrationInclusive: 55 }));
 
       const result = yield* runMigrateDevDb(
         { baseDir: destDir, source, projects: 5, threadsPerProject: 10 },
         { sharedHome: sourceDir },
       );
-      assert.include(result.executedMigrations, "55_OrchestrationV2");
+      assert.include(result.executedMigrations, "56_OrchestrationV2");
     }),
   );
 
@@ -349,7 +349,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         source,
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          yield* runMigrations({ toMigrationInclusive: 54 });
+          yield* runMigrations({ toMigrationInclusive: 55 });
           yield* sql`INSERT INTO projection_projects
             (project_id, title, workspace_root, scripts_json, created_at, updated_at)
             VALUES ('project-legacy', 'Legacy', '/tmp/legacy', '[]', '2026-08-01', '2026-08-01')`;
@@ -429,7 +429,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           yield* sql`UPDATE effect_sql_migrations SET name = 'OtherBuildMigration'
-            WHERE migration_id = 60`;
+            WHERE migration_id = 61`;
         }),
       );
 
@@ -444,20 +444,20 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.equal(error._tag, "MigrateDevDbPhaseError");
       if (error._tag === "MigrateDevDbPhaseError") {
         assert.equal(error.phase, "migrate");
-        assert.include(String(error.cause), "60_ThreadSnapshotWindowIndexes");
+        assert.include(String(error.cause), "61_ThreadSnapshotWindowIndexes");
       }
       assert.deepStrictEqual(yield* fs.readFile(source), sourceBefore);
       assert.deepStrictEqual(yield* fs.readFile(destination), destinationBefore);
     }),
   );
 
-  it.effect("imports a dev seed whose ids after 67 came from the peer links branch", () =>
+  it.effect("imports a dev seed whose ids after 71 came from the peer links branch", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-peer-" });
       const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-peer-dest-" });
-      const source = yield* createFixtureSource(sourceDir, 67);
-      // Mirrors a real ~/.t3 seed written by a build whose 68-70 differ from main's.
+      const source = yield* createFixtureSource(sourceDir, 71);
+      // Mirrors a real ~/.t3 seed written by a build whose 72-74 differ from main's.
       yield* withDatabase(
         source,
         Effect.gen(function* () {
@@ -478,7 +478,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
             WHERE type = 'link_request' AND status = 'waiting'`;
           yield* insertPeerLink(sql);
           yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES
-            (68, 'PeerLinks'), (69, 'PeerLinkFence'), (70, 'WaitingLinkRequestIndex')`;
+            (72, 'PeerLinks'), (73, 'PeerLinkFence'), (74, 'WaitingLinkRequestIndex')`;
         }),
       );
 
