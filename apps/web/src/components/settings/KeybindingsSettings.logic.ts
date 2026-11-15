@@ -444,13 +444,14 @@ export function commandLabel(command: KeybindingCommand): string {
   if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
   if (command === "shortcuts.showMine") return "Show My Shortcuts";
   if (command === "thread.snoozeHour") return "Thread: Snooze for 1 Hour";
+  if (command === "view.reopenClosed") return "Reopen Closed Tab";
+  if (command === "preview.focusUrl") return "Preview: Focus URL";
+  if (command === "preview.find") return "Preview: Find on Page";
   const raw = String(command);
   if (raw.startsWith("chat.newInProject.")) {
     return `Chat: New Thread in Project Slot ${raw.slice("chat.newInProject.".length)}`;
   }
-  if (command === "view.reopenClosed") return "Reopen Closed Tab";
   if (command === "view.tiles.toggle") return "Toggle Tile Wall";
-  if (command === "preview.focusUrl") return "Preview: Focus URL";
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
   }

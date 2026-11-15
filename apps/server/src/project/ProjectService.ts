@@ -429,7 +429,7 @@ export const make = Effect.gen(function* () {
         ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
         ...(input.archived === undefined ? {} : { archived: input.archived }),
       });
-      if (workspaceRoot !== previousRoot) {
+      if (workspaceRoot !== previousRoot || input.faviconPath !== undefined) {
         yield* projectEnrichment.invalidate([previousRoot, workspaceRoot]);
       }
       return yield* readCommitted(input.projectId);
@@ -505,11 +505,13 @@ export const make = Effect.gen(function* () {
           (cause) => new ProjectOperationError({ operation: "list-threads", projectId, cause }),
         ),
       );
-    const projectThreads = [...snapshot.threads, ...snapshot.archivedThreads];
-    // Fork: only live (non-archived) threads make a project "non-empty" — the
-    // client decides whether to ask for force from its active-thread count, so
-    // a project whose only remaining threads are archived deletes without
-    // force. Archived threads are still cascade-deleted below.
+    // Newest first: a source deleted while its fork lives keeps the pages that fork shows.
+    const projectThreads = [...snapshot.threads, ...snapshot.archivedThreads].sort(
+      (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
+    );
+    // Fork: only live (non-archived) threads make a project "non-empty": the client decides
+    // whether to ask for force from its active-thread count, so a project whose only remaining
+    // threads are archived deletes without force. Archived threads are still cascade-deleted below.
     if (snapshot.threads.length > 0 && input.force !== true) {
       return yield* new ProjectNotEmptyError({ projectId });
     }

@@ -7,6 +7,7 @@ import {
   normalizeCliError,
   sanitizeThreadTitle,
 } from "./textGenerationUtils.ts";
+import { buildThreadTitlePrompt } from "./textGenerationPrompts.ts";
 
 describe("normalizeCliError", () => {
   it("does not expose CLI failure details in the public error message", () => {
@@ -73,5 +74,18 @@ describe("cleanThreadTitleSeed", () => {
 
   it("falls back to the placeholder when nothing is left", () => {
     expect(cleanThreadTitleSeed("<@U0BDHRS3TEV>")).toBe("New thread");
+  });
+});
+
+describe("buildThreadTitlePrompt", () => {
+  it("names the project to leave out of initial and regenerated titles", () => {
+    for (const previousTitle of [undefined, "Hyperdrive Config Crash"]) {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "hyperdrive init crashes without a config",
+        previousTitle,
+        projectTitle: "Hyperdrive",
+      });
+      expect(prompt).toContain('Never include the project name ("Hyperdrive")');
+    }
   });
 });

@@ -2,6 +2,7 @@ import type {
   BranchNamingOptions,
   ChatAttachment,
   ModelSelection,
+  ProjectId,
   PullRequestReviewGuide,
   TextGenerationError,
 } from "@t3tools/contracts";
@@ -18,6 +19,7 @@ export interface CommitMessageGenerationInput {
   includeBranch?: boolean;
   policy?: TextGenerationPolicy | undefined;
   modelSelection: ModelSelection;
+  projectId?: ProjectId | null | undefined;
 }
 
 export interface CommitMessageGenerationResult {
@@ -37,6 +39,7 @@ export interface PrContentGenerationInput {
   threadContext?: string | undefined;
   policy?: TextGenerationPolicy | undefined;
   modelSelection: ModelSelection;
+  projectId?: ProjectId | null | undefined;
 }
 
 export interface PrContentGenerationResult {
@@ -50,6 +53,7 @@ export interface BranchNameGenerationInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   modelSelection: ModelSelection;
+  projectId?: ProjectId | null | undefined;
 }
 
 export interface BranchNameGenerationResult {
@@ -60,6 +64,7 @@ export interface ThreadTitleGenerationInput {
   linkedContext?: string | undefined;
   cwd: string;
   message: string;
+  projectTitle?: string | undefined;
   previousTitle?: string | undefined;
   /** Shown beside the title in the UI, so the model leaves it out. */
   projectName?: string | undefined;
@@ -67,6 +72,7 @@ export interface ThreadTitleGenerationInput {
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   instructions?: string | undefined;
   modelSelection: ModelSelection;
+  projectId?: ProjectId | null | undefined;
 }
 
 export interface ThreadTitleGenerationResult {
@@ -92,6 +98,7 @@ export interface ReviewGuideGenerationInput {
   instructions?: string | undefined;
   stack?: ReadonlyArray<ReviewGuideStackLayer> | undefined;
   modelSelection: ModelSelection;
+  projectId?: ProjectId | null | undefined;
 }
 
 export type ReviewGuideGenerationResult = Omit<

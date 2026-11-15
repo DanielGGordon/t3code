@@ -130,6 +130,14 @@ describe("reconcileMigrationLedger", () => {
         [82, "DropOrchestrationEventCorrelationIndex"],
         [83, "DelegatedRecoveryIndexes"],
         [84, "ScheduledTaskThreadMode"],
+        [85, "ProjectionMessageSearchText"],
+        [86, "TurnItemConversationIndex"],
+        [87, "CommandReadIndexes"],
+        [88, "LastExecutedRunIndex"],
+        [89, "TurnItemCounts"],
+        [90, "QueuedTurnInputIndex"],
+        [91, "ProjectionProjectsCustomTitle"],
+        [92, "TurnItemTypeStatusIndex"],
       ]);
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
 
@@ -188,7 +196,7 @@ describe("reconcileMigrationLedger", () => {
         executed.map(([id]) => id),
         [
           33, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
-          77, 78, 79, 80, 81, 82, 83, 84,
+          77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92,
         ],
       );
       assert.deepStrictEqual(yield* readLedger, migrationManifest);
