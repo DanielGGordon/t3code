@@ -20,6 +20,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
@@ -46,9 +47,10 @@ type CacheKeepAliveCommand = Extract<OrchestrationV2Command, { readonly type: "m
 export function cacheKeepAliveCommand(
   thread: CacheKeepAliveThread & { readonly id: ThreadId },
   nowMs: number,
+  maxPings: number,
   attempt = 1,
 ): CacheKeepAliveCommand | null {
-  const state = cacheKeepAliveState({ thread, nowMs });
+  const state = cacheKeepAliveState({ thread, nowMs, maxPings });
   if (state.kind !== "due" && state.kind !== "compact-due") return null;
   const compact = state.kind === "compact-due";
   const identity = `${compact ? "compact:" : ""}${thread.id}:${state.runId}:${attempt}`;
@@ -72,6 +74,7 @@ export function cacheKeepAliveCommand(
 /** Each thread's ping (or compaction) for its current idle period. */
 interface PingAttempts {
   readonly runId: RunId;
+  readonly action: CacheKeepAliveCommand["cacheKeepAliveAction"];
   readonly attempts: number;
   /** Accepted, or refused by the guard: nothing more to send this period. */
   readonly settled: boolean;
@@ -80,6 +83,7 @@ interface PingAttempts {
 const makeSweep = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const nextSweepAtMs = yield* Ref.make(0);
   const pings = yield* Ref.make(new Map<ThreadId, PingAttempts>());
   const record = (threadId: ThreadId, entry: PingAttempts) =>
@@ -89,6 +93,7 @@ const makeSweep = Effect.gen(function* () {
     const nowMs = DateTime.toEpochMillis(now);
     if (nowMs < (yield* Ref.get(nextSweepAtMs))) return;
     yield* Ref.set(nextSweepAtMs, nowMs + SWEEP_INTERVAL_MS);
+    const { cacheKeepAliveMaxPings } = yield* serverSettings.getSettings;
     const threadIds = yield* projections.getCacheKeepAliveCandidates();
     yield* Ref.update(pings, (current) => {
       const live = new Set(threadIds);
@@ -98,25 +103,29 @@ const makeSweep = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const shell = yield* projections.getThreadShell(threadId);
         if (shell === null) return;
-        const firstTry = cacheKeepAliveCommand(shell, nowMs);
+        const firstTry = cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings);
         if (firstTry === null) return;
         const runId = firstTry.cacheKeepAliveOfRunId!;
+        const action = firstTry.cacheKeepAliveAction;
         const known = (yield* Ref.get(pings)).get(threadId);
-        const previous = known?.runId === runId ? known : undefined;
+        const previous = known?.runId === runId && known.action === action ? known : undefined;
         if (previous !== undefined && (previous.settled || previous.attempts >= MAX_ATTEMPTS)) {
           return;
         }
         const attempt = (previous?.attempts ?? 0) + 1;
-        const command = attempt === 1 ? firstTry : cacheKeepAliveCommand(shell, nowMs, attempt)!;
+        const command =
+          attempt === 1
+            ? firstTry
+            : cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings, attempt)!;
         yield* threads.dispatch(command).pipe(
-          Effect.andThen(record(threadId, { runId, attempts: attempt, settled: true })),
+          Effect.andThen(record(threadId, { runId, action, attempts: attempt, settled: true })),
           Effect.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
             const error = Cause.squash(cause);
             const refused =
               isDispatchError(error) &&
               Orchestrator.isOrchestratorCacheKeepAliveRefusal(error.cause);
-            return record(threadId, { runId, attempts: attempt, settled: refused }).pipe(
+            return record(threadId, { runId, action, attempts: attempt, settled: refused }).pipe(
               Effect.andThen(
                 refused
                   ? Effect.logDebug("orchestration-v2.cache-keep-alive.refused", { threadId })

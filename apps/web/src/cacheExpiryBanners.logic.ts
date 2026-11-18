@@ -27,6 +27,7 @@ export function dueCacheExpiryBanners(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly nowMs: number;
   readonly minTokens: number;
+  readonly maxPingsOf?: (thread: EnvironmentThreadShell) => number | undefined;
   readonly driverOf: (thread: EnvironmentThreadShell) => string | undefined;
 }): ReadonlyArray<CacheExpiryBanner> {
   const due: Array<CacheExpiryBanner> = [];
@@ -35,7 +36,7 @@ export function dueCacheExpiryBanners(input: {
     if (timeOf(thread.snoozedUntil) > input.nowMs) continue;
     // Keep-alive is pinging this thread, or will compact it before the cache
     // lapses. A warm toggle that has run out of pings gets the banner back.
-    if (cacheKeepAliveActive(thread.source.cacheKeepAlive)) continue;
+    if (cacheKeepAliveActive(thread.source.cacheKeepAlive, input.maxPingsOf?.(thread))) continue;
     // Null while a run is active (and from servers that predate the field).
     const tokens = thread.idleContextTokens;
     if (tokens == null || tokens < input.minTokens) continue;

@@ -546,7 +546,7 @@ export function createThreadEnvironmentAtoms<R, E>(
     // Mirrors the server: on keeps a running budget, resumes a paused one.
     setCacheKeepAlive: optimistic.wrap(commands.setCacheKeepAlive, (thread, input, now) => ({
       ...thread,
-      cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, input, now),
+      cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, input, now, input.maxPings),
     })),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,

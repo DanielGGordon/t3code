@@ -41,6 +41,20 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("cache keep-alive ping budget", () => {
+  it("defaults older settings to eight pings and accepts only integers from 1 to 48", () => {
+    expect(decodeServerSettings({}).cacheKeepAliveMaxPings).toBe(8);
+    for (const value of [1, 48]) {
+      expect(
+        decodeServerSettingsPatch({ cacheKeepAliveMaxPings: value }).cacheKeepAliveMaxPings,
+      ).toBe(value);
+    }
+    for (const value of [0, 1.5, 49]) {
+      expect(() => decodeServerSettingsPatch({ cacheKeepAliveMaxPings: value })).toThrow();
+    }
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

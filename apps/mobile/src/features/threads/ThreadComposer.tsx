@@ -69,6 +69,7 @@ import { useLinkedEnvironments } from "../../state/peerLinks";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { CacheKeepAliveToggle } from "./CacheKeepAliveToggle";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
 import {
   ComposerAttachmentStrip,
@@ -1094,6 +1095,13 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 }
               >
                 {modelControl}
+                {props.isDraft ? null : (
+                  <CacheKeepAliveToggle
+                    thread={props.selectedThread}
+                    serverConfig={props.serverConfig}
+                    disabled={!props.canOperateThread}
+                  />
+                )}
                 <ComposerDictationStartAction
                   size={usesLargeControls ? "large" : "regular"}
                   state={voiceInput.state}

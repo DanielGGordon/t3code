@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
   ProviderDriverKind,
   RunId,
   RuntimeRequestId,
@@ -16,6 +17,7 @@ import {
   formatCacheExpiry,
   isCacheKeepAliveMessageId,
   nextCacheKeepAlive,
+  nextCacheKeepAliveChoice,
   promptCacheExpiresAtMs,
   type CacheKeepAliveThread,
 } from "./cacheKeepAlive.ts";
@@ -60,8 +62,11 @@ const idle: CacheKeepAliveThread = {
   pendingBackgroundTasks: [],
 };
 
-const stateOf = (thread: Partial<CacheKeepAliveThread>, nowMs = nudgeAtMs) =>
-  cacheKeepAliveState({ thread: { ...idle, ...thread }, nowMs });
+const stateOf = (
+  thread: Partial<CacheKeepAliveThread>,
+  nowMs = nudgeAtMs,
+  maxPings = DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
+) => cacheKeepAliveState({ thread: { ...idle, ...thread }, nowMs, maxPings });
 const withRun = (run: Partial<Run>) => ({
   cacheKeepAliveContext: { ...context, run: { ...finished, ...run } },
 });
@@ -112,7 +117,7 @@ describe("cacheKeepAliveState", () => {
     expect(stateOf({ cacheKeepAlive: null }).kind).toBe("off");
     expect(
       stateOf({ cacheKeepAlive: { ...idle.cacheKeepAlive!, pausedAt: at(lastRequestMs) } }),
-    ).toEqual({ kind: "paused", nudgeCount: 2 });
+    ).toEqual({ kind: "paused" });
     expect(
       stateOf({ cacheKeepAliveContext: { ...context, driver: ProviderDriverKind.make("codex") } })
         .kind,
@@ -182,12 +187,17 @@ describe("compact modes", () => {
   it("is done once the compaction ran, until the user writes and a new run takes over", () => {
     const compacted = { cacheKeepAlive: keepAlive({ mode: "compact", lastCompactRunId: runId }) };
     expect(stateOf(compacted).kind).toBe("compacted");
+    expect(stateOf(compacted, expiresAtMs).kind).toBe("compacted");
     const newRun = withRun({ id: RunId.make("run:later") });
     expect(stateOf({ ...compacted, ...newRun }).kind).toBe("compact-due");
   });
 
   it("warm-then-compact pings while the budget lasts, then compacts after the last ping", () => {
     expect(stateOf({ cacheKeepAlive: keepAlive({ mode: "warm-then-compact" }) }).kind).toBe("due");
+    const warmThenCompact = { cacheKeepAlive: keepAlive({ mode: "warm-then-compact" }) };
+    expect(stateOf(warmThenCompact, compactAtMs - 1, 2).kind).toBe("compact-scheduled");
+    expect(stateOf(warmThenCompact, compactAtMs - 1, 1).kind).toBe("compact-due");
+    expect(stateOf(warmThenCompact, compactAtMs, 1).kind).toBe("compact-due");
     const spent = { cacheKeepAlive: keepAlive({ mode: "warm-then-compact", pausedAt: at(0) }) };
     expect(stateOf(spent, compactAtMs).kind).toBe("compact-due");
     expect(
@@ -201,6 +211,9 @@ describe("compact modes", () => {
     expect(cacheKeepAliveActive(spent)).toBe(false);
     expect(cacheKeepAliveActive({ ...spent, mode: "warm-then-compact" })).toBe(true);
     expect(stateOf({ cacheKeepAlive: spent }).kind).toBe("paused");
+    const warm = keepAlive({ mode: "warm" });
+    expect(cacheKeepAliveActive(warm, 1)).toBe(false);
+    expect(stateOf({ cacheKeepAlive: warm }, nudgeAtMs, 1).kind).toBe("paused");
   });
 
   it("waits out a busy thread like a ping does", () => {
@@ -216,9 +229,16 @@ describe("nextCacheKeepAlive", () => {
   const on = idle.cacheKeepAlive!;
 
   it("turns off, and on with the default or requested mode", () => {
+    expect(nextCacheKeepAliveChoice(null, true, 8)).toBe("warm-then-compact");
+    expect(nextCacheKeepAliveChoice({ ...on, mode: "warm-then-compact" }, true, 8)).toBe("warm");
+    expect(nextCacheKeepAliveChoice(on, true, 8)).toBe("compact");
+    expect(nextCacheKeepAliveChoice({ ...on, mode: "compact" }, true, 8)).toBe("off");
+    expect(nextCacheKeepAliveChoice(on, true, 1)).toBe("warm-then-compact");
+    expect(nextCacheKeepAliveChoice(null, false, 8)).toBe("warm");
+    expect(nextCacheKeepAliveChoice(on, false, 8)).toBe("off");
     expect(nextCacheKeepAlive(on, { enabled: false }, now)).toBeNull();
     expect(nextCacheKeepAlive(null, { enabled: true }, now)).toMatchObject({
-      mode: "warm",
+      mode: "warm-then-compact",
       nudgeCount: 0,
     });
     expect(nextCacheKeepAlive(null, { enabled: true, mode: "compact" }, now)?.mode).toBe("compact");
@@ -230,11 +250,21 @@ describe("nextCacheKeepAlive", () => {
       mode: "compact",
     });
     expect(nextCacheKeepAlive(on, { enabled: true }, now)).toBe(on);
+    const spentCombined = { ...on, mode: "warm-then-compact" as const };
+    expect(nextCacheKeepAliveChoice(spentCombined, true, 1)).toBe("warm");
+    expect(
+      nextCacheKeepAlive(spentCombined, { enabled: true, mode: "warm" }, now, 1),
+    ).toMatchObject({ mode: "warm", nudgeCount: 0 });
+    expect(nextCacheKeepAlive(on, { enabled: true }, now, 1)).toMatchObject({
+      mode: "warm-then-compact",
+      nudgeCount: 0,
+    });
   });
 
   it("starts a fresh budget when the old one ran out, keeping the compaction record", () => {
     const spent = { ...on, pausedAt: at(0), lastCompactRunId: runId };
     expect(nextCacheKeepAlive(spent, { enabled: true }, now)).toMatchObject({
+      mode: "warm-then-compact",
       pausedAt: null,
       nudgeCount: 0,
       lastCompactRunId: runId,

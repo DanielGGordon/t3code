@@ -8,6 +8,9 @@ import IconApps from "@tabler/icons-react-native/IconApps";
 import IconArchive from "@tabler/icons-react-native/IconArchive";
 import IconCalendarClock from "@tabler/icons-react-native/IconCalendarClock";
 import IconArrowBackUp from "@tabler/icons-react-native/IconArrowBackUp";
+import IconFoldDown from "@tabler/icons-react-native/IconFoldDown";
+import IconFlame from "@tabler/icons-react-native/IconFlame";
+import IconHourglass from "@tabler/icons-react-native/IconHourglass";
 import IconArrowDown from "@tabler/icons-react-native/IconArrowDown";
 import IconArrowForwardUp from "@tabler/icons-react-native/IconArrowForwardUp";
 import IconArrowLeft from "@tabler/icons-react-native/IconArrowLeft";
@@ -153,6 +156,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "arrow.left.arrow.right": IconArrowsLeftRight,
   "arrow.clockwise": IconRefresh,
   "arrow.down": IconArrowDown,
+  "arrow.down.to.line": IconFoldDown,
   "arrow.down.circle": IconArrowDownCircle,
   "arrow.right.circle": IconArrowRightCircle,
   "arrow.triangle.branch": IconGitBranch,
@@ -188,6 +192,8 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "circle.dashed.inset.filled": IconCircleDot,
   "calendar.badge.clock": IconCalendarClock,
   clock: IconClock,
+  flame: IconFlame,
+  hourglass: IconHourglass,
   timer: IconClock,
   "face.smiling": IconMoodPlus,
   tag: IconTag,
@@ -248,6 +254,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "pin.slash": IconPinnedOff,
   play: IconPlayerPlay,
   pause: IconPlayerPause,
+  "pause.circle": IconPlayerPause,
   plus: IconPlus,
   minus: IconMinus,
   "slash.circle": IconBan,

@@ -616,6 +616,7 @@ export const setRestartRequest = Effect.fn("EnvironmentCommands.setRestartReques
 export interface SetCacheKeepAliveInput extends ThreadCommandInput {
   readonly enabled: boolean;
   readonly mode?: OrchestrationV2CacheKeepAliveMode;
+  readonly maxPings?: number;
 }
 export const setCacheKeepAlive = Effect.fn("EnvironmentCommands.setCacheKeepAlive")(function* (
   input: SetCacheKeepAliveInput,

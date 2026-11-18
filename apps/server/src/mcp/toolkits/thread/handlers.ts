@@ -360,6 +360,9 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
+        case "enable_cache_keep_alive":
+          command = { ...common, type: "thread.cache-keep-alive.set", enabled: true };
+          break;
         case "keep_cache_warm":
         case "compact_before_cache_expires":
         case "keep_cache_warm_then_compact":
