@@ -196,7 +196,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
       </TooltipTrigger>
       <TooltipPopup
         side={placement === "composer" ? "top" : "bottom"}
-        className="max-w-80 whitespace-normal"
+        className="max-w-96 whitespace-normal"
       >
         <CacheKeepAliveTooltipText
           thread={thread}
