@@ -129,7 +129,7 @@ describe("cacheKeepAliveState", () => {
         maxPings: 12,
         formatTime: () => "1:00 PM",
       }),
-    ).toBe("Paused after 2 pings. Send a message to resume. · Cache expires 1:00 PM");
+    ).toEqual(["Paused after 2 pings", "Send a message to resume", "Cache expires 1:00 PM"]);
     expect(
       stateOf({ cacheKeepAliveContext: { ...context, driver: ProviderDriverKind.make("codex") } })
         .kind,

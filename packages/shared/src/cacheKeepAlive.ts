@@ -331,44 +331,51 @@ export function describeCacheKeepAlive(input: {
   readonly nowMs: number;
   readonly maxPings: number;
   readonly formatTime: (ms: number) => string;
-}): string {
+}): ReadonlyArray<string> {
   const { thread, maxPings, formatTime } = input;
   const state = cacheKeepAliveState(input);
   const status = cacheKeptWarmByHeartbeat(thread)
-    ? "Kept warm by the subagent heartbeat."
+    ? ["Kept warm by the subagent heartbeat"]
     : cacheKeepAliveStatus(state, maxPings, formatTime);
   const expiresAtMs = promptCacheExpiresAtMs(input);
-  return expiresAtMs === null ? status : `${status} · Cache expires ${formatTime(expiresAtMs)}`;
+  return expiresAtMs === null ? status : [...status, `Cache expires ${formatTime(expiresAtMs)}`];
 }
 
+/** Short phrases the tooltip joins with " · "; each one stays on a single line. */
 function cacheKeepAliveStatus(
   state: CacheKeepAliveState,
   maxPings: number,
   formatTime: (ms: number) => string,
-): string {
+): ReadonlyArray<string> {
   switch (state.kind) {
     case "off":
-      return "No keep-alive scheduled.";
+      return [];
     case "paused":
-      return `Paused after ${state.nudgeCount} ${state.nudgeCount === 1 ? "ping" : "pings"}. Send a message to resume.`;
+      return [
+        `Paused after ${state.nudgeCount} ${state.nudgeCount === 1 ? "ping" : "pings"}`,
+        "Send a message to resume",
+      ];
     case "unsupported":
-      return "No Claude session holds this conversation yet.";
+      return ["No Claude session holds this conversation yet"];
     case "parked":
-      return "Left alone while archived, settled or snoozed.";
+      return ["Left alone while archived, settled or snoozed"];
     case "busy":
-      return "Starts when this turn finishes.";
+      return ["Starts when this turn finishes"];
     case "cold":
-      return "No live cache yet. Starts after the next turn.";
+      return ["No live cache yet; starts after the next turn"];
     case "scheduled":
-      return `Next ping ${formatTime(state.nudgeAtMs)} · ${state.nudgeCount} of ${maxPings} sent`;
+      return [
+        `Next ping ${formatTime(state.nudgeAtMs)}`,
+        `${state.nudgeCount} of ${maxPings} sent`,
+      ];
     case "due":
-      return "Pinging now.";
+      return ["Pinging now"];
     case "compact-scheduled":
-      return `Compacts around ${formatTime(state.compactAtMs)} unless you write`;
+      return [`Compacts around ${formatTime(state.compactAtMs)} unless you write`];
     case "compact-due":
-      return "Compacting now.";
+      return ["Compacting now"];
     case "compacted":
-      return "Compacted. Nothing more until you write.";
+      return ["Compacted", "Nothing more until you write"];
   }
 }
 

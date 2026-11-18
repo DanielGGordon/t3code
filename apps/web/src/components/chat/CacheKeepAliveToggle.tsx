@@ -80,7 +80,16 @@ function CacheKeepAliveTooltipText(props: {
   return (
     <div className="flex flex-col gap-1">
       <p className="font-semibold">{props.modeLabel}</p>
-      <p>{status}</p>
+      {status.length > 0 ? (
+        <p>
+          {status.map((part, index) => (
+            <span key={part}>
+              {index > 0 ? " · " : null}
+              <span className="whitespace-nowrap">{part}</span>
+            </span>
+          ))}
+        </p>
+      ) : null}
       <p className="opacity-70">
         Click: {props.next === "off" ? "turn off" : CACHE_KEEP_ALIVE_MODE_LABELS[props.next]}
       </p>
@@ -187,7 +196,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
       </TooltipTrigger>
       <TooltipPopup
         side={placement === "composer" ? "top" : "bottom"}
-        className="max-w-72 whitespace-normal"
+        className="max-w-80 whitespace-normal"
       >
         <CacheKeepAliveTooltipText
           thread={thread}

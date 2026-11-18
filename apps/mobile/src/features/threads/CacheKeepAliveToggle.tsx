@@ -65,6 +65,15 @@ export function CacheKeepAliveToggle(props: {
   const expiry = promptCacheExpiresAtMs({ thread, nowMs });
   const countdown = expiry === null ? null : formatCacheExpiry(expiry - nowMs);
   const closeDetails = () => setDetailsAtMs(null);
+  const status =
+    detailsAtMs === null
+      ? []
+      : describeCacheKeepAlive({
+          thread,
+          nowMs: detailsAtMs,
+          maxPings,
+          formatTime: (ms) => timeFormat.format(ms),
+        });
 
   return (
     <>
@@ -108,14 +117,7 @@ export function CacheKeepAliveToggle(props: {
               accessibilityViewIsModal
             >
               <Text className="font-t3-bold">{label}</Text>
-              <Text>
-                {describeCacheKeepAlive({
-                  thread,
-                  nowMs: detailsAtMs,
-                  maxPings,
-                  formatTime: (ms) => timeFormat.format(ms),
-                })}
-              </Text>
+              {status.length > 0 ? <Text>{status.join(" · ")}</Text> : null}
               <Text className="text-foreground-muted">
                 Click: {next === "off" ? "turn off" : CACHE_KEEP_ALIVE_MODE_LABELS[next]}
               </Text>
