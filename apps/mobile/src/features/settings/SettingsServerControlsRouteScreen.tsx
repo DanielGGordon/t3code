@@ -3,8 +3,10 @@ import { SettingsRow } from "./components/SettingsRow";
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { AppText as Text } from "../../components/ui/AppText";
+import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import {
+  CACHE_KEEP_ALIVE_MAX_PINGS,
+  CACHE_KEEP_ALIVE_MIN_PINGS,
   type ResponseStreamingMode,
   type ServerSettings,
   type ServerSettingsPatch,
@@ -13,6 +15,10 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
+import {
+  CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
+  CACHE_KEEP_ALIVE_COST_WARNING,
+} from "@t3tools/shared/cacheKeepAlive";
 import { useRef, useState } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -281,6 +287,19 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
       !PROJECT_SCOPED_SERVER_SETTING_KEYS.includes(
         key as (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number],
       ));
+  const supportsPingBudget = targets.every(
+    (target) =>
+      target.environment.serverConfig.environment.capabilities.threadCacheKeepAliveMaxPings ===
+      true,
+  );
+  const showPingCostWarning = displayTargets.some(
+    (target) => target.settings.cacheKeepAliveMaxPings >= CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
+  );
+  const pingBudgetStatus = !supportsPingBudget
+    ? "An older selected environment cannot change the ping budget."
+    : showPingCostWarning
+      ? CACHE_KEEP_ALIVE_COST_WARNING
+      : undefined;
 
   return (
     <SettingsScreen title={PAGE_TITLES[props.page]} menus={[environmentMenu]}>
@@ -396,7 +415,26 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                   />
                 </SettingsSection>
-                <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
+                <AutoSettleSettingsRows
+                  write={write}
+                  pending={pendingWrites > 0}
+                  usageLimitRows={
+                    !projectSelected ? (
+                      <CacheKeepAlivePingsInput
+                        value={uniform("cacheKeepAliveMaxPings")}
+                        disabled={!supportsPingBudget || disabledFor("cacheKeepAliveMaxPings")}
+                        description={managedSubtitle(
+                          "cacheKeepAliveMaxPings",
+                          "About one ping per hour while you're away. Default 8.",
+                        )}
+                        status={pingBudgetStatus}
+                        onCommit={(cacheKeepAliveMaxPings) => {
+                          if (supportsPingBudget) write({ cacheKeepAliveMaxPings });
+                        }}
+                      />
+                    ) : null
+                  }
+                />
               </>
             ) : null}
 
@@ -619,6 +657,49 @@ function MixedValuesLabel(props: { readonly projectSelected: boolean }) {
     >
       Mixed
     </Text>
+  );
+}
+
+function CacheKeepAlivePingsInput(props: {
+  readonly value: number | null;
+  readonly disabled: boolean;
+  readonly description: string;
+  readonly status: string | undefined;
+  readonly onCommit: (value: number) => void;
+}) {
+  const [revision, setRevision] = useState(0);
+  return (
+    <View className="gap-2 px-4 py-3">
+      <View className="flex-row items-center gap-3">
+        <View className="flex-1 gap-1">
+          <Text>Cache keep-alive pings</Text>
+          <Text className="text-sm text-foreground-muted">{props.description}</Text>
+        </View>
+        <AppTextInput
+          key={`${props.value}:${revision}`}
+          accessibilityLabel="Cache keep-alive pings"
+          className="min-w-16 rounded-xl bg-subtle px-3 py-2 text-foreground"
+          defaultValue={props.value?.toString() ?? ""}
+          editable={!props.disabled}
+          keyboardType="number-pad"
+          placeholder={props.value === null ? "Mixed" : undefined}
+          returnKeyType="done"
+          onEndEditing={({ nativeEvent }) => {
+            const value = Number(nativeEvent.text.trim());
+            setRevision((current) => current + 1);
+            if (
+              Number.isInteger(value) &&
+              value >= CACHE_KEEP_ALIVE_MIN_PINGS &&
+              value <= CACHE_KEEP_ALIVE_MAX_PINGS &&
+              value !== props.value
+            ) {
+              props.onCommit(value);
+            }
+          }}
+        />
+      </View>
+      {props.status ? <Text className="text-sm text-orange-500">{props.status}</Text> : null}
+    </View>
   );
 }
 

@@ -13,11 +13,7 @@ import {
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
-import {
-  CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
-  cacheKeepAliveState,
-  nextCacheKeepAlive,
-} from "@t3tools/shared/cacheKeepAlive";
+import { cacheKeepAliveState, nextCacheKeepAlive } from "@t3tools/shared/cacheKeepAlive";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -4425,6 +4421,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
     }
+    const cacheKeepAliveMaxPings =
+      command.type === "thread.cache-keep-alive.set" && command.enabled
+        ? (yield* serverSettings.getSettings.pipe(Effect.orDie)).cacheKeepAliveMaxPings
+        : undefined;
     let snoozedUntil: DateTime.Utc | null = null;
     if (command.type === "thread.snooze") {
       const projection = yield* loadProjectionForCommand(command, ["runs", "runtimeRequests"], {
@@ -4573,7 +4573,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.cache-keep-alive.set":
           return {
             ...thread,
-            cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, command, now),
+            cacheKeepAlive: nextCacheKeepAlive(
+              thread.cacheKeepAlive ?? null,
+              command,
+              now,
+              cacheKeepAliveMaxPings,
+            ),
           };
         // Fork: transient "agent asked for a server restart" flag. Does not
         // bump updatedAt — it is UI state, not thread activity, and must not
@@ -6560,11 +6565,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const recordCacheKeepAliveNudge = Effect.fn("Orchestrator.recordCacheKeepAliveNudge")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    maxPings: number,
   ) {
     const projection = yield* getProjectionWithPendingEvents(command.threadId, events);
-    const keepAlive = projection.thread.cacheKeepAlive ?? null;
-    if (keepAlive === null) return;
     const now = yield* DateTime.now;
+    // The guard already judged the ping due, so a record-less subagent thread is following its parent.
+    const keepAlive =
+      projection.thread.cacheKeepAlive ??
+      (isProviderNativeSubagentThread(projection.thread) ||
+      projection.thread.lineage.relationshipToParent !== "subagent"
+        ? null
+        : ({
+            mode: "warm",
+            inherited: true,
+            enabledAt: now,
+            nudgeCount: 0,
+            pausedAt: null,
+            lastNudgeRunId: null,
+            lastNudgeAfterRead: false,
+          } satisfies OrchestrationV2AppThread["cacheKeepAlive"]));
+    if (keepAlive == null) return;
     const nudgeCount = keepAlive.nudgeCount + 1;
     const run = projection.runs.find((candidate) => candidate.userMessageId === command.messageId);
     // Read means visited since the kept-warm run finished (never-visited
@@ -6586,7 +6606,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       cacheKeepAlive: {
         ...keepAlive,
         nudgeCount,
-        pausedAt: nudgeCount >= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES ? now : null,
+        pausedAt: nudgeCount >= maxPings ? now : null,
         lastNudgeRunId: run?.id ?? keepAlive.lastNudgeRunId,
         lastNudgeAfterRead: readBeforePing,
       },
@@ -6639,6 +6659,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    maxPings?: number,
   ) {
     // A compacted thread reads every run and turn item, but attempts, nodes, messages and provider
     // turns only for its recent runs and the runs this command names. An idle compaction reads
@@ -6672,11 +6693,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const shell = yield* projectionStore
         .getThreadShell(command.threadId)
         .pipe(mapDispatchError(command));
+      const parentId =
+        shell?.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
+      const parent =
+        parentId === null
+          ? null
+          : yield* projectionStore.getThreadShell(parentId).pipe(mapDispatchError(command));
       const state =
         shell === null
           ? null
           : cacheKeepAliveState({
               thread: shell,
+              parent,
+              maxPings:
+                maxPings ??
+                (yield* serverSettings.getSettings.pipe(Effect.orDie)).cacheKeepAliveMaxPings,
               nowMs: DateTime.toEpochMillis(yield* DateTime.now),
             });
       const compacting = command.cacheKeepAliveAction === "compact";
@@ -6981,8 +7012,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // also resumes keep-alive if the budget had run out. A message steered
     // into a ping's run makes it real work, so it is no longer quiet.
     const keepAlive = projection.thread.cacheKeepAlive ?? null;
+    // A message from the parent agent restarts an inherited child's budget the same way.
+    const fromParent =
+      keepAlive?.inherited === true &&
+      projection.thread.lineage.relationshipToParent === "subagent" &&
+      command.senderThreadId !== undefined &&
+      command.senderThreadId === projection.thread.lineage.parentThreadId;
     if (
-      isUserActivity(command) &&
+      (isUserActivity(command) || fromParent) &&
       keepAlive !== null &&
       (keepAlive.nudgeCount > 0 ||
         keepAlive.pausedAt !== null ||
@@ -14966,12 +15003,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 text: guestSend.text,
                 context: { version: 1 as const, records: [], guest: guestSend.guest },
               };
-        cancelUnsettledEffects = yield* dispatchMessage(dispatched, events, effects);
+        const maxPings =
+          dispatched.cacheKeepAliveOfRunId === undefined
+            ? undefined
+            : (yield* serverSettings.getSettings.pipe(Effect.orDie)).cacheKeepAliveMaxPings;
+        cancelUnsettledEffects = yield* dispatchMessage(dispatched, events, effects, maxPings);
         yield* recordSubagentFollowup(dispatched, events).pipe(mapDispatchError(command));
-        if (dispatched.cacheKeepAliveOfRunId !== undefined) {
+        if (maxPings !== undefined) {
           yield* dispatched.cacheKeepAliveAction === "compact"
             ? recordCacheKeepAliveCompaction(dispatched, events)
-            : recordCacheKeepAliveNudge(dispatched, events);
+            : recordCacheKeepAliveNudge(dispatched, events, maxPings);
         }
         break;
       }

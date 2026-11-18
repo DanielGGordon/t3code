@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
+  DEFAULT_SERVER_SETTINGS,
   RuntimeRequestId,
   EnvironmentId,
   MessageId,
@@ -95,6 +96,7 @@ const SNAPSHOT: OrchestrationV2ShellSnapshot = {
 const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (options?: {
   readonly loadEarlier?: () => Effect.Effect<ThreadHistoryController.ThreadHistoryLoadEarlierResult>;
   readonly reconcilePendingWork?: (threadId: ThreadId) => Effect.Effect<void>;
+  readonly cacheKeepAliveMaxPings?: number;
 }) {
   const requests = yield* Queue.unbounded<{
     command: OrchestrationV2Command;
@@ -158,7 +160,14 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
   const snapshotAtom = Atom.family((_environmentId: EnvironmentId) =>
     Atom.make<OrchestrationV2ShellSnapshot | null>(SNAPSHOT),
   );
-  const commands = createThreadEnvironmentAtoms(runtime, snapshotAtom);
+  const configAtom = Atom.make({
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      cacheKeepAliveMaxPings:
+        options?.cacheKeepAliveMaxPings ?? DEFAULT_SERVER_SETTINGS.cacheKeepAliveMaxPings,
+    },
+  });
+  const commands = createThreadEnvironmentAtoms(runtime, snapshotAtom, () => configAtom);
   const registry = AtomRegistry.make();
   yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
   const visibleAtom = commands.snapshotAtom(ENVIRONMENT_ID);
@@ -174,6 +183,37 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
     connectionFollowed,
   };
 });
+
+it.effect("optimistically resumes keep-alive using the destination's ping budget", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ cacheKeepAliveMaxPings: 2 });
+    h.registry.set(h.snapshotAtom(ENVIRONMENT_ID), {
+      ...SNAPSHOT,
+      threads: SNAPSHOT.threads.map((thread) => ({
+        ...thread,
+        cacheKeepAlive: {
+          mode: "warm" as const,
+          enabledAt: NOW,
+          nudgeCount: 2,
+          pausedAt: null,
+          lastNudgeRunId: null,
+          lastNudgeAfterRead: false,
+        },
+      })),
+    });
+    const result = h.commands.setCacheKeepAlive.run(h.registry, {
+      environmentId: ENVIRONMENT_ID,
+      input: { threadId: THREAD_ID, enabled: true },
+    });
+    const request = yield* Queue.take(h.requests);
+    expect(h.registry.get(h.visibleAtom)?.threads[0]?.cacheKeepAlive).toMatchObject({
+      mode: "warm-then-compact",
+      nudgeCount: 0,
+    });
+    yield* Deferred.succeed(request.reply, { sequence: 2 });
+    expect((yield* Effect.promise(() => result))._tag).toBe("Success");
+  }),
+);
 
 describe("history loading", () => {
   it.effect("sends a message on the thread while earlier history is loading", () =>

@@ -12,7 +12,7 @@ import {
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useClientSettings } from "../hooks/useSettings";
-import { useThreadShells } from "../state/entities";
+import { useServerConfigs, useThreadShells } from "../state/entities";
 import { useEnvironmentProviders } from "../state/environments";
 import { formatShortTimestamp } from "../timestampFormat";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -48,13 +48,13 @@ export function CacheExpiryBanners() {
   const minTokens = useClientSettings((settings) => settings.cacheExpiryBannerMinTokens);
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const threads = useThreadShells(enabled);
+  const serverConfigs = useServerConfigs();
   const providersByEnvironment = useEnvironmentProviders();
   const navigate = useNavigate();
   const [store, setStore] = useLocalStorage(STORAGE_KEY, EMPTY_STORE, BannerStore);
   const toasts = useRef(new Map<string, ToastId>());
 
-  // A due banner opens once; after that only its X (here or in another tab) closes
-  // it. Each check reads the clock afresh, on new shell data and every 30 s.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keeps persisted reminders in sync with the expiry clock.
   useEffect(() => {
     if (!enabled) return;
     const openDue = () => {
@@ -62,6 +62,8 @@ export function CacheExpiryBanners() {
         threads,
         nowMs: Date.now(),
         minTokens,
+        maxPingsOf: (thread) =>
+          serverConfigs.get(thread.environmentId)?.settings.cacheKeepAliveMaxPings,
         driverOf: (thread) =>
           providersByEnvironment
             .get(thread.environmentId)
@@ -80,7 +82,7 @@ export function CacheExpiryBanners() {
     openDue();
     const timer = setInterval(openDue, RECHECK_MS);
     return () => clearInterval(timer);
-  }, [enabled, threads, minTokens, providersByEnvironment, setStore]);
+  }, [enabled, threads, minTokens, providersByEnvironment, serverConfigs, setStore]);
 
   const dismiss = useStableCallback((key: string) => {
     toasts.current.delete(key);
@@ -106,11 +108,12 @@ export function CacheExpiryBanners() {
     }));
   });
 
-  // Turning the setting off drops the open banners rather than parking them.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Clears persisted reminders when the feature is disabled.
   useEffect(() => {
     if (!enabled && store.open.length > 0) setStore((current) => ({ ...current, open: [] }));
   }, [enabled, store.open.length, setStore]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Mirrors persisted reminders to the imperative toast manager.
   useEffect(() => {
     const openKeys = new Set(store.open.map((banner) => banner.key));
     for (const [key, toastId] of toasts.current) {
@@ -140,6 +143,7 @@ export function CacheExpiryBanners() {
 
   // With several banners stacked, one more toast offers to clear them all.
   const openCount = store.open.length;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keeps the toast manager's dismiss-all action in sync with the open count.
   useEffect(() => {
     if (openCount < 2) return;
     const toastId = toastManager.add(
@@ -159,6 +163,7 @@ export function CacheExpiryBanners() {
     return () => toastManager.close(toastId);
   }, [openCount, dismissAll]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Closes the toast manager entries owned by this component on unmount.
   useEffect(
     () => () => {
       for (const toastId of toasts.current.values()) toastManager.close(toastId);

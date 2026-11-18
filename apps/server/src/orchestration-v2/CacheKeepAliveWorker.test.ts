@@ -1,12 +1,10 @@
 import { assert, expect, it } from "@effect/vitest";
-import {
-  CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
-  CACHE_KEEP_ALIVE_NUDGE_TEXT,
-} from "@t3tools/shared/cacheKeepAlive";
+import { CACHE_KEEP_ALIVE_NUDGE_TEXT } from "@t3tools/shared/cacheKeepAlive";
 import {
   CheckpointId,
   CheckpointScopeId,
   CommandId,
+  DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
   EventId,
   MessageId,
   NodeId,
@@ -59,8 +57,13 @@ const adapter = {
   openSession: () => Effect.die("No provider process needed for keep-alive tests"),
 } as ProviderAdapter.ProviderAdapterV2["Service"];
 const layerDatabase = SqlitePersistence.layerMemory;
+const layerSettings = ServerSettings.layerTest({
+  responseStreamingMode: "turn",
+  providerInstances: { [instanceId]: { driver, enabled: true } },
+}).pipe(Layer.orDie);
 const layerTest = Layer.mergeAll(
   layerDatabase,
+  layerSettings,
   ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
   EventStore.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
@@ -69,7 +72,7 @@ const layerTest = Layer.mergeAll(
     {
       databaseLayer: layerDatabase,
       runEffectWorker: false,
-      providerInstances: { [instanceId]: { driver, enabled: true } },
+      serverSettingsLayer: layerSettings,
     },
   ),
 );
@@ -284,7 +287,16 @@ const shellOf = (threadId: ThreadId) =>
 const pingCommand = (threadId: ThreadId) =>
   Effect.gen(function* () {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
-    return CacheKeepAliveWorker.cacheKeepAliveCommand(yield* shellOf(threadId), now);
+    const shell = yield* shellOf(threadId);
+    const parentId =
+      shell.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
+    return CacheKeepAliveWorker.cacheKeepAliveCommand(
+      shell,
+      now,
+      DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
+      1,
+      parentId === null ? null : yield* shellOf(parentId),
+    );
   });
 
 /** A ping for `runId` built by hand, to show the orchestrator refuses it. */
@@ -354,7 +366,11 @@ it.effect("turns keep-alive on and off as UI state, not activity", () =>
     const threadId = ThreadId.make("thread:keep-alive-toggle");
     yield* createIdleThread(threadId);
     const before = yield* shellOf(threadId);
-    expect(before.cacheKeepAlive).toMatchObject({ nudgeCount: 0, pausedAt: null });
+    expect(before.cacheKeepAlive).toMatchObject({
+      mode: "warm-then-compact",
+      nudgeCount: 0,
+      pausedAt: null,
+    });
     expect(before.cacheKeepAliveContext).toMatchObject({ driver, hasQueuedRun: false });
 
     yield* setKeepAlive(threadId, false);
@@ -737,34 +753,46 @@ it.effect("pauses after the ping budget; the user's next message or the toggle r
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const settings = yield* ServerSettings.ServerSettingsService;
     const threadId = ThreadId.make("thread:keep-alive-cap");
     yield* createIdleThread(threadId);
-    for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
-      yield* TestClock.adjust("55 minutes");
-      yield* pingAndFinish(threadId);
-      assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, sent);
-    }
-    const paused = (yield* keepAliveOf(threadId))!;
-    assert.isNotNull(paused.pausedAt);
+    yield* setKeepAlive(threadId, true, "warm");
+    yield* settings.updateSettings({ cacheKeepAliveMaxPings: 3 });
     yield* TestClock.adjust("55 minutes");
-    assert.isNull(yield* pingCommand(threadId));
-    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
+    yield* pingAndFinish(threadId);
+    yield* TestClock.adjust("55 minutes");
+    const secondPing = yield* pingAndFinish(threadId);
+    expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 2, pausedAt: null });
 
-    // Turning it on again resumes with a fresh budget...
+    yield* settings.updateSettings({ cacheKeepAliveMaxPings: 2 });
+    yield* TestClock.adjust("55 minutes");
+    const error = yield* orchestrator
+      .dispatch(forcedPing(threadId, secondPing.id))
+      .pipe(Effect.flip);
+    expect(error).toMatchObject({
+      _tag: "OrchestratorDispatchError",
+      cause: { _tag: "OrchestratorCacheKeepAliveRefusal", runId: secondPing.id },
+    });
     yield* setKeepAlive(threadId, true);
     expect(yield* keepAliveOf(threadId)).toMatchObject({
+      mode: "warm-then-compact",
       nudgeCount: 0,
       pausedAt: null,
-      lastNudgeRunId: paused.lastNudgeRunId,
+      lastNudgeRunId: secondPing.id,
     });
-    // ...and so does the user's next message.
-    for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
+
+    yield* setKeepAlive(threadId, true, "warm");
+    for (let sent = 1; sent <= 2; sent++) {
       const run = (yield* projections.getThreadProjection(threadId)).runs.at(-1)!;
       yield* recordRun(run, { lastRequestAt: yield* DateTime.now });
       yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
-    assert.isNotNull((yield* keepAliveOf(threadId))?.pausedAt ?? null);
+    expect(yield* keepAliveOf(threadId)).toMatchObject({
+      nudgeCount: 2,
+      pausedAt: expect.anything(),
+    });
+    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
     yield* orchestrator.dispatch(userMessage(threadId));
     expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 0, pausedAt: null });
   }).pipe(Effect.provide(layerTest)),
@@ -825,7 +853,7 @@ it.effect(
       const threadId = ThreadId.make("thread:keep-alive-warm-then-compact");
       yield* createIdleThread(threadId);
       yield* setKeepAlive(threadId, true, "warm-then-compact");
-      for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
+      for (let sent = 1; sent <= DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS; sent++) {
         yield* TestClock.adjust("55 minutes");
         yield* pingAndFinish(threadId);
       }
@@ -840,7 +868,7 @@ it.effect(
       yield* orchestrator.dispatch(compaction!);
       const projection = yield* projections.getThreadProjection(threadId);
       expect(projection.thread.cacheKeepAlive).toMatchObject({
-        nudgeCount: CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES,
+        nudgeCount: DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
         lastCompactRunId: projection.runs.at(-1)!.id,
       });
     }).pipe(Effect.provide(layerTest)),
@@ -884,7 +912,7 @@ it.effect("the toggle, count and pause rebuild from the event log", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:keep-alive-rebuild");
     yield* createIdleThread(threadId);
-    for (let sent = 1; sent <= CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES; sent++) {
+    for (let sent = 1; sent <= DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS; sent++) {
       yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
@@ -970,36 +998,42 @@ it.effect("usage-limit recovery does not resume a ping that hit the limit", () =
   }).pipe(Effect.provide(layerTest)),
 );
 
+/** The real worker; `sweep` receives the registered sweep so a test can run it on demand. */
+const layerRealWorker = (sweep: Ref.Ref<Effect.Effect<void>>) =>
+  CacheKeepAliveWorker.layer.pipe(
+    Layer.provide(
+      Layer.merge(
+        ThreadManagementService.layer.pipe(
+          Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+        ),
+        Layer.mock(Scheduler.Scheduler)({
+          register: Effect.fn("CacheKeepAliveWorkerTest.register")(function* <E, R>(
+            _name: string,
+            work: Effect.Effect<void, E, R>,
+          ) {
+            const context = yield* Effect.context<R>();
+            yield* Ref.set(sweep, work.pipe(Effect.provideContext(context), Effect.orDie));
+          }),
+        }),
+      ),
+    ),
+    Layer.provide(
+      ServerSettings.layerTest({
+        providerInstances: { [instanceId]: { driver, enabled: true } },
+      }),
+    ),
+  );
+
 it.effect("the real sweep pings a due thread through the projection and the orchestrator", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:keep-alive-end-to-end");
     yield* createIdleThread(threadId);
-    const layerWorker = CacheKeepAliveWorker.layer.pipe(
-      Layer.provide(
-        Layer.merge(
-          ThreadManagementService.layer.pipe(
-            // The dispatch chokepoint refuses provider work on an instance the
-            // settings leave off; the fixture instance is not a default one.
-            Layer.provide(
-              ServerSettings.layerTest({
-                providerInstances: { [instanceId]: { driver, enabled: true } },
-              }),
-            ),
-            Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
-          ),
-          Scheduler.layer,
-        ),
-      ),
-    );
+    const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    const layerWorker = layerRealWorker(sweep);
     yield* Effect.gen(function* () {
       yield* TestClock.adjust("55 minutes");
-      // The scheduler fiber runs the sweep after the tick; let it finish.
-      let keepAlive = yield* keepAliveOf(threadId);
-      for (let turn = 0; turn < 200 && keepAlive?.nudgeCount !== 1; turn++) {
-        yield* Effect.yieldNow;
-        keepAlive = yield* keepAliveOf(threadId);
-      }
-      expect(keepAlive).toMatchObject({ nudgeCount: 1 });
+      yield* yield* Ref.get(sweep);
+      expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 1 });
       const messages = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
         threadId,
       )).messages;
@@ -1008,6 +1042,214 @@ it.effect("the real sweep pings a due thread through the projection and the orch
         text: CACHE_KEEP_ALIVE_NUDGE_TEXT,
       });
     }).pipe(Effect.provide(layerWorker));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+/** Turns an idle Claude thread into a delegate_task child of `parentId`, with no toggle of its own. */
+const makeDelegateChild = (threadId: ThreadId, parentId: ThreadId) =>
+  Effect.gen(function* () {
+    yield* setKeepAlive(threadId, false);
+    const thread = yield* (yield* ProjectionStore.ProjectionStoreV2).getThread(threadId);
+    yield* write([
+      {
+        id: EventId.make(`event:${nextId("delegate-child")}`),
+        type: "thread.cache-keep-alive-updated",
+        threadId,
+        providerInstanceId: instanceId,
+        occurredAt: yield* DateTime.now,
+        payload: {
+          ...thread,
+          lineage: {
+            parentThreadId: parentId,
+            relationshipToParent: "subagent",
+            rootThreadId: parentId,
+          },
+        },
+      },
+    ]);
+  });
+
+it.effect(
+  "a delegate_task child is pinged while its parent keeps warm, and stops when it stops",
+  () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parentId = ThreadId.make("thread:keep-alive-parent");
+      const childId = ThreadId.make("thread:keep-alive-child");
+      yield* createIdleThread(parentId);
+      yield* createIdleThread(childId);
+      yield* makeDelegateChild(childId, parentId);
+      const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+      yield* Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [childId, parentId]);
+        yield* yield* Ref.get(sweep);
+        expect(yield* keepAliveOf(childId)).toMatchObject({
+          mode: "warm",
+          inherited: true,
+          nudgeCount: 1,
+        });
+
+        // The ping's turn finishes; then the parent stops keeping warm.
+        const pingRun = (yield* projections.getThreadProjection(childId)).runs.at(-1)!;
+        yield* recordRun(pingRun, { lastRequestAt: yield* DateTime.now });
+        yield* TestClock.adjust("55 minutes");
+        // The parent's own ping turn is over too, so only its toggle is left to keep the child warm.
+        const parentPing = (yield* projections.getThreadProjection(parentId)).runs.at(-1)!;
+        yield* recordRun(parentPing, { lastRequestAt: yield* DateTime.now });
+        yield* setKeepAlive(parentId, false);
+        assert.isNull(yield* pingCommand(childId));
+        assert.isTrue(yield* refused(forcedPing(childId, pingRun.id)));
+        yield* yield* Ref.get(sweep);
+        expect(yield* keepAliveOf(childId)).toMatchObject({ nudgeCount: 1 });
+
+        // An explicit toggle on the child wins over the parent being off.
+        yield* setKeepAlive(childId, true, "warm");
+        expect(yield* keepAliveOf(childId)).not.toHaveProperty("inherited");
+        assert.isNotNull(yield* pingCommand(childId));
+      }).pipe(Effect.provide(layerRealWorker(sweep)));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+/** An idle parent (toggle off) and a delegate child with a live cache. */
+const parentAndChild = (parentId: ThreadId, childId: ThreadId) =>
+  Effect.gen(function* () {
+    const parentRun = yield* createIdleThread(parentId);
+    yield* setKeepAlive(parentId, false);
+    yield* createIdleThread(childId);
+    yield* makeDelegateChild(childId, parentId);
+    return parentRun;
+  });
+
+it.effect("a delegate child stays warm while its parent waits on a running sibling", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const parentId = ThreadId.make("thread:keep-alive-sibling-parent");
+    const childId = ThreadId.make("thread:keep-alive-sibling-child");
+    const parentRun = yield* parentAndChild(parentId, childId);
+    // The parent delegated a second task in the background: an app-owned subagent item on its settled run.
+    const now = yield* DateTime.now;
+    yield* write([
+      {
+        id: EventId.make(`event:${nextId("sibling")}`),
+        type: "turn-item.updated",
+        threadId: parentId,
+        runId: parentRun.id,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: TurnItemId.make(nextId("sibling-item")),
+          threadId: parentId,
+          runId: parentRun.id,
+          nodeId: NodeId.make(`node:${parentId}:sibling`),
+          providerThreadId: parentRun.providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 99,
+          status: "running",
+          title: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+          type: "subagent",
+          subagentId: NodeId.make("subagent:sibling"),
+          origin: "app_owned",
+          driver,
+          providerInstanceId: instanceId,
+          childThreadId: null,
+          prompt: "Work.",
+          result: null,
+        },
+      },
+    ]);
+    assert.isAbove((yield* shellOf(parentId)).pendingBackgroundTasks?.length ?? 0, 0);
+    const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    yield* Effect.gen(function* () {
+      yield* TestClock.adjust("55 minutes");
+      assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [childId]);
+      yield* yield* Ref.get(sweep);
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+    }).pipe(Effect.provide(layerRealWorker(sweep)));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
+  "a delegate child follows a parent mid-turn, and the guard needs the parent to accept",
+  () =>
+    Effect.gen(function* () {
+      const parentId = ThreadId.make("thread:keep-alive-busy-parent");
+      const childId = ThreadId.make("thread:keep-alive-busy-child");
+      yield* parentAndChild(parentId, childId);
+      const parentRun = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
+        parentId,
+      )).runs.at(-1)!;
+      yield* TestClock.adjust("55 minutes");
+      // The parent is quiet and has no toggle: the child is off.
+      assert.isNull(yield* pingCommand(childId));
+      assert.isTrue(yield* refused(forcedPing(childId, runIdOf(yield* shellOf(childId)))));
+      yield* write([runUpdated({ ...parentRun, status: "running", completedAt: null })]);
+      assert.isNotNull(yield* pingCommand(childId));
+      // The guard judges by the parent too: a forced ping is accepted only now.
+      assert.isFalse(yield* refused(forcedPing(childId, runIdOf(yield* shellOf(childId)))));
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+    }).pipe(Effect.provide(layerTest)),
+);
+
+const runIdOf = (shell: OrchestrationV2ThreadShell) => shell.cacheKeepAliveContext!.run!.id;
+
+it.effect(
+  "a parent message restarts an inherited child's count; an explicit off returns to inheriting",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const parentId = ThreadId.make("thread:keep-alive-msg-parent");
+      const childId = ThreadId.make("thread:keep-alive-msg-child");
+      yield* createIdleThread(parentId);
+      yield* createIdleThread(childId);
+      yield* makeDelegateChild(childId, parentId);
+      yield* TestClock.adjust("55 minutes");
+      yield* pingAndFinish(childId);
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+
+      yield* orchestrator.dispatch({
+        ...sendMessage(childId, { createdBy: "agent", creationSource: "mcp" }),
+        senderThreadId: parentId,
+      });
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 0 });
+
+      yield* setKeepAlive(childId, true, "compact");
+      expect(yield* keepAliveOf(childId)).not.toHaveProperty("inherited");
+      yield* setKeepAlive(childId, false);
+      assert.isNull(yield* keepAliveOf(childId));
+      expect((yield* shellOf(childId)).cacheKeepAlive ?? null).toBeNull();
+      yield* TestClock.adjust("55 minutes");
+      const run = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
+        childId,
+      )).runs.at(-1)!;
+      yield* recordRun(run, { lastRequestAt: yield* DateTime.now });
+      yield* TestClock.adjust("55 minutes");
+      assert.isNotNull(yield* pingCommand(childId));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("an archived parent stops an inherited child", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const parentId = ThreadId.make("thread:keep-alive-archived-parent");
+    const childId = ThreadId.make("thread:keep-alive-archived-child");
+    yield* createIdleThread(parentId);
+    yield* createIdleThread(childId);
+    yield* makeDelegateChild(childId, parentId);
+    yield* TestClock.adjust("55 minutes");
+    assert.isNotNull(yield* pingCommand(childId));
+    yield* (yield* Orchestrator.OrchestratorV2).dispatch({
+      type: "thread.archive",
+      commandId: CommandId.make(nextId("archive")),
+      threadId: parentId,
+    });
+    assert.isNull(yield* pingCommand(childId));
+    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -1021,6 +1263,8 @@ const runMockedSweep = (
     readonly commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>;
     readonly sweeps: Ref.Ref<number>;
     readonly runId: RunId;
+    readonly keepAlive: Ref.Ref<OrchestrationV2ThreadShell["cacheKeepAlive"]>;
+    readonly settings: ServerSettings.ServerSettingsService["Service"];
     readonly threadId: ThreadId;
   }) => Effect.Effect<void>,
 ) =>
@@ -1030,6 +1274,7 @@ const runMockedSweep = (
     const runId = RunId.make("run:keep-alive-sweep");
     const shell = {
       id: threadId,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
       cacheKeepAlive: {
         enabledAt: anchor,
         nudgeCount: 0,
@@ -1059,13 +1304,18 @@ const runMockedSweep = (
     } as unknown as OrchestrationV2ThreadShell;
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     const sweeps = yield* Ref.make(0);
+    const keepAlive = yield* Ref.make(shell.cacheKeepAlive);
+    const settings = yield* ServerSettings.ServerSettingsService;
     const layerWorker = CacheKeepAliveWorker.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
             getCacheKeepAliveCandidates: () =>
               Ref.update(sweeps, (count) => count + 1).pipe(Effect.as([threadId])),
-            getThreadShell: () => Effect.succeed(shell),
+            getThreadShell: () =>
+              Ref.get(keepAlive).pipe(
+                Effect.map((cacheKeepAlive) => ({ ...shell, cacheKeepAlive })),
+              ),
           }),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             dispatch: (command) =>
@@ -1078,8 +1328,10 @@ const runMockedSweep = (
       ),
       Layer.provide(Scheduler.layer),
     );
-    yield* body({ commands, sweeps, runId, threadId }).pipe(Effect.provide(layerWorker));
-  });
+    yield* body({ commands, sweeps, runId, threadId, keepAlive, settings }).pipe(
+      Effect.provide(layerWorker),
+    );
+  }).pipe(Effect.provide(ServerSettings.layerTest()));
 
 const commandIds = (commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>) =>
   Effect.map(Ref.get(commands), (all) => all.map((command) => command.commandId));
@@ -1106,6 +1358,27 @@ it.effect("the sweep runs every 30 seconds and sends each idle period's ping onc
         assert.equal(yield* Ref.get(sweeps), sweepsSoFar + 1);
         // The accepted ping is not sent again.
         assert.equal((yield* Ref.get(commands)).length, 1);
+      }),
+  ),
+);
+
+it.effect("the next sweep applies a lowered budget to warm and warm-then-compact threads", () =>
+  runMockedSweep(
+    () => Effect.void,
+    ({ commands, keepAlive, settings }) =>
+      Effect.gen(function* () {
+        const current = (yield* Ref.get(keepAlive))!;
+        yield* Ref.set(keepAlive, { ...current, mode: "warm", nudgeCount: 2 });
+        yield* TestClock.adjust("54 minutes");
+        yield* settings.updateSettings({ cacheKeepAliveMaxPings: 1 }).pipe(Effect.orDie);
+        yield* TestClock.adjust("1 minute");
+        expect(yield* Ref.get(commands)).toEqual([]);
+
+        yield* Ref.set(keepAlive, { ...current, mode: "warm-then-compact", nudgeCount: 2 });
+        yield* TestClock.adjust("30 seconds");
+        expect(yield* Ref.get(commands)).toMatchObject([
+          { cacheKeepAliveAction: "compact", text: "/compact" },
+        ]);
       }),
   ),
 );

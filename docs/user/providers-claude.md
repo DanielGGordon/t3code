@@ -93,41 +93,40 @@ General**; both apply to the device you set them on.
 
 ### Keep cache warm
 
-To keep a conversation's cache from lapsing at all, turn on **Keep cache warm** (the flame
-button) at the bottom of the chat, next to the access mode. In the touch / car layout it is in the
-chat header instead. About five minutes before the cache would expire, the server sends the
-thread a short ping asking Claude to reply "ok", which starts a fresh hour. The early
-start leaves room for Claude Code to restart after a long idle. It works
-with every browser closed, and the setting is saved with the thread. Hover the button
-to see when the next ping is due. Agents can turn it on or off with the
-`t3_thread_organize` tool.
+The prompt-cache button is in the composer footer of a Claude chat. In the touch / car
+layout, find it in the chat header. The button steps through three modes:
 
-Pings never interrupt a turn or a question waiting on you, and settled, snoozed and
-archived threads are skipped. If the cache has already expired, pinging waits for
-your next message, since rebuilding the cache costs the same either way. After 8
-pings in a row with no message from you (about 8 hours), keep-warm pauses; your next
-message, or clicking the button again, resumes it. Each ping is a small turn: it
-reads the whole context from the cache, so it uses some of your limits.
+1. **Keep cache warm, then compact** (violet hourglass). The default when turning it on or
+   clicking to resume a paused toggle. T3 Code pings while the budget lasts, then compacts
+   before the last cache expires.
+2. **Keep cache warm** (orange flame). Pings until the budget runs out, then pauses.
+   Sending a message starts a fresh budget.
+3. **Compact before the cache expires** (blue fold). Compacts once before expiry unless
+   you write first.
 
-Clicking the button again steps through two more modes, each in its own colour, that compact
-the conversation instead of letting its cache lapse. Compacting while the cache is still warm
-reads the old context cheaply once, and your next message starts from the small summary.
+Click once more to turn it off. Hover over the button or press and hold it on mobile to
+see when the cache expires and what happens next.
 
-- **Compact before the cache expires** (blue) sends `/compact` about five minutes before the
-  cache would expire, unless you write first. It compacts once per idle stretch; your next message
-  starts a new one.
-- **Keep cache warm, then compact** (violet) pings like keep-warm, and once the 8 pings are spent
-  compacts before the last cache expires, instead of letting it lapse.
+Each ping goes out about five minutes before expiry, asks Claude to reply "ok", and
+starts a fresh hour. Change the budget in **Settings → Threads → Usage limits → Cache keep-alive pings**
+on the environment that runs the thread. The default is 8 pings in a row without a message
+from you. If you set the budget below the number of pings already sent, the next sweep
+pauses keep-warm or compacts in the violet mode once the thread is idle and the cache is
+still live. Each ping reads the cached context and uses some of your limits.
 
-The compaction appears in the thread as a `/compact` turn sent by T3 Code, and skips a thread
-whose last turn already was a compaction. Agents pick the mode with `t3_thread_organize`
-(`compact_before_cache_expires`, `keep_cache_warm_then_compact`). On your phone, the cache-expiry
-notification from Alfred has a **Compact** button beside **Nudge**.
+Pings and compactions run with the client closed. They wait for an idle thread with a live
+cache and skip settled, snoozed, and archived threads. Automatic compaction appears as a
+`/compact` turn and skips threads whose last turn was already a compaction. In Alfred,
+the cache-expiry alert offers a **Compact** button beside **Nudge**. Agents can
+turn on the default with `enable_cache_keep_alive` in the `t3_thread_organize` tool or
+choose a mode explicitly.
 
-While the agent is babysitting background subagents with the subagent heartbeat (a
-background check-in every 15 minutes), the button shows on even if you never turned it on:
-each check-in refreshes the cache. That stops by itself once the subagents finish, so
-clicking the button then only explains this.
+While a subagent heartbeat is running, the button's details show that the heartbeat
+is keeping the cache warm. The heartbeat stops when the subagents finish.
+
+Subagent threads started with `delegate_task` are kept warm (without compacting) while their
+parent agent is, and never raise cache-expiry notices. Setting the button on a subagent thread
+yourself overrides this.
 
 ## Usage limits
 

@@ -1,3 +1,4 @@
+import { DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS } from "@t3tools/contracts";
 import type {
   OrchestrationV2CacheKeepAliveMode,
   OrchestrationV2ThreadCacheKeepAlive,
@@ -9,31 +10,18 @@ import * as DateTime from "effect/DateTime";
 
 import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
 
-// Fork: per-thread prompt-cache keep-alive. Claude keeps a conversation's
-// prompt cache for an hour after its last request; once it lapses the next
-// message re-reads the whole context uncached. With the toggle on, the server
-// sends a short ping shortly before that hour is up, which resets the clock.
-// Codex and the other providers cache for minutes, too short to keep warm.
-// Its other modes send `/compact` in that window instead of (or after) pinging.
-// The server's sweep, the orchestrator's guard and the chat header all judge
-// a thread with `cacheKeepAliveState` over the server-computed
-// `cacheKeepAliveContext` on its shell, so they cannot disagree.
-
 export const PROMPT_CACHE_TTL_MS = 60 * 60_000;
-/**
- * How long before expiry the ping goes out, so pings land 55–57 minutes after
- * the anchor. T3 releases a Claude session after 30 idle minutes, so a ping
- * first restarts Claude Code and its MCP servers: after a long idle, request to
- * first response measured p50 8 s, p90 40 s, and occasionally over a minute. A
- * ping that lands after expiry is the costliest outcome (a full cache write),
- * so the lead is generous on purpose. It also covers the anchor sitting a few
- * seconds after the request and the 30 s sweep.
- */
+// Leave time to restart Claude Code and its MCP servers after the session is released.
 export const CACHE_KEEP_ALIVE_LEAD_MS = 5 * 60_000;
-/** Pings in a row without a user message before keep-alive pauses (about 8 h). */
-export const CACHE_KEEP_ALIVE_MAX_CONSECUTIVE_NUDGES = 8;
+const DEFAULT_CACHE_KEEP_ALIVE_MODE = "warm-then-compact";
+
+// A ping reads at 0.1x input price and a cold resend rewrites the one-hour cache at 2x, so 20 pings cost one cold resend.
+export const CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS = 20;
+export const CACHE_KEEP_ALIVE_COST_WARNING =
+  "Keeping the cache warm 20x will yield zero net benefit in cost.";
 /** Shared verbatim with Alfred's manual nudge button. */
 export const CACHE_KEEP_ALIVE_NUDGE_TEXT =
+  // oxlint-disable-next-line t3code/no-em-dash-copy -- Match the provider message sent by Alfred.
   'Keep-alive ping to keep the prompt cache warm. No action needed — just reply "ok".';
 /**
  * Ping messages use `<prefix><threadId>:<runId>:<attempt>` ids, which also mark
@@ -41,18 +29,7 @@ export const CACHE_KEEP_ALIVE_NUDGE_TEXT =
  */
 export const CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX = "cache-keep-alive:";
 
-/**
- * Turn items a model response produces; the anchor is the latest one on the
- * run's root node. Checkpoints, errors, notices and bookkeeping items are
- * written by the server, often minutes later, so they do not count.
- *
- * Only the root node is read. The Claude adapter puts assistant messages and
- * most tool items on per-item child nodes (subagents, which do not touch the
- * parent's cache, are child nodes too), so in practice the anchor is the run's
- * last root `reasoning` item: measured within about 9 s of the true last
- * request. A run with no root provider item falls back to its completion time
- * when it completed, and is not pinged when it was stopped.
- */
+// Only provider items on the root node date the cache. Bookkeeping items and subagents do not touch it.
 export const CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES: ReadonlyArray<string> = [
   "assistant_message",
   "reasoning",
@@ -93,9 +70,36 @@ export type CacheKeepAliveThread = Pick<
   | "status"
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
->;
+> &
+  Partial<Pick<OrchestrationV2ThreadShell, "lineage" | "creationSource">>;
 
 export type CacheKeepAliveMode = OrchestrationV2CacheKeepAliveMode;
+type CacheKeepAliveChoice = CacheKeepAliveMode | "off";
+
+export const CACHE_KEEP_ALIVE_MODE_LABELS: Record<CacheKeepAliveChoice, string> = {
+  "warm-then-compact": "Keep cache alive, compact if I don't come back for a while",
+  warm: "Keep cache alive for a while, don't compact",
+  compact: "Compact if I'm not back before cache expires",
+  off: "Cache keep-alive is off",
+};
+
+const NEXT_CACHE_KEEP_ALIVE_CHOICE: Record<CacheKeepAliveChoice, CacheKeepAliveChoice> = {
+  off: DEFAULT_CACHE_KEEP_ALIVE_MODE,
+  "warm-then-compact": "warm",
+  warm: "compact",
+  compact: "off",
+};
+
+export function nextCacheKeepAliveChoice(
+  stored: OrchestrationV2ThreadCacheKeepAlive | null,
+  compactModes: boolean,
+  maxPings: number,
+): CacheKeepAliveChoice {
+  const current = stored?.inherited ? null : stored;
+  const active = cacheKeepAliveActive(current, maxPings);
+  if (!compactModes) return active ? "off" : "warm";
+  return NEXT_CACHE_KEEP_ALIVE_CHOICE[active ? cacheKeepAliveMode(current) : "off"];
+}
 
 /** What the toggle does; toggles saved before modes existed only ping. */
 export function cacheKeepAliveMode(
@@ -104,7 +108,10 @@ export function cacheKeepAliveMode(
   return keepAlive?.mode ?? "warm";
 }
 
-const cacheKeepAlivePings = (mode: CacheKeepAliveMode) => mode !== "compact";
+const cacheKeepAliveBudgetSpent = (
+  keepAlive: Pick<OrchestrationV2ThreadCacheKeepAlive, "pausedAt" | "nudgeCount">,
+  maxPings: number,
+) => keepAlive.pausedAt !== null || keepAlive.nudgeCount >= maxPings;
 const cacheKeepAliveCompacts = (mode: CacheKeepAliveMode) => mode !== "warm";
 
 /**
@@ -112,29 +119,42 @@ const cacheKeepAliveCompacts = (mode: CacheKeepAliveMode) => mode !== "warm";
  * that never compacts; the others still compact before the last cache lapses.
  */
 export function cacheKeepAliveActive(
-  keepAlive: Pick<OrchestrationV2ThreadCacheKeepAlive, "mode" | "pausedAt"> | null | undefined,
+  keepAlive:
+    | Pick<OrchestrationV2ThreadCacheKeepAlive, "mode" | "pausedAt" | "nudgeCount">
+    | null
+    | undefined,
+  maxPings = DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
 ): boolean {
   return (
     keepAlive != null &&
-    (keepAlive.pausedAt === null || cacheKeepAliveCompacts(cacheKeepAliveMode(keepAlive)))
+    (!cacheKeepAliveBudgetSpent(keepAlive, maxPings) ||
+      cacheKeepAliveCompacts(cacheKeepAliveMode(keepAlive)))
   );
 }
 
 /**
  * The toggle after a `thread.cache-keep-alive.set`, for the server and the
- * clients' optimistic copy. Turning it on keeps a running budget (and switching
- * the mode keeps it too) but starts a fresh one when the budget had run out.
+ * clients' optimistic copy. A mode-less enable preserves pending compaction.
  */
 export function nextCacheKeepAlive(
-  current: OrchestrationV2ThreadCacheKeepAlive | null,
+  stored: OrchestrationV2ThreadCacheKeepAlive | null,
   input: { readonly enabled: boolean; readonly mode?: CacheKeepAliveMode | undefined },
   now: OrchestrationV2ThreadCacheKeepAlive["enabledAt"],
+  maxPings = DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
 ): OrchestrationV2ThreadCacheKeepAlive | null {
   if (!input.enabled) return null;
-  const mode = input.mode ?? cacheKeepAliveMode(current);
-  if (current !== null && current.pausedAt === null) {
-    return cacheKeepAliveMode(current) === mode ? current : { ...current, mode };
+  // An explicit toggle replaces an inherited record.
+  const current = stored?.inherited ? null : stored;
+  if (
+    current !== null &&
+    (!cacheKeepAliveBudgetSpent(current, maxPings) ||
+      (input.mode === undefined && cacheKeepAliveCompacts(cacheKeepAliveMode(current))))
+  ) {
+    return input.mode === undefined || cacheKeepAliveMode(current) === input.mode
+      ? current
+      : { ...current, mode: input.mode };
   }
+  const mode = input.mode ?? DEFAULT_CACHE_KEEP_ALIVE_MODE;
   return {
     mode,
     lastCompactRunId: current?.lastCompactRunId ?? null,
@@ -178,13 +198,7 @@ export type CacheKeepAliveState =
   /** The compaction ran; nothing more happens until the user writes again. */
   | { readonly kind: "compacted" };
 
-/**
- * When a run's cache clock started, or null when it cannot be dated safely.
- * The run's last provider item marks its last request; checkpoint capture can
- * hold the completion back by minutes. Without item times only a run that ran
- * to the end is dated, by its completion. A stopped run without them may have
- * sat in a long tool call, so it is not guessed at.
- */
+// Provider items date the last request before checkpointing. Stopped runs without item times are undated.
 function cacheKeepAliveAnchorMs(
   run: NonNullable<OrchestrationV2ThreadCacheKeepAliveContext["run"]>,
 ): number | null {
@@ -201,13 +215,7 @@ export function cacheKeepAliveSupportsDriver(driver: string | null | undefined):
   return driver != null && CACHE_KEEP_ALIVE_DRIVERS.has(driver);
 }
 
-/**
- * When the thread's prompt cache lapses, whether or not keep-alive is on; null
- * when there is no live cache to count down (no turn yet on a Claude session,
- * a failed or cancelled turn that may not have refreshed it, or it already
- * lapsed). A turn in progress counts from its latest model item; before it has
- * produced one, a running turn is mid-request, so the cache is fresh.
- */
+// During the first active request, the cache is fresh until an item can date it.
 export function promptCacheExpiresAtMs(input: {
   readonly thread: Pick<CacheKeepAliveThread, "cacheKeepAliveContext">;
   readonly nowMs: number;
@@ -237,16 +245,113 @@ export function formatCacheExpiry(remainingMs: number): string {
   return minutes < 1 ? "<1m" : `${minutes}m`;
 }
 
-/** Where a thread stands for keep-alive at `nowMs`. */
+const PARENT_NOT_KEEPING_WARM: ReadonlySet<CacheKeepAliveState["kind"]> = new Set([
+  "off",
+  "paused",
+  "compacted",
+  "unsupported",
+  "parked",
+]);
+
+/**
+ * Whether a subagent thread T3 can message follows `parent`'s keep-alive: the
+ * parent's own toggle works, background work holds its turn open, or (fork)
+ * the subagent heartbeat is armed. Provider-native children never inherit.
+ */
+function cacheKeepAliveInheritsFrom(input: {
+  readonly thread: CacheKeepAliveThread;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
+  readonly nowMs: number;
+  readonly maxPings: number;
+}): boolean {
+  const { thread, parent, nowMs, maxPings } = input;
+  if (
+    parent == null ||
+    thread.lineage?.relationshipToParent !== "subagent" ||
+    thread.creationSource === "provider" ||
+    parent.archivedAt != null ||
+    parent.deletedAt != null
+  ) {
+    return false;
+  }
+  // A stored inherited record is no live toggle: grandchildren do not chain through it.
+  const parentToggle = parent.cacheKeepAlive?.inherited ? null : (parent.cacheKeepAlive ?? null);
+  return (
+    !PARENT_NOT_KEEPING_WARM.has(keepAliveStateOf(parent, parentToggle, nowMs, maxPings).kind) ||
+    parentHasRunInFlight(parent) ||
+    backgroundWorkHoldsCompletion(parent.pendingBackgroundTasks ?? []) ||
+    cacheKeptWarmByHeartbeat(parent)
+  );
+}
+
+// A parent mid-turn (e.g. waiting on a sibling) is still orchestrating; its own keep-alive ping is not.
+function parentHasRunInFlight(parent: CacheKeepAliveThread): boolean {
+  const pingRunId = parent.cacheKeepAlive?.lastNudgeRunId ?? null;
+  if (
+    pingRunId !== null &&
+    (parent.activeRunId === pingRunId || parent.cacheKeepAliveContext?.run?.id === pingRunId)
+  ) {
+    return false;
+  }
+  return (
+    parent.activeRunId !== null ||
+    parent.activityRunStatus != null ||
+    BUSY_RUN_STATUSES.has(parent.status) ||
+    parent.cacheKeepAliveContext?.hasQueuedRun === true ||
+    (parent.cacheKeepAliveContext?.run != null &&
+      BUSY_RUN_STATUSES.has(parent.cacheKeepAliveContext.run.status))
+  );
+}
+
+/** The toggle a thread is judged by: its own, else a warm one inherited from its parent. */
+export function effectiveCacheKeepAlive(input: {
+  readonly thread: CacheKeepAliveThread;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
+  readonly nowMs: number;
+  readonly maxPings: number;
+}): {
+  readonly keepAlive: OrchestrationV2ThreadCacheKeepAlive | null;
+  readonly inherited: boolean;
+} {
+  const own = input.thread.cacheKeepAlive ?? null;
+  if (own !== null && !own.inherited) return { keepAlive: own, inherited: false };
+  if (!cacheKeepAliveInheritsFrom(input)) return { keepAlive: null, inherited: false };
+  return {
+    keepAlive: own ?? {
+      mode: "warm",
+      inherited: true,
+      enabledAt: DateTime.makeUnsafe(input.nowMs),
+      nudgeCount: 0,
+      pausedAt: null,
+      lastNudgeRunId: null,
+      lastNudgeAfterRead: false,
+    },
+    inherited: true,
+  };
+}
+
+/** Where a thread stands for keep-alive at `nowMs`; pass the parent to judge a subagent thread. */
 export function cacheKeepAliveState(input: {
   readonly thread: CacheKeepAliveThread;
   readonly nowMs: number;
+  readonly maxPings: number;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
 }): CacheKeepAliveState {
-  const { thread, nowMs } = input;
-  const keepAlive = thread.cacheKeepAlive ?? null;
+  const { thread, nowMs, maxPings } = input;
+  const { keepAlive } = effectiveCacheKeepAlive(input);
+  return keepAliveStateOf(thread, keepAlive, nowMs, maxPings);
+}
+
+function keepAliveStateOf(
+  thread: CacheKeepAliveThread,
+  keepAlive: OrchestrationV2ThreadCacheKeepAlive | null,
+  nowMs: number,
+  maxPings: number,
+): CacheKeepAliveState {
   if (keepAlive === null) return { kind: "off" };
   const mode = cacheKeepAliveMode(keepAlive);
-  if (!cacheKeepAliveActive(keepAlive)) return { kind: "paused", nudgeCount: keepAlive.nudgeCount };
+  if (!cacheKeepAliveActive(keepAlive, maxPings))
+    return { kind: "paused", nudgeCount: keepAlive.nudgeCount };
   // The server adds the context with the toggle; until a client sees it, wait.
   const context = thread.cacheKeepAliveContext ?? null;
   if (context === null) return { kind: "cold" };
@@ -274,14 +379,19 @@ export function cacheKeepAliveState(input: {
   // error), so pings wait for the next real turn instead of retrying it hourly.
   const anchorMs = context.run === null ? null : cacheKeepAliveAnchorMs(context.run);
   if (context.run === null || anchorMs === null) return { kind: "cold" };
+  if (cacheKeepAliveCompacts(mode) && context.run.id === keepAlive.lastCompactRunId) {
+    return { kind: "compacted" };
+  }
   const expiresAtMs = anchorMs + PROMPT_CACHE_TTL_MS;
   // A lapsed cache is gone; a ping would only pay to rebuild it.
   if (nowMs >= expiresAtMs) return { kind: "cold" };
   if (cacheKeepAliveCompacts(mode)) {
-    if (context.run.id === keepAlive.lastCompactRunId) return { kind: "compacted" };
     // Pings come first while the budget lasts; the compaction takes the cache the last one left.
-    if (!cacheKeepAlivePings(mode) || keepAlive.pausedAt !== null) {
-      const compactAtMs = expiresAtMs - CACHE_KEEP_ALIVE_LEAD_MS;
+    if (mode === "compact" || cacheKeepAliveBudgetSpent(keepAlive, maxPings)) {
+      const compactAtMs =
+        mode === "warm-then-compact" && keepAlive.nudgeCount > maxPings
+          ? nowMs
+          : expiresAtMs - CACHE_KEEP_ALIVE_LEAD_MS;
       return {
         kind: nowMs >= compactAtMs ? "compact-due" : "compact-scheduled",
         runId: context.run.id,
@@ -300,15 +410,7 @@ export function cacheKeepAliveState(input: {
   };
 }
 
-/**
- * Fork: the maintainer's Claude Code setup babysits background subagents with
- * a heartbeat, a background `subagent-status.sh --wait` command that wakes the
- * agent every 15 minutes until the work is done (dotfiles
- * `claude/bin/subagent-status.sh`). Each wake is a request, so it keeps the
- * prompt cache warm. The roster names a background command by its Bash
- * description, or by the command itself when it has none; the dotfiles hook
- * asks for the description "Subagent heartbeat".
- */
+// Each heartbeat wake refreshes Claude's cache. The roster exposes either the description or the command.
 const SUBAGENT_HEARTBEAT_PATTERN = /subagent[- ]heartbeat|subagent-status\.sh/i;
 
 /** Whether the subagent heartbeat is armed on this thread right now. */
@@ -321,6 +423,63 @@ export function cacheKeptWarmByHeartbeat(
       task.description !== undefined &&
       SUBAGENT_HEARTBEAT_PATTERN.test(task.description),
   );
+}
+
+export function describeCacheKeepAlive(input: {
+  readonly thread: CacheKeepAliveThread;
+  readonly nowMs: number;
+  readonly maxPings: number;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
+  readonly formatTime: (ms: number) => string;
+}): ReadonlyArray<string> {
+  const { thread, maxPings, formatTime } = input;
+  const state = cacheKeepAliveState(input);
+  const status = cacheKeptWarmByHeartbeat(thread)
+    ? ["Kept warm by the subagent heartbeat"]
+    : [
+        ...(effectiveCacheKeepAlive(input).inherited ? ["Kept warm with its parent agent"] : []),
+        ...cacheKeepAliveStatus(state, maxPings, formatTime),
+      ];
+  const expiresAtMs = promptCacheExpiresAtMs(input);
+  return expiresAtMs === null ? status : [...status, `Cache expires ${formatTime(expiresAtMs)}`];
+}
+
+/** Short phrases the tooltip joins with " · "; each one stays on a single line. */
+function cacheKeepAliveStatus(
+  state: CacheKeepAliveState,
+  maxPings: number,
+  formatTime: (ms: number) => string,
+): ReadonlyArray<string> {
+  switch (state.kind) {
+    case "off":
+      return [];
+    case "paused":
+      return [
+        `Paused after ${state.nudgeCount} ${state.nudgeCount === 1 ? "ping" : "pings"}`,
+        "Send a message to resume",
+      ];
+    case "unsupported":
+      return ["No Claude session holds this conversation yet"];
+    case "parked":
+      return ["Left alone while archived, settled or snoozed"];
+    case "busy":
+      return ["Starts when this turn finishes"];
+    case "cold":
+      return ["No live cache yet; starts after the next turn"];
+    case "scheduled":
+      return [
+        `Next ping ${formatTime(state.nudgeAtMs)}`,
+        `${state.nudgeCount} of ${maxPings} sent`,
+      ];
+    case "due":
+      return ["Pinging now"];
+    case "compact-scheduled":
+      return [`Compacts around ${formatTime(state.compactAtMs)} unless you write`];
+    case "compact-due":
+      return ["Compacting now"];
+    case "compacted":
+      return ["Compacted", "Nothing more until you write"];
+  }
 }
 
 export function isCacheKeepAliveMessageId(messageId: string | undefined): boolean {

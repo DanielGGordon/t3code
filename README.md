@@ -108,41 +108,24 @@ Everything below is additive on top of upstream T3 Code. Screenshots are from a 
 
 Claude keeps a conversation's prompt cache for an hour after its last request. Once it lapses, the next message re-reads the whole context uncached, which is slower and takes a large bite out of your plan limits. On a long conversation that one message can cost more than the hour of work before it.
 
-The **flame button** at the bottom of the composer, next to the access mode, stops that from happening. (In the touch / car layout it sits beside the send button.) The server does the work, so it keeps going with every browser closed, and the setting is saved with the thread. While the cache is live the button counts down the minutes left (`60m`, `54m`, …). Hover it to see exactly when the cache expires and when the next ping or compaction is due.
-
-Click the button to step through **three modes**, each in its own color. Click once more to turn it off.
+The prompt-cache button in a Claude chat cycles through **keep warm, then compact** (violet hourglass), **keep warm** (orange flame), **compact before expiry** (blue fold), and off. The violet mode is the default. It pings while the budget lasts, then compacts before the last cache expires. Each ping starts a fresh hour. The server does the work even when every client is closed.
 
 <table>
   <tr>
-    <td width="33%"><img src="./docs/images/cache-warm.png" alt="Keep cache warm mode: orange flame button counting down 60m, with its tooltip" /></td>
-    <td width="33%"><img src="./docs/images/cache-compact.png" alt="Compact before the cache expires mode: blue button counting down 60m, with its tooltip" /></td>
-    <td width="33%"><img src="./docs/images/cache-warm-then-compact.png" alt="Keep cache warm, then compact mode: violet button counting down 60m, with its tooltip" /></td>
+    <td width="33%"><img src="./docs/images/cache-warm-then-compact.png" alt="Violet hourglass button counting down 59m, with its tooltip: Keep cache alive, compact if I don't come back for a while" /></td>
+    <td width="33%"><img src="./docs/images/cache-warm.png" alt="Orange flame button counting down 59m, with its tooltip: Keep cache alive for a while, don't compact" /></td>
+    <td width="33%"><img src="./docs/images/cache-compact.png" alt="Blue fold button counting down 59m, with its tooltip: Compact if I'm not back before cache expires" /></td>
   </tr>
   <tr>
-    <td valign="top"><b>1 · Keep cache warm</b> <sub>(orange flame)</sub></td>
-    <td valign="top"><b>2 · Compact before the cache expires</b> <sub>(blue)</sub></td>
-    <td valign="top"><b>3 · Keep cache warm, then compact</b> <sub>(violet)</sub></td>
+    <td valign="top"><sub>Keep cache alive, compact if I don't come back for a while (violet hourglass)</sub></td>
+    <td valign="top"><sub>Keep cache alive for a while, don't compact (orange flame)</sub></td>
+    <td valign="top"><sub>Compact if I'm not back before cache expires (blue fold)</sub></td>
   </tr>
 </table>
 
-**1. Keep cache warm** (orange). About five minutes before the cache would expire, the server sends the thread a short ping asking Claude to reply "ok", which starts a fresh hour. The five-minute lead leaves room for Claude Code to restart after a long idle, since a ping that lands after expiry is the most expensive outcome. After **8 pings in a row** with no message from you (about 8 hours), keep-warm pauses; your next message, or clicking the button again, resumes it. Each ping is a small turn that reads the context from the cache, so it uses a little of your limits.
-_Use it when_ you'll be back within a few hours and want the full, uncompacted context waiting for you.
+The default budget is **8 pings** in a row without a message from you. Adjust it under **Settings → Threads → Usage limits**. While the cache is live, the button shows the time left. Hover over it or press and hold on mobile for the next scheduled action.
 
-**2. Compact before the cache expires** (blue). No pings. About five minutes before the cache would expire, the server sends `/compact` while the history is still cached. The summary is cheap to make from a warm cache, and your next message starts from the small summary instead of re-reading the whole history uncached. It compacts once per idle stretch; your next message starts a new one.
-_Use it when_ you're done for now but want resuming later to be cheap.
-
-**3. Keep cache warm, then compact** (violet). Pings like mode 1 while the 8-ping budget lasts, then compacts before the last cache expires instead of letting it lapse.
-_Use it when_ you want both: the full context for a working session, and a cheap summary if you don't come back.
-
-The rules all three modes share:
-
-- Pings and compactions never interrupt a running turn or a question waiting on you. Settled, snoozed and archived threads are skipped.
-- If the cache has already expired, nothing is sent until your next message, because rebuilding the cache costs the same either way.
-- A compaction shows in the thread as a `/compact` turn sent by T3 Code. It is skipped when the thread's last turn was already a compaction.
-- Agents can pick a mode for any thread with the `t3_thread_organize` MCP tool (`keep_cache_warm`, `compact_before_cache_expires`, `keep_cache_warm_then_compact`).
-- While an agent is babysitting background subagents with a 15-minute heartbeat, the button shows as on even if you never turned it on, because each check-in refreshes the cache. That stops by itself when the subagents finish.
-
-**Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
+**Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Subagent threads started with `delegate_task` are kept warm while their parent is, and never raise these banners. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
 
 ### 🎨 Selectable color themes
 

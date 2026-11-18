@@ -5,7 +5,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { Atom } from "effect/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
 import type { AtomCommand } from "./runtime.ts";
 
@@ -67,6 +67,10 @@ export function createOptimisticThreadLifecycle(
       input: Input,
       now: DateTime.Utc,
       accepted: boolean,
+      context: {
+        readonly registry: AtomRegistry.AtomRegistry;
+        readonly environmentId: EnvironmentId;
+      },
     ) => OrchestrationV2ThreadShell,
   ): typeof command {
     return {
@@ -75,9 +79,11 @@ export function createOptimisticThreadLifecycle(
         const now = DateTime.nowUnsafe();
         const pending = pendingAtom(target.environmentId);
         const source = sourceSnapshotAtom(target.environmentId);
+        const context = { registry, environmentId: target.environmentId };
         const update: PendingThreadUpdate = {
           threadId: target.input.threadId,
-          apply: (thread) => apply(thread, target.input, now, update.sequence !== undefined),
+          apply: (thread) =>
+            apply(thread, target.input, now, update.sequence !== undefined, context),
         };
         const remove = () =>
           registry.update(pending, (current) => current.filter((item) => item !== update));

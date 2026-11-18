@@ -140,6 +140,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadCacheKeepAlive: Schema.optionalKey(Schema.Boolean),
   /** Fork: the keep-alive toggle also takes the `compact` and `warm-then-compact` modes. */
   threadCacheKeepAliveCompact: Schema.optionalKey(Schema.Boolean),
+  threadCacheKeepAliveMaxPings: Schema.optionalKey(Schema.Boolean),
   threadProjectFromScratch: Schema.optionalKey(Schema.Boolean),
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
   threadVisitedTracking: Schema.optionalKey(Schema.Boolean),

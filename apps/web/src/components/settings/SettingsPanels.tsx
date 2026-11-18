@@ -16,6 +16,9 @@ import {
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import {
+  CACHE_KEEP_ALIVE_MAX_PINGS,
+  CACHE_KEEP_ALIVE_MIN_PINGS,
+  DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   MAX_CACHE_EXPIRY_BANNER_TOKENS,
@@ -28,6 +31,10 @@ import {
   ScreenReaderAnnouncements,
   ToolCallVisibility,
 } from "@t3tools/contracts/settings";
+import {
+  CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
+  CACHE_KEEP_ALIVE_COST_WARNING,
+} from "@t3tools/shared/cacheKeepAlive";
 import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolvePastedPath } from "@t3tools/shared/path";
@@ -86,6 +93,13 @@ import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -1742,6 +1756,79 @@ function ScopedCompactIdleThreadsRow() {
   );
 }
 
+function CacheKeepAlivePingsRow() {
+  const value = useScopedSettings((settings) => settings.cacheKeepAliveMaxPings);
+  const { targets, connectedEnvironments } = useSettingsScope();
+  const mixed = useScopedSettingsMixed(["cacheKeepAliveMaxPings"]);
+  const updateSettings = useUpdateScopedSettings();
+  const [fieldRevision, setFieldRevision] = useState(0);
+  const supported = connectedEnvironments.every(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.threadCacheKeepAliveMaxPings === true,
+  );
+  const warn = targets.some(
+    (target) => target.settings.cacheKeepAliveMaxPings >= CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
+  );
+  return (
+    <SettingsRow
+      {...searchableSetting("cache-keep-alive-pings")}
+      description="About one ping per hour while you're away. Default 8."
+      serverScoped
+      settingKeys={["cacheKeepAliveMaxPings"]}
+      status={
+        !supported ? (
+          "An older selected environment cannot change the ping budget."
+        ) : warn ? (
+          <span className="text-accent-orange">{CACHE_KEEP_ALIVE_COST_WARNING}</span>
+        ) : null
+      }
+      resetAction={
+        supported && (mixed || value !== DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS) ? (
+          <SettingResetButton
+            label="cache keep-alive pings"
+            onClick={() =>
+              updateSettings({ cacheKeepAliveMaxPings: DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS })
+            }
+          />
+        ) : null
+      }
+      control={
+        <div className="w-32">
+          <NumberField
+            key={`${mixed ? "mixed" : value}:${fieldRevision}`}
+            defaultValue={mixed ? undefined : value}
+            min={CACHE_KEEP_ALIVE_MIN_PINGS}
+            max={CACHE_KEEP_ALIVE_MAX_PINGS}
+            step={1}
+            size="sm"
+            disabled={!supported}
+            onValueCommitted={(next) => {
+              if (!supported) return;
+              if (next === null || !Number.isInteger(next)) {
+                setFieldRevision((revision) => revision + 1);
+              } else if (mixed || next !== value) {
+                updateSettings(
+                  { cacheKeepAliveMaxPings: next },
+                  { onFailed: () => setFieldRevision((revision) => revision + 1) },
+                );
+              }
+            }}
+          >
+            <NumberFieldGroup>
+              <NumberFieldDecrement aria-label="Decrease cache keep-alive pings" />
+              <NumberFieldInput
+                aria-label="Cache keep-alive pings"
+                placeholder={mixed ? "Mixed" : undefined}
+              />
+              <NumberFieldIncrement aria-label="Increase cache keep-alive pings" />
+            </NumberFieldGroup>
+          </NumberField>
+        </div>
+      }
+    />
+  );
+}
+
 export function ThreadsSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -1903,6 +1990,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        {!isProjectScope ? <CacheKeepAlivePingsRow /> : null}
       </SettingsSection>
 
       {hasServerTargets ? (

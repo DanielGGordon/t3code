@@ -1469,7 +1469,17 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+export const DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS = 8;
+export const CACHE_KEEP_ALIVE_MIN_PINGS = 1;
+export const CACHE_KEEP_ALIVE_MAX_PINGS = 48;
+const CacheKeepAliveMaxPings = Schema.Int.check(
+  Schema.isBetween({ minimum: CACHE_KEEP_ALIVE_MIN_PINGS, maximum: CACHE_KEEP_ALIVE_MAX_PINGS }),
+);
+
 export const ServerSettings = Schema.Struct({
+  cacheKeepAliveMaxPings: CacheKeepAliveMaxPings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS)),
+  ),
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
@@ -1896,6 +1906,7 @@ const ModelSelectionPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  cacheKeepAliveMaxPings: Schema.optionalKey(CacheKeepAliveMaxPings),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

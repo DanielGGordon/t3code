@@ -20,6 +20,7 @@ import {
   NonNegativeInt,
   ProjectId,
 } from "@t3tools/contracts";
+import { CACHE_KEEP_ALIVE_MODE_LABELS } from "@t3tools/shared/cacheKeepAlive";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -30,8 +31,15 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
-  description:
-    "Pin, snooze, settle, archive, or mark a thread unread, or turn prompt-cache keep-alive on or off (`keep_cache_warm` pings an idle Claude thread shortly before its one-hour prompt cache expires, up to 8 pings without a user message; `compact_before_cache_expires` sends `/compact` instead, a few minutes before the cache expires; `keep_cache_warm_then_compact` pings, then compacts before the last cache expires). Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
+  description: [
+    "Pin, snooze, settle, archive, or mark a thread unread, or turn prompt-cache keep-alive on or off.",
+    "`enable_cache_keep_alive` uses `keep_cache_warm_then_compact` when off or resuming paused keep-warm.",
+    `keep_cache_warm_then_compact: ${CACHE_KEEP_ALIVE_MODE_LABELS["warm-then-compact"]}.`,
+    `keep_cache_warm: ${CACHE_KEEP_ALIVE_MODE_LABELS.warm}.`,
+    `compact_before_cache_expires: ${CACHE_KEEP_ALIVE_MODE_LABELS.compact}.`,
+    "`stop_keeping_cache_warm` turns cache keep-alive off.",
+    "Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
+  ].join(" "),
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -45,6 +53,7 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
       "archive",
       "unarchive",
       "mark_unread",
+      "enable_cache_keep_alive",
       "keep_cache_warm",
       "compact_before_cache_expires",
       "keep_cache_warm_then_compact",

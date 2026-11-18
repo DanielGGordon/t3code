@@ -650,6 +650,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "cache-keep-alive-pings",
+    title: "Cache keep-alive pings",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["claude prompt cache warm ping budget compaction"],
+  },
+  {
     id: "compact-idle-threads",
     title: "Compact idle threads",
     to: "/settings/providers",

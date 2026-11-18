@@ -1,4 +1,4 @@
-import { RunId } from "@t3tools/contracts";
+import { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -59,6 +59,26 @@ describe("dueCacheExpiryBanners", () => {
       { archivedAt: later },
       { deletedAt: later },
       { snoozedUntil: later },
+      {
+        source: {
+          ...idleThread().source,
+          lineage: {
+            rootThreadId: ThreadId.make("p"),
+            parentThreadId: ThreadId.make("p"),
+            relationshipToParent: "subagent",
+          },
+        },
+      },
+      {
+        source: {
+          ...idleThread().source,
+          delegatedFrom: {
+            environmentId: EnvironmentId.make("e"),
+            threadId: ThreadId.make("t"),
+            title: "Parent",
+          },
+        },
+      },
     ] satisfies ThreadFixtureOverrides[]) {
       expect(due([idleThread(overrides)]), JSON.stringify(overrides)).toHaveLength(0);
     }
