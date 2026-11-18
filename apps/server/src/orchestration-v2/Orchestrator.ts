@@ -6568,9 +6568,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     maxPings: number,
   ) {
     const projection = yield* getProjectionWithPendingEvents(command.threadId, events);
-    const keepAlive = projection.thread.cacheKeepAlive ?? null;
-    if (keepAlive === null) return;
     const now = yield* DateTime.now;
+    // The guard already judged the ping due, so a record-less subagent thread is following its parent.
+    const keepAlive =
+      projection.thread.cacheKeepAlive ??
+      (isProviderNativeSubagentThread(projection.thread) ||
+      projection.thread.lineage.relationshipToParent !== "subagent"
+        ? null
+        : ({
+            mode: "warm",
+            inherited: true,
+            enabledAt: now,
+            nudgeCount: 0,
+            pausedAt: null,
+            lastNudgeRunId: null,
+            lastNudgeAfterRead: false,
+          } satisfies OrchestrationV2AppThread["cacheKeepAlive"]));
+    if (keepAlive == null) return;
     const nudgeCount = keepAlive.nudgeCount + 1;
     const run = projection.runs.find((candidate) => candidate.userMessageId === command.messageId);
     // Read means visited since the kept-warm run finished (never-visited
@@ -6679,11 +6693,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const shell = yield* projectionStore
         .getThreadShell(command.threadId)
         .pipe(mapDispatchError(command));
+      const parentId =
+        shell?.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
+      const parent =
+        parentId === null
+          ? null
+          : yield* projectionStore.getThreadShell(parentId).pipe(mapDispatchError(command));
       const state =
         shell === null
           ? null
           : cacheKeepAliveState({
               thread: shell,
+              parent,
               maxPings:
                 maxPings ??
                 (yield* serverSettings.getSettings.pipe(Effect.orDie)).cacheKeepAliveMaxPings,

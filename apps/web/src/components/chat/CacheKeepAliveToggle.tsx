@@ -10,6 +10,7 @@ import {
   cacheKeepAliveActive,
   cacheKeepAliveMode,
   describeCacheKeepAlive,
+  effectiveCacheKeepAlive,
   cacheKeepAliveSupportsDriver,
   formatCacheExpiry,
   nextCacheKeepAliveChoice,
@@ -67,6 +68,7 @@ function useCacheExpiryLabel(thread: CacheKeepAliveThread | null): string | null
 
 function CacheKeepAliveTooltipText(props: {
   readonly thread: CacheKeepAliveThread;
+  readonly parent: CacheKeepAliveThread | null;
   readonly nowMs: number;
   readonly maxPings: number;
   readonly modeLabel: string;
@@ -114,14 +116,32 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   const handleOpenChange = (open: boolean) => {
     if (open) setOpenedAtMs(Date.now());
   };
+  const nowMinute = useNowMinute();
+  // A subagent thread follows its parent when the parent is loaded here.
+  const lineage = shell?.source.lineage;
+  const parentShell = useThreadShell(
+    lineage?.relationshipToParent === "subagent" && lineage.parentThreadId !== null
+      ? scopeThreadRef(environmentId, lineage.parentThreadId)
+      : null,
+  );
   const expiryLabel = useCacheExpiryLabel(shell?.source ?? null);
-  const keepAlive = shell?.source.cacheKeepAlive ?? null;
   const maxPings =
     serverConfig?.settings.cacheKeepAliveMaxPings ?? DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS;
+  const storedKeepAlive = shell?.source.cacheKeepAlive ?? null;
+  const parent = parentShell?.source ?? null;
+  const keepAlive =
+    shell === null || parent === null
+      ? storedKeepAlive
+      : effectiveCacheKeepAlive({
+          thread: shell.source,
+          parent,
+          nowMs: Date.parse(`${nowMinute}:00Z`),
+          maxPings,
+        }).keepAlive;
   const keepAliveActive = cacheKeepAliveActive(keepAlive, maxPings);
   const mode = cacheKeepAliveMode(keepAlive);
   const compactModes = serverConfig?.environment.capabilities.threadCacheKeepAliveCompact === true;
-  const next = nextCacheKeepAliveChoice(keepAlive, compactModes, maxPings);
+  const next = nextCacheKeepAliveChoice(storedKeepAlive, compactModes, maxPings);
   const handleClick = () =>
     void setCacheKeepAlive({
       environmentId,
@@ -136,7 +156,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   // shows, so it can be turned off. Where the thread stands comes from the
   // server's cacheKeepAliveContext, the same answer the server pings by.
   if (
-    keepAlive === null &&
+    storedKeepAlive === null &&
     !cacheKeepAliveSupportsDriver(
       providers?.find((provider) => provider.instanceId === thread.providerInstanceId)?.driver,
     )
@@ -200,6 +220,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
       >
         <CacheKeepAliveTooltipText
           thread={thread}
+          parent={parent}
           nowMs={openedAtMs}
           maxPings={maxPings}
           modeLabel={modeLabel}

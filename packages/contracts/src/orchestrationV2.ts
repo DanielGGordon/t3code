@@ -490,6 +490,8 @@ export const OrchestrationV2ThreadCacheKeepAlive = Schema.Struct({
    * is not news and clients do not mark the thread unread for it.
    */
   lastNudgeAfterRead: Schema.Boolean,
+  /** Written by a ping to a subagent thread that follows its parent's keep-alive; an explicit toggle never has it. */
+  inherited: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2ThreadCacheKeepAlive = typeof OrchestrationV2ThreadCacheKeepAlive.Type;
 

@@ -70,7 +70,8 @@ export type CacheKeepAliveThread = Pick<
   | "status"
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
->;
+> &
+  Partial<Pick<OrchestrationV2ThreadShell, "lineage" | "creationSource">>;
 
 export type CacheKeepAliveMode = OrchestrationV2CacheKeepAliveMode;
 type CacheKeepAliveChoice = CacheKeepAliveMode | "off";
@@ -90,10 +91,11 @@ const NEXT_CACHE_KEEP_ALIVE_CHOICE: Record<CacheKeepAliveChoice, CacheKeepAliveC
 };
 
 export function nextCacheKeepAliveChoice(
-  current: OrchestrationV2ThreadCacheKeepAlive | null,
+  stored: OrchestrationV2ThreadCacheKeepAlive | null,
   compactModes: boolean,
   maxPings: number,
 ): CacheKeepAliveChoice {
+  const current = stored?.inherited ? null : stored;
   const active = cacheKeepAliveActive(current, maxPings);
   if (!compactModes) return active ? "off" : "warm";
   return NEXT_CACHE_KEEP_ALIVE_CHOICE[active ? cacheKeepAliveMode(current) : "off"];
@@ -135,12 +137,14 @@ export function cacheKeepAliveActive(
  * clients' optimistic copy. A mode-less enable preserves pending compaction.
  */
 export function nextCacheKeepAlive(
-  current: OrchestrationV2ThreadCacheKeepAlive | null,
+  stored: OrchestrationV2ThreadCacheKeepAlive | null,
   input: { readonly enabled: boolean; readonly mode?: CacheKeepAliveMode | undefined },
   now: OrchestrationV2ThreadCacheKeepAlive["enabledAt"],
   maxPings = DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
 ): OrchestrationV2ThreadCacheKeepAlive | null {
   if (!input.enabled) return null;
+  // An explicit toggle replaces an inherited record.
+  const current = stored?.inherited ? null : stored;
   if (
     current !== null &&
     (!cacheKeepAliveBudgetSpent(current, maxPings) ||
@@ -241,14 +245,89 @@ export function formatCacheExpiry(remainingMs: number): string {
   return minutes < 1 ? "<1m" : `${minutes}m`;
 }
 
-/** Where a thread stands for keep-alive at `nowMs`. */
+const PARENT_NOT_KEEPING_WARM: ReadonlySet<CacheKeepAliveState["kind"]> = new Set([
+  "off",
+  "paused",
+  "compacted",
+  "unsupported",
+  "parked",
+]);
+
+/**
+ * Whether a subagent thread T3 can message follows `parent`'s keep-alive: the
+ * parent's own toggle works, background work holds its turn open, or (fork)
+ * the subagent heartbeat is armed. Provider-native children never inherit.
+ */
+function cacheKeepAliveInheritsFrom(input: {
+  readonly thread: CacheKeepAliveThread;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
+  readonly nowMs: number;
+  readonly maxPings: number;
+}): boolean {
+  const { thread, parent, nowMs, maxPings } = input;
+  if (
+    parent == null ||
+    thread.lineage?.relationshipToParent !== "subagent" ||
+    thread.creationSource === "provider" ||
+    parent.archivedAt != null ||
+    parent.deletedAt != null
+  ) {
+    return false;
+  }
+  return (
+    !PARENT_NOT_KEEPING_WARM.has(
+      keepAliveStateOf(parent, parent.cacheKeepAlive ?? null, nowMs, maxPings).kind,
+    ) ||
+    backgroundWorkHoldsCompletion(parent.pendingBackgroundTasks ?? []) ||
+    cacheKeptWarmByHeartbeat(parent)
+  );
+}
+
+/** The toggle a thread is judged by: its own, else a warm one inherited from its parent. */
+export function effectiveCacheKeepAlive(input: {
+  readonly thread: CacheKeepAliveThread;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
+  readonly nowMs: number;
+  readonly maxPings: number;
+}): {
+  readonly keepAlive: OrchestrationV2ThreadCacheKeepAlive | null;
+  readonly inherited: boolean;
+} {
+  const own = input.thread.cacheKeepAlive ?? null;
+  if (own !== null && !own.inherited) return { keepAlive: own, inherited: false };
+  if (!cacheKeepAliveInheritsFrom(input)) return { keepAlive: null, inherited: false };
+  return {
+    keepAlive: own ?? {
+      mode: "warm",
+      inherited: true,
+      enabledAt: DateTime.makeUnsafe(input.nowMs),
+      nudgeCount: 0,
+      pausedAt: null,
+      lastNudgeRunId: null,
+      lastNudgeAfterRead: false,
+    },
+    inherited: true,
+  };
+}
+
+/** Where a thread stands for keep-alive at `nowMs`; pass the parent to judge a subagent thread. */
 export function cacheKeepAliveState(input: {
   readonly thread: CacheKeepAliveThread;
   readonly nowMs: number;
   readonly maxPings: number;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
 }): CacheKeepAliveState {
   const { thread, nowMs, maxPings } = input;
-  const keepAlive = thread.cacheKeepAlive ?? null;
+  const { keepAlive } = effectiveCacheKeepAlive(input);
+  return keepAliveStateOf(thread, keepAlive, nowMs, maxPings);
+}
+
+function keepAliveStateOf(
+  thread: CacheKeepAliveThread,
+  keepAlive: OrchestrationV2ThreadCacheKeepAlive | null,
+  nowMs: number,
+  maxPings: number,
+): CacheKeepAliveState {
   if (keepAlive === null) return { kind: "off" };
   const mode = cacheKeepAliveMode(keepAlive);
   if (!cacheKeepAliveActive(keepAlive, maxPings))
@@ -330,13 +409,17 @@ export function describeCacheKeepAlive(input: {
   readonly thread: CacheKeepAliveThread;
   readonly nowMs: number;
   readonly maxPings: number;
+  readonly parent?: CacheKeepAliveThread | null | undefined;
   readonly formatTime: (ms: number) => string;
 }): ReadonlyArray<string> {
   const { thread, maxPings, formatTime } = input;
   const state = cacheKeepAliveState(input);
   const status = cacheKeptWarmByHeartbeat(thread)
     ? ["Kept warm by the subagent heartbeat"]
-    : cacheKeepAliveStatus(state, maxPings, formatTime);
+    : [
+        ...(effectiveCacheKeepAlive(input).inherited ? ["Kept warm with its parent agent"] : []),
+        ...cacheKeepAliveStatus(state, maxPings, formatTime),
+      ];
   const expiresAtMs = promptCacheExpiresAtMs(input);
   return expiresAtMs === null ? status : [...status, `Cache expires ${formatTime(expiresAtMs)}`];
 }

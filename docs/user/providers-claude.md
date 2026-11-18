@@ -124,6 +124,10 @@ choose a mode explicitly.
 While a subagent heartbeat is running, the button's details show that the heartbeat
 is keeping the cache warm. The heartbeat stops when the subagents finish.
 
+Subagent threads started with `delegate_task` are kept warm (without compacting) while their
+parent agent is, and never raise cache-expiry notices. Setting the button on a subagent thread
+yourself overrides this.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which

@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS, type ServerConfig } from "@t3tools/contracts";
 import {
@@ -6,6 +7,7 @@ import {
   cacheKeepAliveMode,
   cacheKeepAliveSupportsDriver,
   describeCacheKeepAlive,
+  effectiveCacheKeepAlive,
   formatCacheExpiry,
   nextCacheKeepAliveChoice,
   promptCacheExpiresAtMs,
@@ -16,6 +18,7 @@ import { Modal, Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { useNowMinuteMs } from "../../lib/clock";
+import { useThreadShell } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -37,10 +40,16 @@ export function CacheKeepAliveToggle(props: {
   const setKeepAlive = useAtomCommand(threadEnvironment.setCacheKeepAlive, "cache keep-alive");
   const { source: thread, id: threadId, environmentId } = props.thread;
   const capabilities = props.serverConfig?.environment.capabilities;
-  const keepAlive = thread.cacheKeepAlive ?? null;
+  const storedKeepAlive = thread.cacheKeepAlive ?? null;
+  // A subagent thread follows its parent when the parent is loaded here.
+  const parentShell = useThreadShell(
+    thread.lineage.relationshipToParent === "subagent" && thread.lineage.parentThreadId !== null
+      ? scopeThreadRef(environmentId, thread.lineage.parentThreadId)
+      : null,
+  );
   if (
     capabilities?.threadCacheKeepAlive !== true ||
-    (keepAlive === null &&
+    (storedKeepAlive === null &&
       !cacheKeepAliveSupportsDriver(
         props.serverConfig?.providers.find(
           (provider) => provider.instanceId === thread.providerInstanceId,
@@ -52,12 +61,17 @@ export function CacheKeepAliveToggle(props: {
 
   const maxPings =
     props.serverConfig?.settings.cacheKeepAliveMaxPings ?? DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS;
+  const parent = parentShell?.source ?? null;
+  const keepAlive =
+    parent === null
+      ? storedKeepAlive
+      : effectiveCacheKeepAlive({ thread, parent, nowMs, maxPings }).keepAlive;
   const active = cacheKeepAliveActive(keepAlive, maxPings);
   const paused = keepAlive !== null && !active;
   const mode = cacheKeepAliveMode(keepAlive);
   const label = CACHE_KEEP_ALIVE_MODE_LABELS[keepAlive === null ? "off" : mode];
   const next = nextCacheKeepAliveChoice(
-    keepAlive,
+    storedKeepAlive,
     capabilities.threadCacheKeepAliveCompact === true,
     maxPings,
   );
@@ -70,6 +84,7 @@ export function CacheKeepAliveToggle(props: {
       ? []
       : describeCacheKeepAlive({
           thread,
+          parent,
           nowMs: detailsAtMs,
           maxPings,
           formatTime: (ms) => timeFormat.format(ms),

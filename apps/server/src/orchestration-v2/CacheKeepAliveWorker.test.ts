@@ -287,10 +287,15 @@ const shellOf = (threadId: ThreadId) =>
 const pingCommand = (threadId: ThreadId) =>
   Effect.gen(function* () {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const shell = yield* shellOf(threadId);
+    const parentId =
+      shell.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
     return CacheKeepAliveWorker.cacheKeepAliveCommand(
-      yield* shellOf(threadId),
+      shell,
       now,
       DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
+      1,
+      parentId === null ? null : yield* shellOf(parentId),
     );
   });
 
@@ -993,34 +998,38 @@ it.effect("usage-limit recovery does not resume a ping that hit the limit", () =
   }).pipe(Effect.provide(layerTest)),
 );
 
+/** The real worker; `sweep` receives the registered sweep so a test can run it on demand. */
+const layerRealWorker = (sweep: Ref.Ref<Effect.Effect<void>>) =>
+  CacheKeepAliveWorker.layer.pipe(
+    Layer.provide(
+      Layer.merge(
+        ThreadManagementService.layer.pipe(
+          Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+        ),
+        Layer.mock(Scheduler.Scheduler)({
+          register: Effect.fn("CacheKeepAliveWorkerTest.register")(function* <E, R>(
+            _name: string,
+            work: Effect.Effect<void, E, R>,
+          ) {
+            const context = yield* Effect.context<R>();
+            yield* Ref.set(sweep, work.pipe(Effect.provideContext(context), Effect.orDie));
+          }),
+        }),
+      ),
+    ),
+    Layer.provide(
+      ServerSettings.layerTest({
+        providerInstances: { [instanceId]: { driver, enabled: true } },
+      }),
+    ),
+  );
+
 it.effect("the real sweep pings a due thread through the projection and the orchestrator", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:keep-alive-end-to-end");
     yield* createIdleThread(threadId);
     const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-    const layerWorker = CacheKeepAliveWorker.layer.pipe(
-      Layer.provide(
-        Layer.merge(
-          ThreadManagementService.layer.pipe(
-            Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
-          ),
-          Layer.mock(Scheduler.Scheduler)({
-            register: Effect.fn("CacheKeepAliveWorkerTest.register")(function* <E, R>(
-              _name: string,
-              work: Effect.Effect<void, E, R>,
-            ) {
-              const context = yield* Effect.context<R>();
-              yield* Ref.set(sweep, work.pipe(Effect.provideContext(context), Effect.orDie));
-            }),
-          }),
-        ),
-      ),
-      Layer.provide(
-        ServerSettings.layerTest({
-          providerInstances: { [instanceId]: { driver, enabled: true } },
-        }),
-      ),
-    );
+    const layerWorker = layerRealWorker(sweep);
     yield* Effect.gen(function* () {
       yield* TestClock.adjust("55 minutes");
       yield* yield* Ref.get(sweep);
@@ -1034,6 +1043,69 @@ it.effect("the real sweep pings a due thread through the projection and the orch
       });
     }).pipe(Effect.provide(layerWorker));
   }).pipe(Effect.provide(layerTest)),
+);
+
+/** Turns an idle Claude thread into a delegate_task child of `parentId`, with no toggle of its own. */
+const makeDelegateChild = (threadId: ThreadId, parentId: ThreadId) =>
+  Effect.gen(function* () {
+    yield* setKeepAlive(threadId, false);
+    const thread = yield* (yield* ProjectionStore.ProjectionStoreV2).getThread(threadId);
+    yield* write([
+      {
+        id: EventId.make(`event:${nextId("delegate-child")}`),
+        type: "thread.cache-keep-alive-updated",
+        threadId,
+        providerInstanceId: instanceId,
+        occurredAt: yield* DateTime.now,
+        payload: {
+          ...thread,
+          lineage: {
+            parentThreadId: parentId,
+            relationshipToParent: "subagent",
+            rootThreadId: parentId,
+          },
+        },
+      },
+    ]);
+  });
+
+it.effect(
+  "a delegate_task child is pinged while its parent keeps warm, and stops when it stops",
+  () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parentId = ThreadId.make("thread:keep-alive-parent");
+      const childId = ThreadId.make("thread:keep-alive-child");
+      yield* createIdleThread(parentId);
+      yield* createIdleThread(childId);
+      yield* makeDelegateChild(childId, parentId);
+      const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+      yield* Effect.gen(function* () {
+        yield* TestClock.adjust("55 minutes");
+        assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [childId, parentId]);
+        yield* yield* Ref.get(sweep);
+        expect(yield* keepAliveOf(childId)).toMatchObject({
+          mode: "warm",
+          inherited: true,
+          nudgeCount: 1,
+        });
+
+        // The ping's turn finishes; then the parent stops keeping warm.
+        const pingRun = (yield* projections.getThreadProjection(childId)).runs.at(-1)!;
+        yield* recordRun(pingRun, { lastRequestAt: yield* DateTime.now });
+        yield* TestClock.adjust("55 minutes");
+        yield* setKeepAlive(parentId, false);
+        assert.isNull(yield* pingCommand(childId));
+        assert.isTrue(yield* refused(forcedPing(childId, pingRun.id)));
+        yield* yield* Ref.get(sweep);
+        expect(yield* keepAliveOf(childId)).toMatchObject({ nudgeCount: 1 });
+
+        // An explicit toggle on the child wins over the parent being off.
+        yield* setKeepAlive(childId, true, "warm");
+        expect(yield* keepAliveOf(childId)).not.toHaveProperty("inherited");
+        assert.isNotNull(yield* pingCommand(childId));
+      }).pipe(Effect.provide(layerRealWorker(sweep)));
+    }).pipe(Effect.provide(layerTest)),
 );
 
 /**
@@ -1057,6 +1129,7 @@ const runMockedSweep = (
     const runId = RunId.make("run:keep-alive-sweep");
     const shell = {
       id: threadId,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
       cacheKeepAlive: {
         enabledAt: anchor,
         nudgeCount: 0,

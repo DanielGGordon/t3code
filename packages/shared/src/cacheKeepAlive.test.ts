@@ -3,6 +3,7 @@ import {
   ProviderDriverKind,
   RunId,
   RuntimeRequestId,
+  ThreadId,
   type OrchestrationV2ThreadCacheKeepAliveContext,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -329,6 +330,130 @@ describe("cacheKeptWarmByHeartbeat", () => {
     expect(
       withTasks([{ taskId: "a1", kind: "subagent", description: "Subagent heartbeat review" }]),
     ).toBe(false);
+  });
+});
+
+describe("subagent threads", () => {
+  const lineage = (relationshipToParent: "subagent" | "fork" | null) => ({
+    parentThreadId: ThreadId.make("thread:parent"),
+    relationshipToParent,
+    rootThreadId: ThreadId.make("thread:parent"),
+  });
+  const child = (overrides: Partial<CacheKeepAliveThread> = {}): CacheKeepAliveThread => ({
+    ...idle,
+    cacheKeepAlive: null,
+    lineage: lineage("subagent"),
+    creationSource: "server",
+    ...overrides,
+  });
+  const inheritedRecord = { ...idle.cacheKeepAlive!, mode: "warm" as const, inherited: true };
+  const parentOf = (overrides: Partial<CacheKeepAliveThread> = {}): CacheKeepAliveThread => ({
+    ...idle,
+    ...overrides,
+  });
+  const childState = (
+    thread: CacheKeepAliveThread,
+    parent: CacheKeepAliveThread | null,
+    maxPings = DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS,
+  ) => cacheKeepAliveState({ thread, parent, nowMs: nudgeAtMs, maxPings }).kind;
+
+  it("follows a parent whose toggle works, whatever its mode", () => {
+    expect(childState(child(), parentOf())).toBe("due");
+    expect(
+      childState(
+        child(),
+        parentOf({ cacheKeepAlive: { ...idle.cacheKeepAlive!, mode: "compact" } }),
+      ),
+    ).toBe("due");
+    // A busy or cold parent still has its toggle on.
+    expect(childState(child(), parentOf({ activeRunId: RunId.make("run:active") }))).toBe("due");
+    expect(
+      childState(child({ cacheKeepAliveContext: { ...context, run: null } }), parentOf()),
+    ).toBe("cold");
+  });
+
+  it("is off when the parent is off, paused, compacted, parked or unsupported", () => {
+    const spent = { ...idle.cacheKeepAlive!, mode: "warm" as const, pausedAt: at(lastRequestMs) };
+    for (const parent of [
+      parentOf({ cacheKeepAlive: null }),
+      parentOf({ cacheKeepAlive: spent }),
+      parentOf({
+        cacheKeepAlive: { ...idle.cacheKeepAlive!, mode: "compact", lastCompactRunId: runId },
+      }),
+      parentOf({ archivedAt: at(lastRequestMs) }),
+      parentOf({ settledOverride: "settled" }),
+      parentOf({ cacheKeepAliveContext: { ...context, driver: ProviderDriverKind.make("codex") } }),
+    ]) {
+      expect(childState(child(), parent)).toBe("off");
+      expect(childState(child({ cacheKeepAlive: inheritedRecord }), parent)).toBe("off");
+    }
+    expect(childState(child(), null)).toBe("off");
+  });
+
+  it("follows a parent still orchestrating background work or armed with the heartbeat", () => {
+    const off = { cacheKeepAlive: null };
+    expect(
+      childState(
+        child(),
+        parentOf({ ...off, pendingBackgroundTasks: [{ taskId: "a1", kind: "subagent" }] }),
+      ),
+    ).toBe("due");
+    expect(
+      childState(
+        child(),
+        parentOf({
+          ...off,
+          pendingBackgroundTasks: [
+            { taskId: "b1", kind: "command", description: "Subagent heartbeat" },
+          ],
+        }),
+      ),
+    ).toBe("due");
+    expect(
+      childState(
+        child(),
+        parentOf({
+          ...off,
+          archivedAt: at(lastRequestMs),
+          pendingBackgroundTasks: [{ taskId: "a1", kind: "subagent" }],
+        }),
+      ),
+    ).toBe("off");
+  });
+
+  it("lets an explicit toggle win and never lends to provider-native or non-subagent threads", () => {
+    const own = { ...idle.cacheKeepAlive!, mode: "compact" as const };
+    expect(childState(child({ cacheKeepAlive: own }), parentOf({ cacheKeepAlive: null }))).toBe(
+      "compact-due",
+    );
+    expect(childState(child({ creationSource: "provider" }), parentOf())).toBe("off");
+    expect(childState(child({ lineage: lineage("fork") }), parentOf())).toBe("off");
+  });
+
+  it("spends the parent-given ping budget and describes itself as kept warm", () => {
+    const sent = { ...inheritedRecord, nudgeCount: 3 };
+    expect(childState(child({ cacheKeepAlive: sent }), parentOf(), 3)).toBe("paused");
+    expect(
+      describeCacheKeepAlive({
+        thread: child({ cacheKeepAlive: sent }),
+        parent: parentOf(),
+        nowMs: nudgeAtMs,
+        maxPings: 12,
+        formatTime: () => "1:00 PM",
+      }),
+    ).toEqual(["Kept warm with its parent agent", "Pinging now", "Cache expires 1:00 PM"]);
+  });
+
+  it("replaces an inherited record when the toggle is set explicitly", () => {
+    const sent = { ...inheritedRecord, nudgeCount: 3 };
+    expect(nextCacheKeepAlive(sent, { enabled: true }, at(lastRequestMs))).toMatchObject({
+      mode: "warm-then-compact",
+      nudgeCount: 0,
+    });
+    expect(nextCacheKeepAlive(sent, { enabled: true }, at(lastRequestMs))).not.toHaveProperty(
+      "inherited",
+    );
+    expect(nextCacheKeepAliveChoice(sent, true, 12)).toBe("warm-then-compact");
   });
 });
 

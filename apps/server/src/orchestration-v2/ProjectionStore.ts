@@ -602,10 +602,9 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
   /**
-   * Fork: idle threads with keep-alive on and not out of work (a spent ping
-   * budget only ends the modes that never compact). A cheap pre-filter
-   * (few threads have it on); the caller judges each one by its shell's
-   * `cacheKeepAliveContext` with `cacheKeepAliveState`.
+   * Fork: idle threads with keep-alive on and not out of work, plus subagent
+   * threads whose parent may be keeping warm. A cheap pre-filter; the caller
+   * judges each with `cacheKeepAliveState` and the parent's shell.
    */
   readonly getCacheKeepAliveCandidates: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
@@ -4643,11 +4642,40 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           FROM orchestration_v2_projection_threads t
           WHERE t.deleted_at IS NULL
             AND t.archived_at IS NULL
-            AND json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
-            -- A spent ping budget still leaves the compaction before the last cache lapses.
             AND (
-              json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
-              OR json_extract(t.payload_json, '$.cacheKeepAlive.mode') = 'warm-then-compact'
+              (
+                json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
+                -- A spent ping budget still leaves the compaction before the last cache lapses.
+                AND (
+                  json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+                  OR json_extract(t.payload_json, '$.cacheKeepAlive.mode') = 'warm-then-compact'
+                )
+              )
+              -- A subagent thread T3 can message follows a parent that may be keeping warm.
+              OR (
+                json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                AND json_extract(t.payload_json, '$.creationSource') IS NOT 'provider'
+                AND json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+                AND EXISTS (
+                  SELECT 1 FROM orchestration_v2_projection_threads parent
+                  WHERE parent.thread_id = json_extract(t.payload_json, '$.lineage.parentThreadId')
+                    AND parent.deleted_at IS NULL
+                    AND parent.archived_at IS NULL
+                    AND (
+                      json_extract(parent.payload_json, '$.cacheKeepAlive') IS NOT NULL
+                      OR EXISTS (
+                        SELECT 1 FROM orchestration_v2_projection_runs parent_run
+                        WHERE parent_run.thread_id = parent.thread_id
+                          AND parent_run.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
+                      )
+                      OR EXISTS (
+                        SELECT 1 FROM orchestration_v2_projection_provider_threads parent_pt
+                        WHERE parent_pt.thread_id = parent.thread_id
+                          AND json_array_length(parent_pt.payload_json, '$.pendingBackgroundTasks') > 0
+                      )
+                    )
+                )
+              )
             )
             AND NOT EXISTS (
               SELECT 1 FROM orchestration_v2_projection_runs active

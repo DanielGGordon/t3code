@@ -49,8 +49,9 @@ export function cacheKeepAliveCommand(
   nowMs: number,
   maxPings: number,
   attempt = 1,
+  parent: CacheKeepAliveThread | null = null,
 ): CacheKeepAliveCommand | null {
-  const state = cacheKeepAliveState({ thread, nowMs, maxPings });
+  const state = cacheKeepAliveState({ thread, nowMs, maxPings, parent });
   if (state.kind !== "due" && state.kind !== "compact-due") return null;
   const compact = state.kind === "compact-due";
   const identity = `${compact ? "compact:" : ""}${thread.id}:${state.runId}:${attempt}`;
@@ -103,7 +104,10 @@ const makeSweep = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const shell = yield* projections.getThreadShell(threadId);
         if (shell === null) return;
-        const firstTry = cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings);
+        const parentId =
+          shell.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
+        const parent = parentId === null ? null : yield* projections.getThreadShell(parentId);
+        const firstTry = cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings, 1, parent);
         if (firstTry === null) return;
         const runId = firstTry.cacheKeepAliveOfRunId!;
         const action = firstTry.cacheKeepAliveAction;
@@ -116,7 +120,7 @@ const makeSweep = Effect.gen(function* () {
         const command =
           attempt === 1
             ? firstTry
-            : cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings, attempt)!;
+            : cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings, attempt, parent)!;
         yield* threads.dispatch(command).pipe(
           Effect.andThen(record(threadId, { runId, action, attempts: attempt, settled: true })),
           Effect.catchCause((cause) => {

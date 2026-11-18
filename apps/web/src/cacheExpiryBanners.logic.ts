@@ -1,5 +1,5 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { isDelegatedAppThread, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { cacheKeepAliveActive } from "@t3tools/shared/cacheKeepAlive";
 
 // Fork: which idle conversations are about to lose their provider prompt cache.
@@ -33,6 +33,8 @@ export function dueCacheExpiryBanners(input: {
   const due: Array<CacheExpiryBanner> = [];
   for (const thread of input.threads) {
     if (thread.deletedAt || thread.archivedAt || thread.settledAt) continue;
+    // The parent agent decides when to use a subagent; the user never needs this notice for one.
+    if (isDelegatedAppThread(thread.source)) continue;
     if (timeOf(thread.snoozedUntil) > input.nowMs) continue;
     // Keep-alive is pinging this thread, or will compact it before the cache
     // lapses. A warm toggle that has run out of pings gets the banner back.

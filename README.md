@@ -125,7 +125,7 @@ The prompt-cache button in a Claude chat cycles through **keep warm, then compac
 
 The default budget is **8 pings** in a row without a message from you. Adjust it under **Settings → Threads → Usage limits**. While the cache is live, the button shows the time left. Hover over it or press and hold on mobile for the next scheduled action.
 
-**Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
+**Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Subagent threads started with `delegate_task` are kept warm while their parent is, and never raise these banners. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
 
 ### 🎨 Selectable color themes
 
