@@ -5,6 +5,7 @@ import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/at
 import { nextPastedTextFileName } from "@t3tools/client-runtime/text-paste";
 import type { ComposerTextPaste } from "../components/ComposerEditor";
 import {
+  attachLatestComposerPhoto,
   convertPastedImagesToAttachments,
   createPastedTextComposerAttachment,
   pickComposerFiles,
@@ -69,6 +70,21 @@ export function useComposerAttachmentActions(props: {
       });
       report(
         "Could not attach photo or video",
+        result.error,
+        await append(key, signal, result.attachments, insertion),
+      );
+    });
+  };
+  const onAttachLatestPhoto = async () => {
+    const key = props.draftKey;
+    if (!key || props.locked) return;
+    const insertion = captureComposerDraftInsertion(key);
+    await withDraftOperation(key, async (signal) => {
+      const result = await attachLatestComposerPhoto({
+        existingCount: countComposerDraftAttachmentsAfterSelection(key, insertion),
+      });
+      report(
+        "Could not attach latest photo",
         result.error,
         await append(key, signal, result.attachments, insertion),
       );
@@ -145,5 +161,11 @@ export function useComposerAttachmentActions(props: {
       }
     });
   };
-  return { onPickDraftMedia, onPickDraftFiles, onNativePasteImages, onNativePasteText };
+  return {
+    onPickDraftMedia,
+    onAttachLatestPhoto,
+    onPickDraftFiles,
+    onNativePasteImages,
+    onNativePasteText,
+  };
 }
