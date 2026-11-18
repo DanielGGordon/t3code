@@ -110,7 +110,7 @@ Claude keeps a conversation's prompt cache for an hour after its last request. O
 
 The prompt-cache button in a Claude chat cycles through **keep warm, then compact** (violet hourglass), **keep warm** (orange flame), **compact before expiry** (blue fold), and off. The violet mode is the default. It pings while the budget lasts, then compacts before the last cache expires. Each ping starts a fresh hour. The server does the work even when every client is closed.
 
-The default budget is **8 pings** in a row without a message from you. Adjust it under **Settings → Threads → Prompt cache**. While the cache is live, the button shows the time left. Hover over it or press and hold on mobile for the next scheduled action.
+The default budget is **8 pings** in a row without a message from you. Adjust it under **Settings → Threads → Usage limits**. While the cache is live, the button shows the time left. Hover over it or press and hold on mobile for the next scheduled action.
 
 **Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
 

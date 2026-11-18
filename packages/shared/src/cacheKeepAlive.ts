@@ -132,8 +132,7 @@ export function cacheKeepAliveActive(
 
 /**
  * The toggle after a `thread.cache-keep-alive.set`, for the server and the
- * clients' optimistic copy. Turning it on keeps a running budget (and switching
- * the mode keeps it too) but starts a fresh one when the budget had run out.
+ * clients' optimistic copy. A mode-less enable preserves pending compaction.
  */
 export function nextCacheKeepAlive(
   current: OrchestrationV2ThreadCacheKeepAlive | null,
@@ -145,8 +144,7 @@ export function nextCacheKeepAlive(
   if (
     current !== null &&
     (!cacheKeepAliveBudgetSpent(current, maxPings) ||
-      (cacheKeepAliveCompacts(cacheKeepAliveMode(current)) &&
-        (input.mode === undefined || input.mode === cacheKeepAliveMode(current))))
+      (input.mode === undefined && cacheKeepAliveCompacts(cacheKeepAliveMode(current))))
   ) {
     return input.mode === undefined || cacheKeepAliveMode(current) === input.mode
       ? current
@@ -168,7 +166,7 @@ export type CacheKeepAliveState =
   /** The toggle is off. */
   | { readonly kind: "off" }
   /** The ping budget ran out with no message from the user. */
-  | { readonly kind: "paused" }
+  | { readonly kind: "paused"; readonly nudgeCount: number }
   /** The conversation is not on a provider with an hour-long cache. */
   | { readonly kind: "unsupported" }
   /** Archived, settled or snoozed: put away, so no pings. */
@@ -253,7 +251,8 @@ export function cacheKeepAliveState(input: {
   const keepAlive = thread.cacheKeepAlive ?? null;
   if (keepAlive === null) return { kind: "off" };
   const mode = cacheKeepAliveMode(keepAlive);
-  if (!cacheKeepAliveActive(keepAlive, maxPings)) return { kind: "paused" };
+  if (!cacheKeepAliveActive(keepAlive, maxPings))
+    return { kind: "paused", nudgeCount: keepAlive.nudgeCount };
   // The server adds the context with the toggle; until a client sees it, wait.
   const context = thread.cacheKeepAliveContext ?? null;
   if (context === null) return { kind: "cold" };
@@ -351,7 +350,7 @@ function cacheKeepAliveStatus(
     case "off":
       return "No keep-alive scheduled.";
     case "paused":
-      return `Paused after ${maxPings} pings. Send a message to resume.`;
+      return `Paused after ${state.nudgeCount} ${state.nudgeCount === 1 ? "ping" : "pings"}. Send a message to resume.`;
     case "unsupported":
       return "No Claude session holds this conversation yet.";
     case "parked":

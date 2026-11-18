@@ -7,6 +7,7 @@ import {
   WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
+  type ServerConfig,
 } from "@t3tools/contracts";
 
 import { nextCacheKeepAlive } from "@t3tools/shared/cacheKeepAlive";
@@ -81,6 +82,9 @@ export type LoadEarlierThreadHistoryInput = {
 export function createThreadEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
   snapshotAtom: (environmentId: EnvironmentId) => Atom.Atom<OrchestrationV2ShellSnapshot | null>,
+  serverConfigAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<Pick<ServerConfig, "settings"> | null>,
 ) {
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
@@ -543,11 +547,18 @@ export function createThreadEnvironmentAtoms<R, E>(
           }
         : null,
     })),
-    // Mirrors the server: on keeps a running budget, resumes a paused one.
-    setCacheKeepAlive: optimistic.wrap(commands.setCacheKeepAlive, (thread, input, now) => ({
-      ...thread,
-      cacheKeepAlive: nextCacheKeepAlive(thread.cacheKeepAlive ?? null, input, now, input.maxPings),
-    })),
+    setCacheKeepAlive: optimistic.wrap(
+      commands.setCacheKeepAlive,
+      (thread, input, now, _accepted, { registry, environmentId }) => ({
+        ...thread,
+        cacheKeepAlive: nextCacheKeepAlive(
+          thread.cacheKeepAlive ?? null,
+          input,
+          now,
+          registry.get(serverConfigAtom(environmentId))?.settings.cacheKeepAliveMaxPings,
+        ),
+      }),
+    ),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
       pinnedAt: thread.pinnedAt ?? now,

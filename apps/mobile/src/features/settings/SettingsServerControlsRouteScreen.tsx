@@ -287,6 +287,19 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
       !PROJECT_SCOPED_SERVER_SETTING_KEYS.includes(
         key as (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number],
       ));
+  const supportsPingBudget = targets.every(
+    (target) =>
+      target.environment.serverConfig.environment.capabilities.threadCacheKeepAliveMaxPings ===
+      true,
+  );
+  const showPingCostWarning = displayTargets.some(
+    (target) => target.settings.cacheKeepAliveMaxPings >= CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
+  );
+  const pingBudgetStatus = !supportsPingBudget
+    ? "An older selected environment cannot change the ping budget."
+    : showPingCostWarning
+      ? CACHE_KEEP_ALIVE_COST_WARNING
+      : undefined;
 
   return (
     <SettingsScreen title={PAGE_TITLES[props.page]} menus={[environmentMenu]}>
@@ -402,21 +415,26 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                   />
                 </SettingsSection>
-                {!projectSelected ? (
-                  <SettingsSection title="Prompt cache" footer={managed("cacheKeepAliveMaxPings")}>
-                    <CacheKeepAlivePingsInput
-                      value={uniform("cacheKeepAliveMaxPings")}
-                      disabled={disabledFor("cacheKeepAliveMaxPings")}
-                      warn={displayTargets.some(
-                        (target) =>
-                          target.settings.cacheKeepAliveMaxPings >=
-                          CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
-                      )}
-                      onCommit={(cacheKeepAliveMaxPings) => write({ cacheKeepAliveMaxPings })}
-                    />
-                  </SettingsSection>
-                ) : null}
-                <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
+                <AutoSettleSettingsRows
+                  write={write}
+                  pending={pendingWrites > 0}
+                  usageLimitRows={
+                    !projectSelected ? (
+                      <CacheKeepAlivePingsInput
+                        value={uniform("cacheKeepAliveMaxPings")}
+                        disabled={!supportsPingBudget || disabledFor("cacheKeepAliveMaxPings")}
+                        description={managedSubtitle(
+                          "cacheKeepAliveMaxPings",
+                          "About one ping per hour while you're away. Default 8.",
+                        )}
+                        status={pingBudgetStatus}
+                        onCommit={(cacheKeepAliveMaxPings) => {
+                          if (supportsPingBudget) write({ cacheKeepAliveMaxPings });
+                        }}
+                      />
+                    ) : null
+                  }
+                />
               </>
             ) : null}
 
@@ -642,11 +660,11 @@ function MixedValuesLabel(props: { readonly projectSelected: boolean }) {
   );
 }
 
-/** Locked settings are refused when saved; say so before the user tries. */
 function CacheKeepAlivePingsInput(props: {
   readonly value: number | null;
   readonly disabled: boolean;
-  readonly warn: boolean;
+  readonly description: string;
+  readonly status: string | undefined;
   readonly onCommit: (value: number) => void;
 }) {
   const [revision, setRevision] = useState(0);
@@ -655,9 +673,7 @@ function CacheKeepAlivePingsInput(props: {
       <View className="flex-row items-center gap-3">
         <View className="flex-1 gap-1">
           <Text>Cache keep-alive pings</Text>
-          <Text className="text-sm text-foreground-muted">
-            About one ping per hour while you're away. Default 8.
-          </Text>
+          <Text className="text-sm text-foreground-muted">{props.description}</Text>
         </View>
         <AppTextInput
           key={`${props.value}:${revision}`}
@@ -682,13 +698,12 @@ function CacheKeepAlivePingsInput(props: {
           }}
         />
       </View>
-      {props.warn ? (
-        <Text className="text-sm text-orange-500">{CACHE_KEEP_ALIVE_COST_WARNING}</Text>
-      ) : null}
+      {props.status ? <Text className="text-sm text-orange-500">{props.status}</Text> : null}
     </View>
   );
 }
 
+/** Locked settings are refused when saved; say so before the user tries. */
 function ManagedPolicyNotice(props: { readonly targets: readonly ScopedMobileSettingsTarget[] }) {
   const organizations = [
     ...new Set(

@@ -167,7 +167,11 @@ function environment(environmentId: string, label: string) {
         sidebarAutoSettleOnMerge: false,
       },
       environment: {
-        capabilities: { projectSettingsOverrides: true, threadAutoSettlement: true },
+        capabilities: {
+          projectSettingsOverrides: true,
+          threadAutoSettlement: true,
+          threadCacheKeepAliveMaxPings: true,
+        },
       },
     },
   };
@@ -247,5 +251,21 @@ describe("SettingsServerControlsRouteScreen", () => {
       (button) => button.textContent === "Auto-settle merged threads",
     )!;
     expect(autoSettle.disabled).toBe(true);
+  });
+
+  it("disables the ping budget when a selected server cannot store it", () => {
+    const local = environment("local", "Local");
+    const remote = environment("remote", "Remote");
+    remote.serverConfig.environment.capabilities.threadCacheKeepAliveMaxPings = false;
+    mocks.targets = [local, remote];
+    const field = () =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Cache keep-alive pings"]');
+
+    act(() => root.render(<SettingsThreadsRouteScreen />));
+    expect(field()?.disabled).toBe(true);
+
+    mocks.targets = [local];
+    act(() => root.render(<SettingsThreadsRouteScreen key="local-only" />));
+    expect(field()?.disabled).toBe(false);
   });
 });

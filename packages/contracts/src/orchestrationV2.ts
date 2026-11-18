@@ -481,7 +481,7 @@ export const OrchestrationV2ThreadCacheKeepAlive = Schema.Struct({
   enabledAt: Schema.DateTimeUtc,
   /** Pings sent since the user last wrote to the thread. */
   nudgeCount: NonNegativeInt,
-  /** Set when nudgeCount reaches the cap; a user message or re-enabling resumes. */
+  /** Records a cap reached by sending a ping. A user message or a fresh budget clears it. */
   pausedAt: Schema.NullOr(Schema.DateTimeUtc),
   /** Run the latest ping started, so clients can keep its completion quiet. */
   lastNudgeRunId: Schema.NullOr(RunId),
@@ -3278,9 +3278,9 @@ export const OrchestrationV2Command = Schema.Union([
     reason: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   }),
   /**
-   * Fork: turn the prompt-cache keep-alive on or off. Turning it on while it
-   * is paused resumes it with a fresh ping budget. `mode` picks what it does
-   * (default `warm`, or the mode it already has).
+   * Enabling from off or resuming paused `warm` starts a fresh budget and defaults to
+   * `warm-then-compact`. A running budget survives mode changes. With a spent budget,
+   * an explicit mode starts a fresh budget and omitting it preserves any pending compaction.
    */
   Schema.Struct({
     type: Schema.Literal("thread.cache-keep-alive.set"),

@@ -11,7 +11,6 @@ import {
   cacheKeepAliveMode,
   describeCacheKeepAlive,
   cacheKeepAliveSupportsDriver,
-  cacheKeptWarmByHeartbeat,
   formatCacheExpiry,
   nextCacheKeepAliveChoice,
   promptCacheExpiresAtMs,
@@ -89,11 +88,6 @@ function CacheKeepAliveTooltipText(props: {
   );
 }
 
-/**
- * Fork: the per-thread "Keep cache warm" toggle. The server sends the pings and compactions;
- * a click steps through the modes. While the subagent heartbeat is armed it reads as on.
- * `placement` picks a header toggle or a composer-footer control.
- */
 export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -112,7 +106,6 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
     if (open) setOpenedAtMs(Date.now());
   };
   const expiryLabel = useCacheExpiryLabel(shell?.source ?? null);
-  const heartbeat = shell !== null && cacheKeptWarmByHeartbeat(shell.source);
   const keepAlive = shell?.source.cacheKeepAlive ?? null;
   const maxPings =
     serverConfig?.settings.cacheKeepAliveMaxPings ?? DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS;
@@ -124,9 +117,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
     void setCacheKeepAlive({
       environmentId,
       input:
-        next === "off"
-          ? { threadId, enabled: false }
-          : { threadId, enabled: true, mode: next, maxPings },
+        next === "off" ? { threadId, enabled: false } : { threadId, enabled: true, mode: next },
     });
   if (shell === null || serverConfig?.environment.capabilities.threadCacheKeepAlive !== true) {
     return null;
@@ -143,10 +134,8 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   ) {
     return null;
   }
-  const paused = keepAlive !== null && !keepAliveActive && !heartbeat;
-  // Paused reads as not pressed: pressing it resumes with a fresh budget.
-  const pressed = heartbeat || keepAliveActive;
-  const style = MODES[keepAliveActive ? mode : "warm"];
+  const paused = keepAlive !== null && !keepAliveActive;
+  const style = MODES[keepAlive === null && next !== "off" ? next : mode];
   const Icon = paused ? CirclePauseIcon : style.icon;
   const modeLabel = CACHE_KEEP_ALIVE_MODE_LABELS[keepAlive === null ? "off" : mode];
   const label = `${modeLabel}${expiryLabel === null ? "" : `, cache expires in ${expiryLabel}`}`;
@@ -158,7 +147,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             <ComposerControl
               size={props.composerSize ?? "sm"}
               className={style.composerClassName}
-              aria-pressed={pressed}
+              aria-pressed={keepAliveActive}
               aria-label={label}
               disabled={!canOperateThread}
               onClick={handleClick}
@@ -166,7 +155,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
           ) : (
             <Toggle
               className="shrink-0 touch:h-12 touch:min-w-12 max-md:touch:h-10 max-md:touch:min-w-10"
-              pressed={pressed}
+              pressed={keepAliveActive}
               onPressedChange={handleClick}
               disabled={!canOperateThread}
               aria-label={label}
@@ -181,7 +170,7 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
             <ComposerControlIcon
               icon={Icon}
               size={props.composerSize ?? "sm"}
-              className={pressed ? style.iconClassName : undefined}
+              className={keepAliveActive ? style.iconClassName : undefined}
             />
             {expiryLabel !== null ? <span className="tabular-nums">{expiryLabel}</span> : null}
           </>

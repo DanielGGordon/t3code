@@ -1758,10 +1758,14 @@ function ScopedCompactIdleThreadsRow() {
 
 function CacheKeepAlivePingsRow() {
   const value = useScopedSettings((settings) => settings.cacheKeepAliveMaxPings);
-  const { targets } = useSettingsScope();
+  const { targets, connectedEnvironments } = useSettingsScope();
   const mixed = useScopedSettingsMixed(["cacheKeepAliveMaxPings"]);
   const updateSettings = useUpdateScopedSettings();
   const [fieldRevision, setFieldRevision] = useState(0);
+  const supported = connectedEnvironments.every(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.threadCacheKeepAliveMaxPings === true,
+  );
   const warn = targets.some(
     (target) => target.settings.cacheKeepAliveMaxPings >= CACHE_KEEP_ALIVE_BREAK_EVEN_PINGS,
   );
@@ -1772,10 +1776,14 @@ function CacheKeepAlivePingsRow() {
       serverScoped
       settingKeys={["cacheKeepAliveMaxPings"]}
       status={
-        warn ? <span className="text-accent-orange">{CACHE_KEEP_ALIVE_COST_WARNING}</span> : null
+        !supported ? (
+          "An older selected environment cannot change the ping budget."
+        ) : warn ? (
+          <span className="text-accent-orange">{CACHE_KEEP_ALIVE_COST_WARNING}</span>
+        ) : null
       }
       resetAction={
-        mixed || value !== DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS ? (
+        supported && (mixed || value !== DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS) ? (
           <SettingResetButton
             label="cache keep-alive pings"
             onClick={() =>
@@ -1793,7 +1801,9 @@ function CacheKeepAlivePingsRow() {
             max={CACHE_KEEP_ALIVE_MAX_PINGS}
             step={1}
             size="sm"
+            disabled={!supported}
             onValueCommitted={(next) => {
+              if (!supported) return;
               if (next === null || !Number.isInteger(next)) {
                 setFieldRevision((revision) => revision + 1);
               } else if (mixed || next !== value) {
@@ -1947,12 +1957,6 @@ export function ThreadsSettingsPanel() {
         </SettingsSection>
       ) : null}
 
-      {!isProjectScope ? (
-        <SettingsSection id="prompt-cache" title="Prompt cache">
-          <CacheKeepAlivePingsRow />
-        </SettingsSection>
-      ) : null}
-
       <SettingsSection id="usage-limits" title="Usage limits">
         <SettingsRow
           serverScoped
@@ -1986,6 +1990,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        {!isProjectScope ? <CacheKeepAlivePingsRow /> : null}
       </SettingsSection>
 
       {hasServerTargets ? (

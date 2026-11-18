@@ -57,8 +57,13 @@ const adapter = {
   openSession: () => Effect.die("No provider process needed for keep-alive tests"),
 } as ProviderAdapter.ProviderAdapterV2["Service"];
 const layerDatabase = SqlitePersistence.layerMemory;
+const layerSettings = ServerSettings.layerTest({
+  responseStreamingMode: "turn",
+  providerInstances: { [instanceId]: { driver, enabled: true } },
+}).pipe(Layer.orDie);
 const layerTest = Layer.mergeAll(
   layerDatabase,
+  layerSettings,
   ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
   EventStore.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
@@ -67,7 +72,7 @@ const layerTest = Layer.mergeAll(
     {
       databaseLayer: layerDatabase,
       runEffectWorker: false,
-      providerInstances: { [instanceId]: { driver, enabled: true } },
+      serverSettingsLayer: layerSettings,
     },
   ),
 );
@@ -743,37 +748,46 @@ it.effect("pauses after the ping budget; the user's next message or the toggle r
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const settings = yield* ServerSettings.ServerSettingsService;
     const threadId = ThreadId.make("thread:keep-alive-cap");
     yield* createIdleThread(threadId);
     yield* setKeepAlive(threadId, true, "warm");
-    for (let sent = 1; sent <= DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS; sent++) {
-      yield* TestClock.adjust("55 minutes");
-      yield* pingAndFinish(threadId);
-      assert.equal((yield* keepAliveOf(threadId))?.nudgeCount, sent);
-    }
-    const paused = (yield* keepAliveOf(threadId))!;
-    assert.isNotNull(paused.pausedAt);
+    yield* settings.updateSettings({ cacheKeepAliveMaxPings: 3 });
     yield* TestClock.adjust("55 minutes");
-    assert.isNull(yield* pingCommand(threadId));
-    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
+    yield* pingAndFinish(threadId);
+    yield* TestClock.adjust("55 minutes");
+    const secondPing = yield* pingAndFinish(threadId);
+    expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 2, pausedAt: null });
 
-    // Turning it on again resumes with a fresh budget...
+    yield* settings.updateSettings({ cacheKeepAliveMaxPings: 2 });
+    yield* TestClock.adjust("55 minutes");
+    const error = yield* orchestrator
+      .dispatch(forcedPing(threadId, secondPing.id))
+      .pipe(Effect.flip);
+    expect(error).toMatchObject({
+      _tag: "OrchestratorDispatchError",
+      cause: { _tag: "OrchestratorCacheKeepAliveRefusal", runId: secondPing.id },
+    });
     yield* setKeepAlive(threadId, true);
     expect(yield* keepAliveOf(threadId)).toMatchObject({
       mode: "warm-then-compact",
       nudgeCount: 0,
       pausedAt: null,
-      lastNudgeRunId: paused.lastNudgeRunId,
+      lastNudgeRunId: secondPing.id,
     });
-    // ...and so does the user's next message.
+
     yield* setKeepAlive(threadId, true, "warm");
-    for (let sent = 1; sent <= DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS; sent++) {
+    for (let sent = 1; sent <= 2; sent++) {
       const run = (yield* projections.getThreadProjection(threadId)).runs.at(-1)!;
       yield* recordRun(run, { lastRequestAt: yield* DateTime.now });
       yield* TestClock.adjust("55 minutes");
       yield* pingAndFinish(threadId);
     }
-    assert.isNotNull((yield* keepAliveOf(threadId))?.pausedAt ?? null);
+    expect(yield* keepAliveOf(threadId)).toMatchObject({
+      nudgeCount: 2,
+      pausedAt: expect.anything(),
+    });
+    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
     yield* orchestrator.dispatch(userMessage(threadId));
     expect(yield* keepAliveOf(threadId)).toMatchObject({ nudgeCount: 0, pausedAt: null });
   }).pipe(Effect.provide(layerTest)),

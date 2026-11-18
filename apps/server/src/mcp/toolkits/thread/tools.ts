@@ -32,13 +32,13 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description: [
-    "Organize a thread or manage Claude's prompt cache. Omit threadId for this thread. snooze needs snoozedUntil.",
-    "enable_cache_keep_alive uses keep_cache_warm_then_compact when off.",
+    "Pin, snooze, settle, archive, or mark a thread unread, or turn prompt-cache keep-alive on or off.",
+    "`enable_cache_keep_alive` uses `keep_cache_warm_then_compact` when off or resuming paused keep-warm.",
     `keep_cache_warm_then_compact: ${CACHE_KEEP_ALIVE_MODE_LABELS["warm-then-compact"]}.`,
     `keep_cache_warm: ${CACHE_KEEP_ALIVE_MODE_LABELS.warm}.`,
     `compact_before_cache_expires: ${CACHE_KEEP_ALIVE_MODE_LABELS.compact}.`,
-    `stop_keeping_cache_warm: ${CACHE_KEEP_ALIVE_MODE_LABELS.off}.`,
-    "Self-settle waits for turn end. Failure or queued messages leave it active.",
+    "`stop_keeping_cache_warm` turns cache keep-alive off.",
+    "Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
   ].join(" "),
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,

@@ -5,7 +5,6 @@ import {
   cacheKeepAliveActive,
   cacheKeepAliveMode,
   cacheKeepAliveSupportsDriver,
-  cacheKeptWarmByHeartbeat,
   describeCacheKeepAlive,
   formatCacheExpiry,
   nextCacheKeepAliveChoice,
@@ -54,16 +53,15 @@ export function CacheKeepAliveToggle(props: {
   const maxPings =
     props.serverConfig?.settings.cacheKeepAliveMaxPings ?? DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS;
   const active = cacheKeepAliveActive(keepAlive, maxPings);
-  const heartbeat = cacheKeptWarmByHeartbeat(thread);
-  const paused = keepAlive !== null && !active && !heartbeat;
+  const paused = keepAlive !== null && !active;
   const mode = cacheKeepAliveMode(keepAlive);
-  const { name, tint } = MODE_ICONS[mode];
   const label = CACHE_KEEP_ALIVE_MODE_LABELS[keepAlive === null ? "off" : mode];
   const next = nextCacheKeepAliveChoice(
     keepAlive,
     capabilities.threadCacheKeepAliveCompact === true,
     maxPings,
   );
+  const { name, tint } = MODE_ICONS[keepAlive === null && next !== "off" ? next : mode];
   const expiry = promptCacheExpiresAtMs({ thread, nowMs });
   const countdown = expiry === null ? null : formatCacheExpiry(expiry - nowMs);
   const closeDetails = () => setDetailsAtMs(null);
@@ -74,7 +72,7 @@ export function CacheKeepAliveToggle(props: {
         accessibilityRole="togglebutton"
         accessibilityLabel={countdown === null ? label : `${label}, cache expires in ${countdown}`}
         accessibilityHint={next === "off" ? "Turn off" : CACHE_KEEP_ALIVE_MODE_LABELS[next]}
-        accessibilityState={{ checked: active || heartbeat, disabled: props.disabled }}
+        accessibilityState={{ checked: active, disabled: props.disabled }}
         className="h-11 min-w-11 flex-row items-center justify-center gap-1 rounded-xl px-1 active:bg-subtle"
         onLongPress={() => setDetailsAtMs(Date.now())}
         onPress={() => {
@@ -84,13 +82,13 @@ export function CacheKeepAliveToggle(props: {
             input:
               next === "off"
                 ? { threadId, enabled: false }
-                : { threadId, enabled: true, mode: next, maxPings },
+                : { threadId, enabled: true, mode: next },
           });
         }}
       >
         <SymbolView
           name={paused ? "pause.circle" : name}
-          tintColorClassName={active || heartbeat ? tint : "accent-icon-muted"}
+          tintColorClassName={active ? tint : "accent-icon-muted"}
           size={18}
           type="monochrome"
         />

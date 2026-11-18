@@ -93,7 +93,8 @@ General**; both apply to the device you set them on.
 
 ### Keep cache warm
 
-Use the prompt-cache button in a Claude chat to step through three modes in this order:
+The prompt-cache button is in the composer footer of a Claude chat. In the touch / car
+layout, find it in the chat header. The button steps through three modes:
 
 1. **Keep cache warm, then compact** (violet hourglass). The default when turning it on or
    clicking to resume a paused toggle. T3 Code pings while the budget lasts, then compacts
@@ -107,7 +108,7 @@ Click once more to turn it off. Hover over the button or press and hold it on mo
 see when the cache expires and what happens next.
 
 Each ping goes out about five minutes before expiry, asks Claude to reply "ok", and
-starts a fresh hour. Change the budget in **Settings → Threads → Prompt cache → Cache keep-alive pings**
+starts a fresh hour. Change the budget in **Settings → Threads → Usage limits → Cache keep-alive pings**
 on the environment that runs the thread. The default is 8 pings in a row without a message
 from you. If you set the budget below the number of pings already sent, the next sweep
 pauses keep-warm or compacts in the violet mode once the thread is idle and the cache is
@@ -115,12 +116,13 @@ still live. Each ping reads the cached context and uses some of your limits.
 
 Pings and compactions run with the client closed. They wait for an idle thread with a live
 cache and skip settled, snoozed, and archived threads. Automatic compaction appears as a
-`/compact` turn and skips threads whose last turn was already a compaction. Agents can
+`/compact` turn and skips threads whose last turn was already a compaction. In Alfred,
+the cache-expiry alert offers a **Compact** button beside **Nudge**. Agents can
 turn on the default with `enable_cache_keep_alive` in the `t3_thread_organize` tool or
 choose a mode explicitly.
 
-While the agent is babysitting background subagents with a heartbeat, the button shows
-that the cache is being kept warm. The heartbeat stops when the subagents finish.
+While a subagent heartbeat is running, the button's details show that the heartbeat
+is keeping the cache warm. The heartbeat stops when the subagents finish.
 
 ## Usage limits
 

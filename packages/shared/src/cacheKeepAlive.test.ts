@@ -14,6 +14,7 @@ import {
   cacheKeepAliveActive,
   cacheKeepAliveState,
   cacheKeptWarmByHeartbeat,
+  describeCacheKeepAlive,
   formatCacheExpiry,
   isCacheKeepAliveMessageId,
   nextCacheKeepAlive,
@@ -117,7 +118,18 @@ describe("cacheKeepAliveState", () => {
     expect(stateOf({ cacheKeepAlive: null }).kind).toBe("off");
     expect(
       stateOf({ cacheKeepAlive: { ...idle.cacheKeepAlive!, pausedAt: at(lastRequestMs) } }),
-    ).toEqual({ kind: "paused" });
+    ).toEqual({ kind: "paused", nudgeCount: 2 });
+    expect(
+      describeCacheKeepAlive({
+        thread: {
+          ...idle,
+          cacheKeepAlive: { ...idle.cacheKeepAlive!, pausedAt: at(lastRequestMs) },
+        },
+        nowMs: nudgeAtMs,
+        maxPings: 12,
+        formatTime: () => "1:00 PM",
+      }),
+    ).toBe("Paused after 2 pings. Send a message to resume. · Cache expires 1:00 PM");
     expect(
       stateOf({ cacheKeepAliveContext: { ...context, driver: ProviderDriverKind.make("codex") } })
         .kind,
@@ -252,6 +264,10 @@ describe("nextCacheKeepAlive", () => {
     expect(nextCacheKeepAlive(on, { enabled: true }, now)).toBe(on);
     const spentCombined = { ...on, mode: "warm-then-compact" as const };
     expect(nextCacheKeepAliveChoice(spentCombined, true, 1)).toBe("warm");
+    expect(nextCacheKeepAlive(spentCombined, { enabled: true }, now, 1)).toBe(spentCombined);
+    expect(
+      nextCacheKeepAlive(spentCombined, { enabled: true, mode: "warm-then-compact" }, now, 1),
+    ).toMatchObject({ mode: "warm-then-compact", nudgeCount: 0 });
     expect(
       nextCacheKeepAlive(spentCombined, { enabled: true, mode: "warm" }, now, 1),
     ).toMatchObject({ mode: "warm", nudgeCount: 0 });
