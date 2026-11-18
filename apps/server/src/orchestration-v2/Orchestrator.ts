@@ -7012,8 +7012,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // also resumes keep-alive if the budget had run out. A message steered
     // into a ping's run makes it real work, so it is no longer quiet.
     const keepAlive = projection.thread.cacheKeepAlive ?? null;
+    // A message from the parent agent restarts an inherited child's budget the same way.
+    const fromParent =
+      keepAlive?.inherited === true &&
+      projection.thread.lineage.relationshipToParent === "subagent" &&
+      command.senderThreadId !== undefined &&
+      command.senderThreadId === projection.thread.lineage.parentThreadId;
     if (
-      isUserActivity(command) &&
+      (isUserActivity(command) || fromParent) &&
       keepAlive !== null &&
       (keepAlive.nudgeCount > 0 ||
         keepAlive.pausedAt !== null ||

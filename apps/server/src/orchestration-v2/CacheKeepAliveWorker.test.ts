@@ -1094,6 +1094,9 @@ it.effect(
         const pingRun = (yield* projections.getThreadProjection(childId)).runs.at(-1)!;
         yield* recordRun(pingRun, { lastRequestAt: yield* DateTime.now });
         yield* TestClock.adjust("55 minutes");
+        // The parent's own ping turn is over too, so only its toggle is left to keep the child warm.
+        const parentPing = (yield* projections.getThreadProjection(parentId)).runs.at(-1)!;
+        yield* recordRun(parentPing, { lastRequestAt: yield* DateTime.now });
         yield* setKeepAlive(parentId, false);
         assert.isNull(yield* pingCommand(childId));
         assert.isTrue(yield* refused(forcedPing(childId, pingRun.id)));
@@ -1106,6 +1109,148 @@ it.effect(
         assert.isNotNull(yield* pingCommand(childId));
       }).pipe(Effect.provide(layerRealWorker(sweep)));
     }).pipe(Effect.provide(layerTest)),
+);
+
+/** An idle parent (toggle off) and a delegate child with a live cache. */
+const parentAndChild = (parentId: ThreadId, childId: ThreadId) =>
+  Effect.gen(function* () {
+    const parentRun = yield* createIdleThread(parentId);
+    yield* setKeepAlive(parentId, false);
+    yield* createIdleThread(childId);
+    yield* makeDelegateChild(childId, parentId);
+    return parentRun;
+  });
+
+it.effect("a delegate child stays warm while its parent waits on a running sibling", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const parentId = ThreadId.make("thread:keep-alive-sibling-parent");
+    const childId = ThreadId.make("thread:keep-alive-sibling-child");
+    const parentRun = yield* parentAndChild(parentId, childId);
+    // The parent delegated a second task in the background: an app-owned subagent item on its settled run.
+    const now = yield* DateTime.now;
+    yield* write([
+      {
+        id: EventId.make(`event:${nextId("sibling")}`),
+        type: "turn-item.updated",
+        threadId: parentId,
+        runId: parentRun.id,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: TurnItemId.make(nextId("sibling-item")),
+          threadId: parentId,
+          runId: parentRun.id,
+          nodeId: NodeId.make(`node:${parentId}:sibling`),
+          providerThreadId: parentRun.providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 99,
+          status: "running",
+          title: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+          type: "subagent",
+          subagentId: NodeId.make("subagent:sibling"),
+          origin: "app_owned",
+          driver,
+          providerInstanceId: instanceId,
+          childThreadId: null,
+          prompt: "Work.",
+          result: null,
+        },
+      },
+    ]);
+    assert.isAbove((yield* shellOf(parentId)).pendingBackgroundTasks?.length ?? 0, 0);
+    const sweep = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    yield* Effect.gen(function* () {
+      yield* TestClock.adjust("55 minutes");
+      assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), [childId]);
+      yield* yield* Ref.get(sweep);
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+    }).pipe(Effect.provide(layerRealWorker(sweep)));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
+  "a delegate child follows a parent mid-turn, and the guard needs the parent to accept",
+  () =>
+    Effect.gen(function* () {
+      const parentId = ThreadId.make("thread:keep-alive-busy-parent");
+      const childId = ThreadId.make("thread:keep-alive-busy-child");
+      yield* parentAndChild(parentId, childId);
+      const parentRun = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
+        parentId,
+      )).runs.at(-1)!;
+      yield* TestClock.adjust("55 minutes");
+      // The parent is quiet and has no toggle: the child is off.
+      assert.isNull(yield* pingCommand(childId));
+      assert.isTrue(yield* refused(forcedPing(childId, runIdOf(yield* shellOf(childId)))));
+      yield* write([runUpdated({ ...parentRun, status: "running", completedAt: null })]);
+      assert.isNotNull(yield* pingCommand(childId));
+      // The guard judges by the parent too: a forced ping is accepted only now.
+      assert.isFalse(yield* refused(forcedPing(childId, runIdOf(yield* shellOf(childId)))));
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+    }).pipe(Effect.provide(layerTest)),
+);
+
+const runIdOf = (shell: OrchestrationV2ThreadShell) => shell.cacheKeepAliveContext!.run!.id;
+
+it.effect(
+  "a parent message restarts an inherited child's count; an explicit off returns to inheriting",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const parentId = ThreadId.make("thread:keep-alive-msg-parent");
+      const childId = ThreadId.make("thread:keep-alive-msg-child");
+      yield* createIdleThread(parentId);
+      yield* createIdleThread(childId);
+      yield* makeDelegateChild(childId, parentId);
+      yield* TestClock.adjust("55 minutes");
+      yield* pingAndFinish(childId);
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 1 });
+
+      yield* orchestrator.dispatch({
+        ...sendMessage(childId, { createdBy: "agent", creationSource: "mcp" }),
+        senderThreadId: parentId,
+      });
+      expect(yield* keepAliveOf(childId)).toMatchObject({ inherited: true, nudgeCount: 0 });
+
+      yield* setKeepAlive(childId, true, "compact");
+      expect(yield* keepAliveOf(childId)).not.toHaveProperty("inherited");
+      yield* setKeepAlive(childId, false);
+      assert.isNull(yield* keepAliveOf(childId));
+      expect((yield* shellOf(childId)).cacheKeepAlive ?? null).toBeNull();
+      yield* TestClock.adjust("55 minutes");
+      const run = (yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
+        childId,
+      )).runs.at(-1)!;
+      yield* recordRun(run, { lastRequestAt: yield* DateTime.now });
+      yield* TestClock.adjust("55 minutes");
+      assert.isNotNull(yield* pingCommand(childId));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("an archived parent stops an inherited child", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const parentId = ThreadId.make("thread:keep-alive-archived-parent");
+    const childId = ThreadId.make("thread:keep-alive-archived-child");
+    yield* createIdleThread(parentId);
+    yield* createIdleThread(childId);
+    yield* makeDelegateChild(childId, parentId);
+    yield* TestClock.adjust("55 minutes");
+    assert.isNotNull(yield* pingCommand(childId));
+    yield* (yield* Orchestrator.OrchestratorV2).dispatch({
+      type: "thread.archive",
+      commandId: CommandId.make(nextId("archive")),
+      threadId: parentId,
+    });
+    assert.isNull(yield* pingCommand(childId));
+    assert.deepEqual(yield* projections.getCacheKeepAliveCandidates(), []);
+  }).pipe(Effect.provide(layerTest)),
 );
 
 /**

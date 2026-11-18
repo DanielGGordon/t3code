@@ -130,8 +130,8 @@ export const CacheKeepAliveToggle = memo(function CacheKeepAliveToggle(props: {
   const storedKeepAlive = shell?.source.cacheKeepAlive ?? null;
   const parent = parentShell?.source ?? null;
   const keepAlive =
-    shell === null || parent === null
-      ? storedKeepAlive
+    shell === null
+      ? null
       : effectiveCacheKeepAlive({
           thread: shell.source,
           parent,

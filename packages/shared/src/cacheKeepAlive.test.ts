@@ -421,6 +421,30 @@ describe("subagent threads", () => {
     ).toBe("off");
   });
 
+  it("follows a parent that is mid-turn or queued, but not through a parent's inherited record", () => {
+    const off = { cacheKeepAlive: null };
+    expect(childState(child(), parentOf({ ...off, activeRunId: RunId.make("run:active") }))).toBe(
+      "due",
+    );
+    expect(
+      childState(
+        child(),
+        parentOf({ ...off, cacheKeepAliveContext: { ...context, hasQueuedRun: true } }),
+      ),
+    ).toBe("due");
+    expect(childState(child(), parentOf({ cacheKeepAlive: inheritedRecord }))).toBe("off");
+    expect(
+      childState(
+        child(),
+        parentOf({ cacheKeepAlive: inheritedRecord, activeRunId: RunId.make("run:active") }),
+      ),
+    ).toBe("due");
+  });
+
+  it("never lends to a delegated-only thread without subagent lineage", () => {
+    expect(childState(child({ lineage: lineage(null) }), parentOf())).toBe("off");
+  });
+
   it("lets an explicit toggle win and never lends to provider-native or non-subagent threads", () => {
     const own = { ...idle.cacheKeepAlive!, mode: "compact" as const };
     expect(childState(child({ cacheKeepAlive: own }), parentOf({ cacheKeepAlive: null }))).toBe(

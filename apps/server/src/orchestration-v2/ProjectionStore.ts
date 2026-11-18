@@ -91,6 +91,7 @@ import {
   CACHE_KEEP_ALIVE_MESSAGE_ID_PREFIX,
   CACHE_KEEP_ALIVE_PROVIDER_ITEM_TYPES,
   cacheKeepAliveSupportsDriver,
+  PROMPT_CACHE_TTL_MS,
 } from "@t3tools/shared/cacheKeepAlive";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -603,8 +604,8 @@ export interface ProjectionStoreV2Shape {
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
   /**
    * Fork: idle threads with keep-alive on and not out of work, plus subagent
-   * threads whose parent may be keeping warm. A cheap pre-filter; the caller
-   * judges each with `cacheKeepAliveState` and the parent's shell.
+   * threads with a live cache. A cheap pre-filter; the caller judges each
+   * with `cacheKeepAliveState` and the parent's shell.
    */
   readonly getCacheKeepAliveCandidates: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
@@ -4637,6 +4638,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     const getCacheKeepAliveCandidates = Effect.fn("ProjectionStore.getCacheKeepAliveCandidates")(
       function* () {
+        const cutoff = DateTime.formatIso(
+          DateTime.subtract(yield* DateTime.now, { milliseconds: PROMPT_CACHE_TTL_MS }),
+        );
         const rows = yield* sql<{ readonly thread_id: string }>`
           SELECT t.thread_id
           FROM orchestration_v2_projection_threads t
@@ -4645,35 +4649,34 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND (
               (
                 json_extract(t.payload_json, '$.cacheKeepAlive') IS NOT NULL
+                AND json_extract(t.payload_json, '$.cacheKeepAlive.inherited') IS NOT 1
                 -- A spent ping budget still leaves the compaction before the last cache lapses.
                 AND (
                   json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
                   OR json_extract(t.payload_json, '$.cacheKeepAlive.mode') = 'warm-then-compact'
                 )
               )
-              -- A subagent thread T3 can message follows a parent that may be keeping warm.
+              -- A subagent thread T3 can message may follow its parent. Whether it does
+              -- is decided from the parent's shell; here only its own cache must be live.
               OR (
                 json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
                 AND json_extract(t.payload_json, '$.creationSource') IS NOT 'provider'
                 AND json_extract(t.payload_json, '$.cacheKeepAlive.pausedAt') IS NULL
+                AND (
+                  json_extract(t.payload_json, '$.cacheKeepAlive') IS NULL
+                  OR json_extract(t.payload_json, '$.cacheKeepAlive.inherited') = 1
+                )
                 AND EXISTS (
                   SELECT 1 FROM orchestration_v2_projection_threads parent
                   WHERE parent.thread_id = json_extract(t.payload_json, '$.lineage.parentThreadId')
                     AND parent.deleted_at IS NULL
                     AND parent.archived_at IS NULL
-                    AND (
-                      json_extract(parent.payload_json, '$.cacheKeepAlive') IS NOT NULL
-                      OR EXISTS (
-                        SELECT 1 FROM orchestration_v2_projection_runs parent_run
-                        WHERE parent_run.thread_id = parent.thread_id
-                          AND parent_run.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
-                      )
-                      OR EXISTS (
-                        SELECT 1 FROM orchestration_v2_projection_provider_threads parent_pt
-                        WHERE parent_pt.thread_id = parent.thread_id
-                          AND json_array_length(parent_pt.payload_json, '$.pendingBackgroundTasks') > 0
-                      )
-                    )
+                )
+                AND EXISTS (
+                  SELECT 1 FROM orchestration_v2_projection_runs live_run
+                  WHERE live_run.thread_id = t.thread_id
+                    AND live_run.status IN ('completed', 'interrupted')
+                    AND (live_run.completed_at IS NULL OR live_run.completed_at >= ${cutoff})
                 )
               )
             )

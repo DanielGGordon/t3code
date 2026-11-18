@@ -100,13 +100,18 @@ const makeSweep = Effect.gen(function* () {
       const live = new Set(threadIds);
       return new Map([...current].filter(([threadId]) => live.has(threadId)));
     });
+    const parents = new Map<ThreadId, CacheKeepAliveThread | null>();
+    const parentShell = Effect.fn("CacheKeepAliveWorker.parentShell")(function* (id: ThreadId) {
+      if (!parents.has(id)) parents.set(id, yield* projections.getThreadShell(id));
+      return parents.get(id) ?? null;
+    });
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const shell = yield* projections.getThreadShell(threadId);
         if (shell === null) return;
         const parentId =
           shell.lineage.relationshipToParent === "subagent" ? shell.lineage.parentThreadId : null;
-        const parent = parentId === null ? null : yield* projections.getThreadShell(parentId);
+        const parent = parentId === null ? null : yield* parentShell(parentId);
         const firstTry = cacheKeepAliveCommand(shell, nowMs, cacheKeepAliveMaxPings, 1, parent);
         if (firstTry === null) return;
         const runId = firstTry.cacheKeepAliveOfRunId!;

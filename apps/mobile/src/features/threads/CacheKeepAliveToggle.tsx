@@ -62,10 +62,7 @@ export function CacheKeepAliveToggle(props: {
   const maxPings =
     props.serverConfig?.settings.cacheKeepAliveMaxPings ?? DEFAULT_CACHE_KEEP_ALIVE_MAX_PINGS;
   const parent = parentShell?.source ?? null;
-  const keepAlive =
-    parent === null
-      ? storedKeepAlive
-      : effectiveCacheKeepAlive({ thread, parent, nowMs, maxPings }).keepAlive;
+  const keepAlive = effectiveCacheKeepAlive({ thread, parent, nowMs, maxPings }).keepAlive;
   const active = cacheKeepAliveActive(keepAlive, maxPings);
   const paused = keepAlive !== null && !active;
   const mode = cacheKeepAliveMode(keepAlive);

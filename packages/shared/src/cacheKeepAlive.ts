@@ -274,12 +274,25 @@ function cacheKeepAliveInheritsFrom(input: {
   ) {
     return false;
   }
+  // A stored inherited record is no live toggle: grandchildren do not chain through it.
+  const parentToggle = parent.cacheKeepAlive?.inherited ? null : (parent.cacheKeepAlive ?? null);
   return (
-    !PARENT_NOT_KEEPING_WARM.has(
-      keepAliveStateOf(parent, parent.cacheKeepAlive ?? null, nowMs, maxPings).kind,
-    ) ||
+    !PARENT_NOT_KEEPING_WARM.has(keepAliveStateOf(parent, parentToggle, nowMs, maxPings).kind) ||
+    parentHasRunInFlight(parent) ||
     backgroundWorkHoldsCompletion(parent.pendingBackgroundTasks ?? []) ||
     cacheKeptWarmByHeartbeat(parent)
+  );
+}
+
+// A parent mid-turn (e.g. waiting on a sibling) is still orchestrating.
+function parentHasRunInFlight(parent: CacheKeepAliveThread): boolean {
+  return (
+    parent.activeRunId !== null ||
+    parent.activityRunStatus != null ||
+    BUSY_RUN_STATUSES.has(parent.status) ||
+    parent.cacheKeepAliveContext?.hasQueuedRun === true ||
+    (parent.cacheKeepAliveContext?.run != null &&
+      BUSY_RUN_STATUSES.has(parent.cacheKeepAliveContext.run.status))
   );
 }
 
