@@ -284,8 +284,15 @@ function cacheKeepAliveInheritsFrom(input: {
   );
 }
 
-// A parent mid-turn (e.g. waiting on a sibling) is still orchestrating.
+// A parent mid-turn (e.g. waiting on a sibling) is still orchestrating; its own keep-alive ping is not.
 function parentHasRunInFlight(parent: CacheKeepAliveThread): boolean {
+  const pingRunId = parent.cacheKeepAlive?.lastNudgeRunId ?? null;
+  if (
+    pingRunId !== null &&
+    (parent.activeRunId === pingRunId || parent.cacheKeepAliveContext?.run?.id === pingRunId)
+  ) {
+    return false;
+  }
   return (
     parent.activeRunId !== null ||
     parent.activityRunStatus != null ||

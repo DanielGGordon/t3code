@@ -439,6 +439,17 @@ describe("subagent threads", () => {
         parentOf({ cacheKeepAlive: inheritedRecord, activeRunId: RunId.make("run:active") }),
       ),
     ).toBe("due");
+    // The parent's own keep-alive ping in flight is not orchestrating.
+    const pingRun = RunId.make("run:ping");
+    expect(
+      childState(
+        child(),
+        parentOf({
+          cacheKeepAlive: { ...inheritedRecord, lastNudgeRunId: pingRun },
+          activeRunId: pingRun,
+        }),
+      ),
+    ).toBe("off");
   });
 
   it("never lends to a delegated-only thread without subagent lineage", () => {
