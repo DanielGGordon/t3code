@@ -426,17 +426,87 @@ export async function pickComposerMedia(input: {
     };
   }
 
+  return convertPickedMediaAssets(result.assets, {
+    remainingSlots,
+    ...(input.maxVideoBytes === undefined ? {} : { maxVideoBytes: input.maxVideoBytes }),
+  });
+}
+
+export async function attachLatestComposerPhoto(input: {
+  readonly existingCount: number;
+}): Promise<{
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly error: string | null;
+}> {
+  const remainingSlots = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - input.existingCount;
+  if (remainingSlots <= 0) {
+    return {
+      attachments: [],
+      error: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments per message.`,
+    };
+  }
+
+  const endHandoff = beginForegroundHandoff();
+  try {
+    const { AssetField, MediaType, Query, requestPermissionsAsync } =
+      await import("expo-media-library");
+    const permission = await requestPermissionsAsync(false, ["photo"]);
+    if (!permission.granted) {
+      return {
+        attachments: [],
+        error: "Allow photo access in Settings to attach your latest photo.",
+      };
+    }
+    const [latest] = await new Query()
+      .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+      .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
+      .limit(1)
+      .exe();
+    if (latest === undefined) {
+      return { attachments: [], error: "No photos found on this device." };
+    }
+    const [uri, fileName] = await Promise.all([latest.getUri(), latest.getFilename()]);
+    return await convertPickedMediaAssets(
+      [{ uri, type: "image", mimeType: imageMimeType({ name: fileName, mimeType: "" }), fileName }],
+      { remainingSlots },
+    );
+  } catch (error) {
+    return {
+      attachments: [],
+      error: error instanceof Error ? error.message : "Could not read your latest photo.",
+    };
+  } finally {
+    endHandoff();
+  }
+}
+
+interface PickedMediaAsset {
+  readonly uri: string;
+  readonly type?: string | null | undefined;
+  readonly mimeType?: string | null | undefined;
+  readonly fileName?: string | null | undefined;
+  readonly fileSize?: number | null | undefined;
+}
+
+async function convertPickedMediaAssets(
+  assets: ReadonlyArray<PickedMediaAsset>,
+  options: { readonly remainingSlots: number; readonly maxVideoBytes?: number },
+): Promise<{
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly error: string | null;
+}> {
+  const { remainingSlots, maxVideoBytes } = options;
   const attachments: DraftComposerAttachment[] = [];
   let error: string | null = null;
 
-  for (const asset of result.assets) {
+  for (const asset of assets) {
     if (attachments.length >= remainingSlots) {
       error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments per message.`;
       break;
     }
     const mimeType = asset.mimeType?.toLowerCase();
     if (asset.type === "video" || mimeType?.startsWith("video/")) {
-      if (input.maxVideoBytes === undefined) {
+      if (maxVideoBytes === undefined) {
         error = "Video attachments are unavailable here.";
         continue;
       }
@@ -449,7 +519,7 @@ export async function pickComposerMedia(input: {
             name: asset.fileName?.trim() || file.name || "video",
             mimeType: mimeType || file.type || "application/octet-stream",
             sizeBytes: asset.fileSize ?? null,
-            maxBytes: clampFileAttachmentUploadBytes(input.maxVideoBytes),
+            maxBytes: clampFileAttachmentUploadBytes(maxVideoBytes),
           }),
         );
       } catch (cause) {

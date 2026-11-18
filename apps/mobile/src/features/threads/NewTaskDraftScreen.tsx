@@ -556,6 +556,7 @@ export function NewTaskDraftScreen(props: {
 
   const {
     onPickDraftMedia: handlePickMedia,
+    onAttachLatestPhoto: handleAttachLatestPhoto,
     onPickDraftFiles: handlePickFiles,
     onNativePasteImages: handleNativePasteImages,
     onNativePasteText: handleNativePasteText,
@@ -1017,6 +1018,7 @@ export function NewTaskDraftScreen(props: {
         onOpenConnectionEditor={() => navigation.navigate("Connections")}
         onChangeDraftMessage={flow.setPrompt}
         onPickDraftMedia={handlePickMedia}
+        onAttachLatestPhoto={handleAttachLatestPhoto}
         onPickDraftFiles={handlePickFiles}
         onNativePasteImages={handleNativePasteImages}
         onNativePasteText={handleNativePasteText}

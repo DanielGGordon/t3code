@@ -5,10 +5,13 @@ import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSi
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 
-const ATTACHMENT_MENU_ACTIONS: MenuAction[] = [
-  { id: "photos", title: "Photo Library", image: "photo" },
-  { id: "files", title: "Choose Files", image: "folder" },
-];
+const LATEST_PHOTO_ACTION: MenuAction = {
+  id: "latest",
+  title: "Attach Latest Photo",
+  image: "clock",
+};
+const PHOTO_LIBRARY_ACTION: MenuAction = { id: "photos", title: "Photo Library", image: "photo" };
+const FILES_ACTION: MenuAction = { id: "files", title: "Choose Files", image: "folder" };
 
 export function ComposerAttachmentButton(props: {
   readonly disabled?: boolean;
@@ -16,8 +19,10 @@ export function ComposerAttachmentButton(props: {
   readonly supportsFiles: boolean;
   readonly onPickMedia: () => Promise<void>;
   readonly onPickFiles: () => Promise<void>;
+  readonly onAttachLatest?: () => Promise<void>;
 }) {
   const { scale } = useAndroidControlSizing();
+  const hasMenu = props.supportsFiles || props.onAttachLatest !== undefined;
   const button = (
     <Pressable
       accessibilityLabel="Add attachment"
@@ -25,7 +30,7 @@ export function ComposerAttachmentButton(props: {
       accessibilityState={{ disabled: props.disabled }}
       className="size-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70 disabled:opacity-50"
       disabled={props.disabled}
-      onPress={props.supportsFiles ? undefined : () => void props.onPickMedia()}
+      onPress={hasMenu ? undefined : () => void props.onPickMedia()}
     >
       <SymbolView
         name="plus"
@@ -37,18 +42,26 @@ export function ComposerAttachmentButton(props: {
     </Pressable>
   );
 
-  if (props.disabled || !props.supportsFiles) {
+  if (props.disabled || !hasMenu) {
     return button;
   }
+
+  const actions = [
+    ...(props.onAttachLatest ? [LATEST_PHOTO_ACTION] : []),
+    PHOTO_LIBRARY_ACTION,
+    ...(props.supportsFiles ? [FILES_ACTION] : []),
+  ];
 
   return (
     <Menu
       accessible
       accessibilityLabel="Add attachment"
       accessibilityRole="button"
-      actions={ATTACHMENT_MENU_ACTIONS}
+      actions={actions}
       onPressAction={({ nativeEvent }) => {
-        if (nativeEvent.event === "photos") {
+        if (nativeEvent.event === "latest") {
+          void props.onAttachLatest?.();
+        } else if (nativeEvent.event === "photos") {
           void props.onPickMedia();
         } else if (nativeEvent.event === "files") {
           void props.onPickFiles();

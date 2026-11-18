@@ -115,11 +115,87 @@ vi.mock("expo-file-system", () => ({
   Paths: { document: "file:///documents" },
 }));
 
+const mediaLibrary = vi.hoisted(() => {
+  const state = { granted: true, assets: [] as Array<{ uri: string; filename: string }> };
+  const calls: unknown[][] = [];
+  class Query {
+    eq(...args: unknown[]) {
+      calls.push(["eq", ...args]);
+      return this;
+    }
+    orderBy(...args: unknown[]) {
+      calls.push(["orderBy", ...args]);
+      return this;
+    }
+    limit(...args: unknown[]) {
+      calls.push(["limit", ...args]);
+      return this;
+    }
+    async exe() {
+      return state.assets.map((asset) => ({
+        getUri: async () => asset.uri,
+        getFilename: async () => asset.filename,
+      }));
+    }
+  }
+  return { state, calls, Query };
+});
+
+vi.mock("expo-media-library", () => ({
+  AssetField: { MEDIA_TYPE: "mediaType", CREATION_TIME: "creationTime" },
+  MediaType: { IMAGE: "image" },
+  Query: mediaLibrary.Query,
+  requestPermissionsAsync: vi.fn(async () => ({ granted: mediaLibrary.state.granted })),
+}));
+
 vi.mock("./uuid", () => ({
   uuidv4: () => "attachment-id",
 }));
 
-import { convertPastedImagesToAttachments, persistComposerAttachmentFile } from "./composerImages";
+import {
+  attachLatestComposerPhoto,
+  convertPastedImagesToAttachments,
+  persistComposerAttachmentFile,
+} from "./composerImages";
+
+describe("attachLatestComposerPhoto", () => {
+  beforeEach(() => {
+    files.clear();
+    mediaLibrary.calls.length = 0;
+    mediaLibrary.state.granted = true;
+    mediaLibrary.state.assets = [];
+  });
+
+  it("attaches the newest photo as an image", async () => {
+    const uri = "file:///DCIM/IMG_0001.jpg";
+    files.set(uri, { base64: "aGVsbG8=", deleted: false, mimeType: "image/jpeg" });
+    mediaLibrary.state.assets = [{ uri, filename: "IMG_0001.jpg" }];
+    manipulator.state.sourceSize = { width: 100, height: 100 };
+
+    const result = await attachLatestComposerPhoto({ existingCount: 0 });
+
+    expect(result.error).toBeNull();
+    expect(result.attachments).toEqual([
+      expect.objectContaining({ type: "image", name: "IMG_0001.jpg", mimeType: "image/jpeg" }),
+    ]);
+    expect(mediaLibrary.calls).toContainEqual([
+      "orderBy",
+      { key: "creationTime", ascending: false },
+    ]);
+    expect(mediaLibrary.calls).toContainEqual(["limit", 1]);
+  });
+
+  it("explains a denied permission and an empty library", async () => {
+    mediaLibrary.state.granted = false;
+    expect((await attachLatestComposerPhoto({ existingCount: 0 })).error).toMatch(/Settings/);
+
+    mediaLibrary.state.granted = true;
+    expect(await attachLatestComposerPhoto({ existingCount: 0 })).toEqual({
+      attachments: [],
+      error: "No photos found on this device.",
+    });
+  });
+});
 
 describe("native pasted image cleanup", () => {
   beforeEach(() => {

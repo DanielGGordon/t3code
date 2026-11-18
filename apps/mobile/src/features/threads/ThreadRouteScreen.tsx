@@ -1065,6 +1065,7 @@ function ThreadRouteContent(
           onOpenConnectionEditor={handleOpenConnectionEditor}
           onChangeDraftMessage={composer.onChangeDraftMessage}
           onPickDraftMedia={composer.onPickDraftMedia}
+          onAttachLatestPhoto={composer.onAttachLatestPhoto}
           onPickDraftFiles={composer.onPickDraftFiles}
           onNativePasteImages={composer.onNativePasteImages}
           onNativePasteText={composer.onNativePasteText}

@@ -407,6 +407,14 @@ const config: ExpoConfig = {
       },
     ],
     [
+      "expo-media-library",
+      {
+        photosPermission: "Allow T3 Code to read your latest photo when you choose Latest Photo.",
+        savePhotosPermission: false,
+        granularPermissions: ["photo"],
+      },
+    ],
+    [
       "expo-splash-screen",
       {
         image: variant.assets.splashIcon,
