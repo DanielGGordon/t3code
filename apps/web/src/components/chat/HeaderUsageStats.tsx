@@ -26,6 +26,7 @@ import {
   type ContextWindowSnapshot,
   formatContextWindowTokens,
   formatCostUsd,
+  formatPercentage,
 } from "~/lib/contextWindow";
 
 export type HeaderUsageStatId =
@@ -113,6 +114,12 @@ export const HEADER_USAGE_STAT_DEFINITIONS: ReadonlyArray<HeaderUsageStatDefinit
     patch: (visible) => ({ headerUsageScopedWeeklyVisible: visible }),
   },
 ];
+
+function contextTooltip(contextWindow: ContextWindowSnapshot): string | undefined {
+  const percentage = formatPercentage(contextWindow.usedPercentage);
+  if (contextWindow.maxTokens == null || !percentage) return undefined;
+  return `${percentage} of the ${formatContextWindowTokens(contextWindow.maxTokens)} context window used`;
+}
 
 export function selectHeaderUsageStatsVisibility(
   settings: ClientSettings,
@@ -383,6 +390,7 @@ export function selectHeaderUsageStats(input: {
             shortLabel: "Ctx",
             value: formatContextWindowTokens(contextWindow.usedTokens),
             colorClass: definition.colorClass,
+            ...(contextTooltip(contextWindow) ? { tooltip: contextTooltip(contextWindow) } : {}),
           });
         }
         break;
@@ -496,7 +504,8 @@ export function selectHeaderUsageBadges(input: {
 /**
  * Big usage readouts filling the chat header's otherwise-blank middle area.
  *
- * On a regular desktop header they are hidden below the `xl` breakpoint. A
+ * On a regular desktop header they are hidden below the `md` breakpoint and
+ * scroll sideways when the title leaves too little room. A
  * `condensed` header (phone viewport or touch / car layout) always shows them,
  * in a smaller type that grows back to full size at `xl`, inside a strip that
  * scrolls horizontally rather than overflowing. On a phone the strip drops to
@@ -528,7 +537,7 @@ export function HeaderUsageStats(props: {
           ? "flex max-h-[var(--workspace-topbar-height)] max-w-60 shrink-0 flex-wrap items-center justify-end gap-x-2.5 overflow-hidden"
           : condensed
             ? "flex min-w-0 shrink items-center gap-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] max-md:-ml-[calc(var(--workspace-titlebar-content-left)-var(--workspace-gutter-start))] max-md:flex-[1_1_8rem] max-md:justify-between max-md:gap-2.5 max-md:pb-1.5 md:gap-5 xl:gap-8 [&::-webkit-scrollbar]:hidden"
-            : "hidden shrink-0 items-center gap-8 xl:flex"
+            : "hidden min-w-0 shrink items-center gap-5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] md:flex xl:gap-8 [&::-webkit-scrollbar]:hidden"
       }
     >
       {stats.map((stat) => {
@@ -580,19 +589,16 @@ export function HeaderUsageStats(props: {
 }
 
 /**
- * Small header-actions menu with one switch per big usage readout. Hidden
- * below `xl` alongside the stats strip it controls, except in a `condensed`
- * header where the strip is always visible (and this is the only place to
- * configure it on that device).
+ * Small header-actions menu with one switch per big usage readout. Always
+ * visible, including where the strip is hidden, so the readouts stay reachable.
  */
 export function HeaderUsageStatsMenu(props: {
   visibility: HeaderUsageStatsVisibility;
   scopedWeeklyLabel: string;
   stockSymbol: string;
   onPatch: (patch: ClientSettingsPatch) => void;
-  condensed?: boolean;
 }) {
-  const { visibility, scopedWeeklyLabel, stockSymbol, onPatch, condensed = false } = props;
+  const { visibility, scopedWeeklyLabel, stockSymbol, onPatch } = props;
   const [symbolDraft, setSymbolDraft] = useState(stockSymbol);
   // Keep the draft in sync when the persisted symbol changes elsewhere.
   const [syncedSymbol, setSyncedSymbol] = useState(stockSymbol);
@@ -623,10 +629,7 @@ export function HeaderUsageStatsMenu(props: {
                   size="icon-xs"
                   type="button"
                   aria-label="Configure header usage stats"
-                  className={cn(
-                    condensed ? "inline-flex" : "hidden xl:inline-flex",
-                    "touch:size-12 max-md:touch:size-10",
-                  )}
+                  className="touch:size-12 max-md:touch:size-10"
                 />
               }
             />

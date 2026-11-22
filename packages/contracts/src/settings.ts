@@ -589,7 +589,7 @@ export const ClientSettingsSchema = Schema.Struct({
   // Large usage readouts rendered in the chat header's middle area on wide
   // viewports. All default off; toggled per device from the header menu.
   headerUsageCodexVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  headerUsageContextVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  headerUsageContextVisible: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   headerUsageGeminiSessionVisible: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),

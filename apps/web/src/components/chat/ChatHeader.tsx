@@ -504,7 +504,6 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         <NotificationBell />
         <HeaderUsageStatsMenu
-          condensed={condensed}
           visibility={usageStatsVisibility}
           scopedWeeklyLabel={resolveScopedWeeklyLabel(claudeAccountUsage)}
           stockSymbol={stockSymbols}
