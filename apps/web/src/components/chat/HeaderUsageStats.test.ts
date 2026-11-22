@@ -72,13 +72,13 @@ const allVisible: HeaderUsageStatsVisibility = {
 };
 
 describe("selectHeaderUsageStatsVisibility", () => {
-  it("defaults every stat to hidden", () => {
+  it("defaults every stat to hidden except the context window", () => {
     expect(selectHeaderUsageStatsVisibility(DEFAULT_CLIENT_SETTINGS)).toEqual({
       codex: false,
       geminiSession: false,
       geminiWeekly: false,
       stock: false,
-      context: false,
+      context: true,
       spend: false,
       session: false,
       weekly: false,
@@ -139,7 +139,7 @@ describe("selectHeaderUsageStats", () => {
     expect(byId.spend).toBeUndefined();
   });
 
-  it("attaches the estimate caveat tooltip to the spend stat only", () => {
+  it("attaches the estimate caveat tooltip to the spend stat", () => {
     const stats = selectHeaderUsageStats({
       visibility: allVisible,
       contextWindow,
@@ -147,9 +147,8 @@ describe("selectHeaderUsageStats", () => {
     });
 
     expect(stats.find((stat) => stat.id === "spend")?.tooltip).toBe(SPEND_STAT_TOOLTIP);
-    expect(stats.filter((stat) => stat.tooltip !== undefined).map((stat) => stat.id)).toEqual([
-      "spend",
-    ]);
+    expect(stats.find((stat) => stat.id === "context")?.tooltip).toMatch(/context window used$/);
+    expect(stats.find((stat) => stat.id === "session")?.tooltip).toBeUndefined();
   });
 
   it("marks the spend stat as partial when some usage had no list price", () => {

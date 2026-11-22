@@ -57,7 +57,7 @@ const clientSettings: ClientSettings = {
   headerOpenInEditorVisibility: "auto",
   headerProjectScriptsVisibility: "auto",
   headerUsageCodexVisible: true,
-  headerUsageContextVisible: false,
+  headerUsageContextVisible: true,
   headerUsageGeminiSessionVisible: false,
   headerUsageGeminiWeeklyVisible: false,
   headerUsageScopedWeeklyVisible: false,
