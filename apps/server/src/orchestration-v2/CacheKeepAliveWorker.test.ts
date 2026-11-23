@@ -384,6 +384,42 @@ it.effect("turns keep-alive on and off as UI state, not activity", () =>
 );
 
 it.effect(
+  "threads a person starts begin with keep-warm-then-compact, unless the setting is off",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const create = (name: string, creationSource: "web" | "mcp") =>
+        Effect.gen(function* () {
+          const threadId = ThreadId.make(`thread:keep-alive-default:${name}`);
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`create:${threadId}`),
+            threadId,
+            projectId: ProjectId.make("project:cache-keep-alive"),
+            title: "Default keep alive",
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdBy: "user",
+            creationSource,
+          });
+          return yield* keepAliveOf(threadId);
+        });
+
+      expect(yield* create("web", "web")).toMatchObject({
+        mode: "warm-then-compact",
+        nudgeCount: 0,
+      });
+      assert.isNull(yield* create("mcp", "mcp"));
+      yield* settings.updateSettings({ cacheKeepAliveByDefault: false });
+      assert.isNull(yield* create("web-off", "web"));
+    }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
   "pings an idle Claude thread shortly before its cache lapses, as a quiet system turn",
   () =>
     Effect.gen(function* () {
