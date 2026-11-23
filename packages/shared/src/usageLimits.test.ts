@@ -25,6 +25,7 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  preferSoonerExpiringClaudeInstance,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -1715,5 +1716,93 @@ describe("ChatGPT sharing presentation", () => {
         auth: { status: "unauthenticated", subscriptionSharing: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe("preferSoonerExpiringClaudeInstance", () => {
+  const claudeModels = [
+    { slug: "claude-opus-5-5", name: "Opus", isCustom: false, isDefault: true, capabilities: null },
+  ];
+  const claude = (id: string, usedPercent: number | null, resetsAt?: string) =>
+    provider({
+      instanceId: ProviderInstanceId.make(id),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      models: claudeModels,
+      ...(usedPercent === null
+        ? {}
+        : {
+            usageLimits: {
+              checkedAt: "2026-09-03T11:00:00.000Z",
+              windows: [
+                {
+                  id: "seven_day",
+                  kind: "weekly" as const,
+                  label: "Weekly",
+                  usedPercent,
+                  windowDurationMins: 10080,
+                  ...(resetsAt ? { resetsAt } : {}),
+                },
+              ],
+            },
+          }),
+    });
+  const soon = "2026-09-05T12:00:00.000Z";
+  const later = "2026-09-09T12:00:00.000Z";
+  const pick = (providers: ServerProvider[], instance = "claudeAgent") =>
+    preferSoonerExpiringClaudeInstance({
+      selection: { instanceId: ProviderInstanceId.make(instance), model: "claude-opus-5-5" },
+      providers,
+      now,
+    })?.instanceId ?? null;
+
+  it.each([
+    ["sooner reset wins", [claude("claudeAgent", 20, later), claude("work", 20, soon)], "work"],
+    [
+      "already on the sooner one",
+      [claude("claudeAgent", 20, soon), claude("work", 20, later)],
+      null,
+    ],
+    [
+      "sooner one near max is skipped",
+      [claude("claudeAgent", 20, later), claude("work", 90, soon)],
+      null,
+    ],
+    [
+      "current near max moves to the other",
+      [claude("claudeAgent", 95, soon), claude("work", 20, later)],
+      "work",
+    ],
+    ["a single subscription", [claude("claudeAgent", 20, soon)], null],
+    ["no reset times", [claude("claudeAgent", 20), claude("work", 20)], null],
+    ["no usage data on one", [claude("claudeAgent", 20, later), claude("work", null)], null],
+    [
+      "a past reset is ignored",
+      [claude("claudeAgent", 20, later), claude("work", 20, "2026-09-01T00:00:00Z")],
+      null,
+    ],
+  ])("%s", (_name, providers, expected) => {
+    expect(pick(providers)).toBe(expected);
+  });
+
+  it("leaves other drivers alone", () => {
+    expect(pick([provider({}), claude("work", 20, soon)], "codex")).toBeNull();
+  });
+
+  it("keeps the model's options when the model exists on the target", () => {
+    expect(
+      preferSoonerExpiringClaudeInstance({
+        selection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5-5",
+          options: [{ id: "effort", value: "high" }],
+        },
+        providers: [claude("claudeAgent", 20, later), claude("work", 20, soon)],
+        now,
+      }),
+    ).toEqual({
+      instanceId: "work",
+      model: "claude-opus-5-5",
+      options: [{ id: "effort", value: "high" }],
+    });
   });
 });

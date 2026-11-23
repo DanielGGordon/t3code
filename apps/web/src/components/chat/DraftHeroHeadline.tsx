@@ -61,7 +61,10 @@ import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
-import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  preferSoonerExpiringClaudeInstance,
+  resolveNewThreadModelSelection,
+} from "@t3tools/shared/usageLimits";
 
 const ADD_PROJECT_VALUE = "add-project";
 
@@ -269,9 +272,28 @@ export function DraftHeroHeadline({
         projectId: project.id,
         now: Date.now(),
       });
-      const defaultModelSelection = fallbackResolution.fallback
-        ? fallbackResolution.selection
-        : defaultSelection;
+      const stickyState = useComposerDraftStore.getState();
+      const stickySelection = stickyState.stickyActiveProvider
+        ? (stickyState.stickyModelSelectionByProvider[stickyState.stickyActiveProvider] ?? null)
+        : null;
+      const projectProviders = providersByEnvironment.get(project.environmentId) ?? [];
+      const defaultModelSelection =
+        (fallbackResolution.fallback ? fallbackResolution.selection : defaultSelection) ??
+        (environmentSettings
+          ? preferSoonerExpiringClaudeInstance({
+              selection:
+                stickySelection ??
+                resolveProjectDefaultProviderModelSelection(
+                  projectProviders,
+                  environmentSettings,
+                  project.id,
+                ),
+              providers: projectProviders,
+              settings: environmentSettings,
+              projectId: project.id,
+              now: Date.now(),
+            })
+          : null);
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,
