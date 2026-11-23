@@ -55,6 +55,18 @@ describe("cache keep-alive ping budget", () => {
   });
 });
 
+describe("cache keep-alive default", () => {
+  it("is on unless an earlier saved setting turned it off", () => {
+    expect(decodeServerSettings({}).cacheKeepAliveByDefault).toBe(true);
+    expect(decodeServerSettings({ cacheKeepAliveByDefault: false }).cacheKeepAliveByDefault).toBe(
+      false,
+    );
+    expect(decodeServerSettingsPatch({ cacheKeepAliveByDefault: false })).toEqual({
+      cacheKeepAliveByDefault: false,
+    });
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

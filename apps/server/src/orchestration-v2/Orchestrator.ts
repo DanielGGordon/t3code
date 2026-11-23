@@ -3634,6 +3634,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    // Only threads a person starts from a client; agent, scheduled and imported ones opt in themselves.
+    const keepsCacheWarm =
+      (command.creationSource === "web" || command.creationSource === "mobile") &&
+      command.importedNativeThread === undefined &&
+      (yield* serverSettings.getSettings.pipe(Effect.orDie)).cacheKeepAliveByDefault;
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
@@ -3668,6 +3673,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       snoozedAt: null,
       lastVisitedAt: null,
       deletedAt: null,
+      ...(keepsCacheWarm
+        ? { cacheKeepAlive: nextCacheKeepAlive(null, { enabled: true }, now) }
+        : {}),
     };
 
     yield* emitEvent({

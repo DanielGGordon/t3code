@@ -261,6 +261,7 @@ export const make = Effect.gen(function* () {
       threadCacheKeepAlive: true,
       threadCacheKeepAliveCompact: true,
       threadCacheKeepAliveMaxPings: true,
+      threadCacheKeepAliveByDefault: true,
       threadProjectFromScratch: true,
       threadTitleRegeneration: true,
       commandOutputStreaming: true,

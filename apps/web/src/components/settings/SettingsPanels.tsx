@@ -1756,6 +1756,36 @@ function ScopedCompactIdleThreadsRow() {
   );
 }
 
+function CacheKeepAliveByDefaultRow() {
+  const settings = useScopedSettings();
+  const { connectedEnvironments } = useSettingsScope();
+  const updateSettings = useUpdateScopedSettings();
+  const supported = connectedEnvironments.every(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.threadCacheKeepAliveByDefault === true,
+  );
+  return (
+    <SettingsRow
+      {...searchableSetting("cache-keep-alive-default")}
+      description="New Claude threads keep their prompt cache warm and compact if you don't come back for a while. You can still turn it off per thread."
+      serverScoped
+      settingKeys={["cacheKeepAliveByDefault"]}
+      status={!supported ? "An older selected environment does not have this setting." : null}
+      control={
+        <ScopedSwitch
+          settingKeys={["cacheKeepAliveByDefault"]}
+          checked={settings.cacheKeepAliveByDefault}
+          disabled={!supported}
+          onCheckedChange={(checked) =>
+            updateSettings({ cacheKeepAliveByDefault: Boolean(checked) })
+          }
+          aria-label="Keep cache alive in new threads"
+        />
+      }
+    />
+  );
+}
+
 function CacheKeepAlivePingsRow() {
   const value = useScopedSettings((settings) => settings.cacheKeepAliveMaxPings);
   const { targets, connectedEnvironments } = useSettingsScope();
@@ -1990,6 +2020,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        {!isProjectScope ? <CacheKeepAliveByDefaultRow /> : null}
         {!isProjectScope ? <CacheKeepAlivePingsRow /> : null}
       </SettingsSection>
 

@@ -650,6 +650,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "cache-keep-alive-default",
+    title: "Keep cache alive in new threads",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["claude prompt cache warm keep-alive compact default new threads"],
+  },
+  {
     id: "cache-keep-alive-pings",
     title: "Cache keep-alive pings",
     to: "/settings/threads",

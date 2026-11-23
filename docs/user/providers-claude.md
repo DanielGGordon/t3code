@@ -104,6 +104,11 @@ layout, find it in the chat header. The button steps through three modes:
 3. **Compact before the cache expires** (blue fold). Compacts once before expiry unless
    you write first.
 
+New Claude threads you start from the web or mobile app begin in the violet mode, so you
+don't have to remember to turn it on. Turn that off for new threads in
+**Settings → Threads → Usage limits → Keep cache alive in new threads**; threads that
+already exist keep their own setting.
+
 Click once more to turn it off. Hover over the button or press and hold it on mobile to
 see when the cache expires and what happens next.
 
