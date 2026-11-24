@@ -114,6 +114,83 @@ export function resolveNewThreadModelSelection(input: {
   };
 }
 
+/** A Claude subscription this full is left alone for new chats, however soon its week ends. */
+const CLAUDE_NEAR_MAX_PERCENT = 90;
+
+function liveWindows(provider: ServerProvider, now: number): readonly ServerProviderUsageWindow[] {
+  return (provider.usageLimits?.windows ?? []).filter((window) => {
+    const at = resetMillis(window);
+    return at === null || at > now;
+  });
+}
+
+/**
+ * Among the account's Claude subscriptions, the one whose weekly allowance resets first (its
+ * remaining quota is the cheapest to spend), skipping any that is near its limit. Returns the
+ * selection moved onto that instance, or null when nothing should change: not a Claude selection,
+ * the chat's subscription already resets first (or ties), or none is usable.
+ */
+export function preferSoonerExpiringClaudeInstance(input: {
+  readonly selection: ModelSelection | null;
+  readonly providers: readonly ServerProvider[];
+  readonly now: number;
+  readonly settings?: ServerSettings;
+  readonly projectId?: ProjectId | null;
+}): ModelSelection | null {
+  const { selection, providers, now } = input;
+  const current = providers.find((entry) => entry.instanceId === selection?.instanceId);
+  if (!selection || current?.driver !== "claudeAgent") return null;
+  const candidates = providers.flatMap((provider) => {
+    if (
+      provider.driver !== "claudeAgent" ||
+      !provider.enabled ||
+      !provider.installed ||
+      provider.auth.status === "unauthenticated" ||
+      !isProviderAvailable(provider) ||
+      (input.settings &&
+        !resolveProjectProviderInstanceEnabled(
+          input.settings,
+          input.projectId ?? null,
+          provider.instanceId,
+        ))
+    ) {
+      return [];
+    }
+    const windows = liveWindows(provider, now).filter(
+      (window) => window.kind === "session" || window.kind === "weekly",
+    );
+    if (windows.some((window) => window.usedPercent >= CLAUDE_NEAR_MAX_PERCENT)) return [];
+    const weeklyResets = windows
+      .filter((window) => window.id === "seven_day")
+      .map(resetMillis)
+      .filter((at): at is number => at !== null);
+    return [{ provider, resetsAt: weeklyResets.length > 0 ? Math.min(...weeklyResets) : Infinity }];
+  });
+  if (candidates.length === 0) return null;
+  const soonest = Math.min(...candidates.map((candidate) => candidate.resetsAt));
+  // Ties, including no reset times at all, keep the instance the chat would have used anyway.
+  const best =
+    candidates.find(
+      (candidate) =>
+        candidate.resetsAt === soonest && candidate.provider.instanceId === selection.instanceId,
+    ) ?? candidates.find((candidate) => candidate.resetsAt === soonest);
+  if (!best || best.provider.instanceId === selection.instanceId) return null;
+  const target = best.provider;
+  const sameModel = target.models.some(
+    (model) => model.slug === selection.model || model.aliases?.includes(selection.model),
+  );
+  const model = sameModel
+    ? selection.model
+    : (target.models.find((entry) => entry.isDefault && !entry.isCustom)?.slug ??
+      target.models.find((entry) => !entry.isCustom)?.slug);
+  if (!model) return null;
+  return {
+    instanceId: target.instanceId,
+    model,
+    ...(sameModel && selection.options ? { options: selection.options } : {}),
+  };
+}
+
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
 export const CHATGPT_USAGE_LIMIT_CODE = "subscription_sharing_usage_limit_exceeded";
 /** A ChatGPT Business admin caps plan use in other apps; only the admin can raise it. */

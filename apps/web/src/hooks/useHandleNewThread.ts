@@ -49,7 +49,10 @@ import { defaultProjectFallbackReadyAtom } from "../state/projects";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
-import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  preferSoonerExpiringClaudeInstance,
+  resolveNewThreadModelSelection,
+} from "@t3tools/shared/usageLimits";
 
 export const LAST_USED_PROJECT_STORAGE_KEY = "t3code:last-used-project:v1";
 export const lastUsedProjectKeySchema = Schema.NullOr(Schema.String);
@@ -162,18 +165,23 @@ export function createNewThreadHandler(router: AnyRouter) {
       project,
     );
     const configuredDefaultModelSelection = projectSettings.settings.defaultModelSelection ?? null;
+    const stickyState = useComposerDraftStore.getState();
+    const stickySelection = stickyState.stickyActiveProvider
+      ? (stickyState.stickyModelSelectionByProvider?.[stickyState.stickyActiveProvider] ?? null)
+      : null;
+    const environmentProviders = environmentServerConfigs.get(projectRef.environmentId)?.providers;
+    const unconfiguredDefaultSelection =
+      carryModelSelection || stickyState.stickyActiveProvider !== null
+        ? null
+        : resolveProjectDefaultProviderModelSelection(
+            environmentProviders ?? [],
+            targetServerSettings,
+            projectRef.projectId,
+          );
     const fallbackResolution = resolveNewThreadModelSelection({
-      defaultSelection:
-        configuredDefaultModelSelection ??
-        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
-          ? null
-          : resolveProjectDefaultProviderModelSelection(
-              environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
-              targetServerSettings,
-              projectRef.projectId,
-            )),
+      defaultSelection: configuredDefaultModelSelection ?? unconfiguredDefaultSelection,
       fallbackSelection: targetServerSettings.fallbackModelSelection ?? null,
-      providers: environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+      providers: environmentProviders ?? [],
       settings: targetServerSettings,
       projectId: projectRef.projectId,
       now: Date.now(),
@@ -181,10 +189,21 @@ export function createNewThreadHandler(router: AnyRouter) {
     const projectDefaultModelSelection = fallbackResolution.fallback
       ? fallbackResolution.selection
       : configuredDefaultModelSelection;
+    // A project default is a deliberate choice; otherwise a Claude chat starts on the subscription
+    // that resets soonest, whatever the last chat used.
+    const soonerClaudeSelection = projectDefaultModelSelection
+      ? null
+      : preferSoonerExpiringClaudeInstance({
+          selection: carryModelSelection ?? stickySelection ?? unconfiguredDefaultSelection,
+          providers: environmentProviders ?? [],
+          settings: targetServerSettings,
+          projectId: projectRef.projectId,
+          now: Date.now(),
+        });
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
       resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: projectDefaultModelSelection ?? null,
+        projectDefaultSelection: projectDefaultModelSelection ?? soonerClaudeSelection,
         carrySelection: carryModelSelection,
         carrySourceDraftId:
           currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
