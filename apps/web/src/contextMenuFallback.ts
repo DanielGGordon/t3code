@@ -134,6 +134,10 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
       },
     },
   ],
+  terminal: [
+    { tag: "path", attrs: { d: "M12 19h8" } },
+    { tag: "path", attrs: { d: "m4 17 6-6-6-6" } },
+  ],
   "folder-tree": [
     {
       tag: "path",

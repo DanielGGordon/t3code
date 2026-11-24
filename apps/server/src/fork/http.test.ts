@@ -4,6 +4,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -13,6 +14,7 @@ import * as HttpRouter from "effect/http/HttpRouter";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
+import * as ClaudeTerminalHandoff from "../import/ClaudeTerminalHandoff.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -69,14 +71,24 @@ function run(request: Request, calls: Array<unknown>) {
         const counters = ClaudeTranscriptSync.emptyCounters();
         counters.created = 1;
         counters.total = 1;
-        return { lines: ["created sessionId=s messages=2"], counters };
+        return { lines: ["created sessionId=s messages=2"], counters, continuedOutsideT3: [] };
       }),
     importSession: (options) =>
       Effect.sync(() => {
         calls.push({ importSession: options });
-        return { lines: ["created"], counters: ClaudeTranscriptSync.emptyCounters() };
+        return {
+          lines: ["updated"],
+          counters: ClaudeTranscriptSync.emptyCounters(),
+          continuedOutsideT3: [ThreadId.make("resumed-in-cli")],
+        };
       }),
   });
+  const handoff = {
+    releaseStaleSessions: (threadIds: ReadonlyArray<string>) =>
+      Effect.sync(() => {
+        if (threadIds.length > 0) calls.push({ release: threadIds });
+      }),
+  } as unknown as ClaudeTerminalHandoff.ClaudeTerminalHandoff["Service"];
   const bindings = ClaudeResumeBindings.ClaudeResumeBindings.of({
     reset: (input) =>
       input.threadId === "busy"
@@ -133,6 +145,7 @@ function run(request: Request, calls: Array<unknown>) {
           Context.make(EnvironmentAuth.EnvironmentAuth, auth).pipe(
             Context.add(ClaudeTranscriptSync.ClaudeTranscriptSync, sync),
             Context.add(ClaudeResumeBindings.ClaudeResumeBindings, bindings),
+            Context.add(ClaudeTerminalHandoff.ClaudeTerminalHandoff, handoff),
             Context.add(ServerLifecycleEvents.ServerLifecycleEvents, lifecycleEvents),
             Context.add(ThreadManagementService.ThreadManagementService, threads),
             Context.add(ScheduledTaskService.ScheduledTaskService, scheduledTasks),
@@ -161,7 +174,11 @@ it.effect("runs the Claude import sweep for operate-scoped sessions", () =>
       calls,
     );
     expect(single.status).toBe(200);
-    expect(calls.at(-1)).toEqual({ importSession: { session: "abc" } });
+    // A session the CLI continued: T3's idle process no longer has the whole conversation.
+    expect(calls.slice(-2)).toEqual([
+      { importSession: { session: "abc" } },
+      { release: ["resumed-in-cli"] },
+    ]);
   }),
 );
 

@@ -80,10 +80,13 @@ import {
   PinOffIcon,
   PlugIcon,
   SquarePenIcon,
+  SquareTerminalIcon,
   TextSearchIcon,
   UserPlusIcon,
 } from "lucide-react";
 import { toggleMyShortcuts } from "./MyShortcutsDialog";
+import { useClaudeTerminalHandoff } from "../hooks/useClaudeTerminalHandoff";
+import { isClaudeSessionThread } from "../lib/claudeTerminalHandoff";
 import { openThreadFind } from "./chat/threadFindStore";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
 import { previewBridge } from "./preview/previewBridge";
@@ -480,6 +483,7 @@ function OpenCommandPaletteDialog(props: {
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
   });
+  const { continueInTerminal, syncTerminalTurns } = useClaudeTerminalHandoff();
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
     reportFailure: false,
   });
@@ -1591,6 +1595,28 @@ function OpenCommandPaletteDialog(props: {
         if (refreshed._tag === "Failure") throw squashAtomCommandFailure(refreshed);
       },
     });
+  }
+
+  if (activeThread !== null && isClaudeSessionThread(activeThread)) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:claude-code-continue",
+        searchTerms: ["claude code", "terminal", "cli", "resume", "handoff", "continue"],
+        title: "Continue in Claude Code (terminal)",
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => continueInTerminal(threadRef),
+      },
+      {
+        kind: "action",
+        value: "action:claude-code-sync",
+        searchTerms: ["claude code", "terminal", "cli", "sync", "pull", "import"],
+        title: "Sync turns from Claude Code",
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => syncTerminalTurns(threadRef),
+      },
+    );
   }
 
   actionItems.push({

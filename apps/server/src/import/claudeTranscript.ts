@@ -9,6 +9,7 @@ export interface ParsedClaudeMessage {
   role: "user" | "assistant";
   text: string;
   timestamp: string; // ISO-8601 from the line
+  entrypoint?: string; // CLAUDE_CODE_ENTRYPOINT of the process that wrote the line
 }
 
 export interface ParsedClaudeSession {
@@ -281,11 +282,13 @@ function handleUserLine(
   const uuid = asString(parsed.uuid);
   if (uuid === null) return;
 
+  const entrypoint = asString(parsed.entrypoint);
   messages.push({
     uuid,
     role: "user",
     text,
     timestamp: timestamp ?? "",
+    ...(entrypoint === null ? {} : { entrypoint }),
   });
 }
 
@@ -306,10 +309,12 @@ function handleAssistantLine(
   const uuid = asString(parsed.uuid);
   if (uuid === null) return;
 
+  const entrypoint = asString(parsed.entrypoint);
   messages.push({
     uuid,
     role: "assistant",
     text,
     timestamp: timestamp ?? "",
+    ...(entrypoint === null ? {} : { entrypoint }),
   });
 }

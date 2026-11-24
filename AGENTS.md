@@ -110,11 +110,16 @@ when no server answers. The sweep lives in `apps/server/src/import/ClaudeTranscr
 `historyOrigin: "v1_import"`, one `message.updated` + `turn-item.updated` per message with the
 transcript uuid as message id, and a `provider-thread.updated` binding the native session — see
 `import/claudeResumeEvents.ts`). The first T3 send resumes that Claude session **in place** (Claude
-appends T3's turns to the same transcript), so once T3 has run a turn in an imported thread the
-sweep stops mirroring it (`skipped-forked`). When debugging duplicate or missing conversations,
-look here first. Key invariants: transcripts of sessions T3 itself spawned are skipped
-(`skipped-owned` — session id is another thread's v2 provider-thread native id or legacy
-`provider_session_runtime` cursor; `skipped-worktree` — transcript cwd inside the T3 worktrees dir;
+appends T3's turns to the same transcript). Once a thread has T3 runs, imported or not, the sweep
+only appends lines written outside every T3 run window, not by T3's process, and newer than its first
+run (`planExternalAppend` in `import/syncPlan.ts`): that is the Claude Code CLI resuming the session,
+which is how the CLI handoff (`import/ClaudeTerminalHandoff.ts`, `t3 import hook`,
+docs/user/claude-code-handoff.md) brings terminal turns back. Such appends reserve positions after
+the last run and release the thread's idle Claude process, whose in-memory conversation lacks them.
+When debugging duplicate or missing conversations, look here first. Key invariants: transcripts of
+sessions T3 itself spawned are not imported as new threads (`skipped-owned` — session id is another
+thread's v2 provider-thread native id or legacy `provider_session_runtime` cursor; CLI turns still
+reach that thread; `skipped-worktree` — unowned transcript cwd inside the T3 worktrees dir;
 `skipped-copy` — a forkSession copy whose message uuids largely already live on another thread),
 deleted imported threads stay deleted via the event-log tombstone, migrated v1 imports wait until
 their messages are hydrated (`skipped-pending-migration`), and transcripts whose cwd no longer exists

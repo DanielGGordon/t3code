@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ParsedClaudeMessage, ParsedClaudeSession } from "./claudeTranscript.ts";
@@ -5,18 +6,34 @@ import {
   buildOwnedSessionIdMap,
   detectForkCopy,
   isRalphSession,
+  planExternalAppend,
   planThreadSync,
+  RUN_WINDOW_TRAILING_SLACK_MS,
+  type RunWindowView,
 } from "./syncPlan.ts";
 
 const message = (
   uuid: string,
   role: "user" | "assistant" = "user",
   text = `text-${uuid}`,
+  timestamp = "2026-07-01T00:00:00.000Z",
 ): ParsedClaudeMessage => ({
   uuid,
   role,
   text,
-  timestamp: "2026-07-01T00:00:00.000Z",
+  timestamp,
+});
+
+const START_MS = Date.parse("2026-07-01T00:00:00.000Z");
+function at(seconds: number): string;
+function at(seconds: number, unit: "ms"): number;
+function at(seconds: number, unit?: "ms"): string | number {
+  const ms = START_MS + seconds * 1000;
+  return unit === "ms" ? ms : DateTime.formatIso(DateTime.makeUnsafe(ms));
+}
+const run = (fromSeconds: number, toSeconds: number): RunWindowView => ({
+  requestedAtMs: at(fromSeconds, "ms"),
+  completedAtMs: at(toSeconds, "ms"),
 });
 
 const session = (messages: ParsedClaudeMessage[]): ParsedClaudeSession => ({
@@ -52,7 +69,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1"), imported("a-1")],
       },
     });
@@ -68,24 +85,33 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1"), imported("a-1")],
       },
     });
     expect(plan.kind).toBe("unchanged");
   });
 
-  it("skips a thread that has provider turns (continued in T3)", () => {
-    const s = session([message("u-1"), message("u-2")]);
+  it("appends only the lines another client wrote between T3's runs", () => {
+    const s = session([
+      message("u-1", "user", "imported", at(0)),
+      message("t3-u", "user", "asked in T3", at(10)),
+      message("t3-a", "assistant", "answered in T3", at(20)),
+      message("cli-u", "user", "asked in the CLI", at(40)),
+      message("cli-a", "assistant", "answered in the CLI", at(50)),
+    ]);
     const plan = planThreadSync({
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: true,
+        runs: [run(5, 30)],
         messages: [imported("u-1")],
       },
     });
-    expect(plan.kind).toBe("skip-forked");
+    expect(plan).toMatchObject({ kind: "append" });
+    if (plan.kind === "append") {
+      expect(plan.newMessages.map((m) => m.uuid)).toEqual(["cli-u", "cli-a"]);
+    }
   });
 
   it("skips a thread with a turn-bound message", () => {
@@ -94,7 +120,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1"), { id: "u-1b", turnId: "turn-1" }],
       },
     });
@@ -107,7 +133,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1"), imported("not-in-transcript")],
       },
     });
@@ -123,7 +149,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: "2026-07-02T00:00:00.000Z",
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1")],
       },
     });
@@ -156,7 +182,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1")],
       },
       // A live imported thread's stream trivially exists in the event log.
@@ -171,7 +197,7 @@ describe("planThreadSync", () => {
       session: s,
       existingThread: {
         deletedAt: "2026-07-02T00:00:00.000Z",
-        hasTurns: false,
+        runs: [],
         messages: [imported("u-1")],
       },
       threadStreamEverExisted: true,
@@ -179,17 +205,67 @@ describe("planThreadSync", () => {
     expect(plan.kind).toBe("skip-deleted");
   });
 
-  it("prefers skip-forked over unchanged/append when both would match", () => {
-    const s = session([message("u-1"), message("u-2")]);
+  it("plans nothing while a T3 run is in flight", () => {
+    const s = session([
+      message("u-1", "user", "imported", at(0)),
+      message("u-2", "user", "x", at(40)),
+    ]);
     const plan = planThreadSync({
       session: s,
       existingThread: {
         deletedAt: null,
-        hasTurns: true,
-        messages: [imported("u-1"), imported("u-2")],
+        runs: [run(5, 30), { requestedAtMs: at(35, "ms"), completedAtMs: null }],
+        messages: [imported("u-1")],
       },
     });
     expect(plan.kind).toBe("skip-forked");
+  });
+});
+
+describe("planExternalAppend", () => {
+  const plan = (messages: ParsedClaudeMessage[], runs: ReadonlyArray<RunWindowView>) =>
+    planExternalAppend({ session: session(messages), existingMessageIds: new Set(), runs });
+  const appended = (result: ReturnType<typeof plan>) =>
+    result.kind === "append" ? result.newMessages.map((m) => m.uuid) : [];
+
+  it("keeps lines Claude stamps just after T3 records the run complete", () => {
+    const justAfter = DateTime.formatIso(
+      DateTime.makeUnsafe(at(30, "ms") + RUN_WINDOW_TRAILING_SLACK_MS - 1),
+    );
+    expect(appended(plan([message("late", "assistant", "x", justAfter)], [run(5, 30)]))).toEqual(
+      [],
+    );
+  });
+
+  it("never treats what T3's own process wrote between runs as another client's", () => {
+    const result = plan(
+      [
+        message("notify", "user", "<task-notification>\n<task-id>b1</task-id>", at(40)),
+        message("reply", "assistant", "The build finished.", at(41)),
+        { ...message("wakeup", "assistant", "Heartbeat check", at(42)), entrypoint: "t3-code" },
+        { ...message("cli-u", "user", "now me", at(50)), entrypoint: "cli" },
+        message("cli-a", "assistant", "hi", at(51)),
+      ],
+      [run(5, 30)],
+    );
+    expect(appended(result)).toEqual(["cli-u", "cli-a"]);
+  });
+
+  it("ignores history older than the thread's first run, such as a fork's copied lines", () => {
+    const result = plan(
+      [message("copied", "user", "from the parent", at(0)), message("cli", "user", "new", at(40))],
+      [run(5, 30)],
+    );
+    expect(appended(result)).toEqual(["cli"]);
+  });
+
+  it("skips messages already on the thread and lines without a readable timestamp", () => {
+    const result = planExternalAppend({
+      session: session([message("known", "user", "x", at(40)), message("bad", "user", "x", "?")]),
+      existingMessageIds: new Set(["known"]),
+      runs: [run(5, 30)],
+    });
+    expect(result.kind).toBe("unchanged");
   });
 });
 

@@ -90,6 +90,7 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 Everything below is additive on top of upstream T3 Code. Screenshots are from a live instance. The per-device switches for most of these live on one page, **Settings → Fork Features**.
 
 - [🔥 Keep the Claude prompt cache warm](#-keep-the-claude-prompt-cache-warm), in three modes
+- [↔️ Hand Claude conversations to the Claude Code CLI and back](#️-hand-claude-conversations-to-the-claude-code-cli-and-back)
 - [🎨 Selectable color themes](#-selectable-color-themes)
 - [📊 Usage, spend & token meters in the header](#-usage-spend--token-meters-in-the-header)
 - [🧱 Tile wall of live chats](#-tile-wall-of-live-chats)
@@ -126,6 +127,24 @@ The prompt-cache button in a Claude chat cycles through **keep warm, then compac
 The default budget is **8 pings** in a row without a message from you. Adjust it under **Settings → Threads → Usage limits**. While the cache is live, the button shows the time left. Hover over it or press and hold on mobile for the next scheduled action.
 
 **Prompt cache reminders.** Separately, when an idle Claude conversation with at least 100k tokens of context is 10 minutes from losing its cache, T3 Code shows a banner linking to it. Turn the banners off or change the size threshold in **Settings → General**. Subagent threads started with `delegate_task` are kept warm while their parent is, and never raise these banners. Full details: [Claude provider docs](./docs/user/providers-claude.md#keep-cache-warm).
+
+### ↔️ Hand Claude conversations to the Claude Code CLI and back
+
+Move one Claude conversation between T3 Code and the Claude Code CLI (in IntelliJ's terminal, for
+example) as often as you like. Both sides continue the same Claude session, so each sees everything
+the other did.
+
+- **T3 Code → terminal:** **Claude Code → Continue in terminal** in the thread menu gives you
+  `cd <project> && claude --resume <session id>`. T3 Code stops its own Claude process for the
+  thread first, so it can't keep running on an outdated copy of the conversation.
+- **Terminal → T3 Code:** with the one-line Claude Code hook (`t3 import hook`), each terminal turn
+  appears in the T3 thread a moment after Claude answers. Without it, use **Sync terminal turns**.
+  When you next send from T3 Code, Claude has the terminal's turns.
+- A conversation that started in the CLI comes in with `t3 import claude <session>`, or through the
+  hook, and can then go back and forth the same way.
+
+The CLI runs on the machine that runs T3 Code. Setup and details:
+[Claude Code CLI handoff](./docs/user/claude-code-handoff.md).
 
 ### 🎨 Selectable color themes
 
@@ -233,7 +252,7 @@ A **Settings → Fork Features** page gathers the fork's per-device switches: au
 - **Latest Claude models** — Claude Opus 5.5, Sonnet 5.5 and Fable are in the built-in model list, and new sessions default to Claude Sonnet 5.5.
 - **`t3 freeze` / `t3 thaw`** — pause every other conversation and scheduled task on the server so one long task is the only thing using your Claude subscription while you measure it, then put everything back exactly as it was.
 - **Automatic Claude Code transcript sync** — `t3 import sync` (run every 15 minutes by a systemd timer on the host) mirrors every Claude Code transcript into T3 as a backdated, resumable thread. It skips sessions T3 spawned itself and copies it already has, and respects threads you've deleted.
-- **Resumable Claude Code conversation import** — `t3 import claude <session>` turns an existing Claude Code transcript into a resumable T3 thread, forking to a new transcript so your original session is untouched.
+- **Resumable Claude Code conversation import** — `t3 import claude <session>` turns an existing Claude Code transcript into a T3 thread that resumes the same session (see [the CLI handoff](#️-hand-claude-conversations-to-the-claude-code-cli-and-back)).
 - **Missing-transcript diagnostics** — when a Claude thread can no longer be resumed because its `~/.claude/projects/…/<session>.jsonl` is gone (host reprovisioned, thread imported from another machine), the thread shows exactly which file is missing instead of a generic stream failure. `t3 session audit` lists every affected thread with the path to restore; `t3 session reset <threadId> --yes` is the explicit opt-in to start that thread over with a fresh Claude session.
 - **Android app** — a full native Android build (Ghostty terminal, Shiki-highlighted code blocks, themed native chrome, self-signed-TLS trust, sideload APK publish script).
 - **File explorer collapsed by default**, and a fix so the **left edge of message lines is selectable**.

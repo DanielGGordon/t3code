@@ -23,7 +23,10 @@ import {
   makeTempDir,
   writeTranscript,
 } from "./ClaudeImport.testkit.ts";
-import { importedClaudeProviderThread } from "./claudeResumeEvents.ts";
+import {
+  bindExistingThreadToClaudeSession,
+  importedClaudeProviderThread,
+} from "./claudeResumeEvents.ts";
 import * as ClaudeTranscriptSync from "./ClaudeTranscriptSync.ts";
 
 const SESSION_A = "11111111-1111-4111-8111-111111111111";
@@ -463,6 +466,80 @@ describe("ClaudeTranscriptSync", () => {
       assert.strictEqual(records.messages.length, baseMessages.length);
     }).pipe(Effect.provide(layer));
   });
+  it.effect("pulls the CLI's turns into a T3 thread whose session the CLI resumed", () => {
+    const { projectsDir, workspace, layer } = fixture();
+    return Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const native = yield* createThread({ threadId: "native-thread" });
+      yield* eventSink.write({
+        events: bindExistingThreadToClaudeSession({
+          thread: native,
+          sessionId: SESSION_A,
+          providerInstanceId: CLAUDE_INSTANCE,
+          eventIdPrefix: "test:bind",
+        }),
+      });
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_runs (
+          run_id, thread_id, ordinal, provider, provider_thread_id, status, requested_at,
+          completed_at, payload_json
+        ) VALUES (
+          'run:t3', ${native.id}, 1, 'claudeAgent', NULL, 'completed',
+          '2026-09-01T10:00:00.000Z', '2026-09-01T10:01:00.000Z', '{}'
+        )
+      `;
+      // Where run 1's items sit: the CLI's turns must come after them, not before.
+      yield* sql`
+        INSERT INTO orchestration_v2_turn_item_positions (thread_id, turn_item_id, ordinal)
+        VALUES (${native.id}, 'turn-item:t3-run-1', 1000004)
+      `;
+      // T3's own turn, then `claude --resume` in a terminal.
+      writeTranscript({
+        projectsDir,
+        sessionId: SESSION_A,
+        cwd: workspace,
+        messages: [
+          { uuid: "t3-u", role: "user", text: "Start here", timestamp: "2026-09-01T10:00:01.000Z" },
+          { uuid: "t3-a", role: "assistant", text: "Done.", timestamp: "2026-09-01T10:00:50.000Z" },
+          { uuid: "cli-u", role: "user", text: "Tweak it", timestamp: "2026-09-01T11:00:00.000Z" },
+          {
+            uuid: "cli-a",
+            role: "assistant",
+            text: "Tweaked.",
+            timestamp: "2026-09-01T11:00:09.000Z",
+          },
+        ],
+      });
+
+      const report = yield* sync(projectsDir);
+      assert.strictEqual(report.counters.updated, 1, report.lines.join("\n"));
+      assert.strictEqual(report.counters.appended, 2, report.lines.join("\n"));
+      assert.deepStrictEqual(report.continuedOutsideT3, [native.id]);
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const records = yield* projections.getThreadRecords(native.id, ["messages"]);
+      assert.deepStrictEqual(
+        records.messages.map((message) => message.id),
+        ["cli-u", "cli-a"],
+      );
+      const placed = yield* sql<{ readonly ordinal: number }>`
+        SELECT ordinal FROM orchestration_v2_projection_turn_items
+        WHERE thread_id = ${native.id} ORDER BY ordinal
+      `;
+      assert.deepStrictEqual(
+        placed.map((row) => row.ordinal),
+        [1000005, 1000006],
+      );
+      assert.isTrue(
+        DateTime.toEpochMillis(records.thread.updatedAt) === Date.parse("2026-09-01T11:00:09.000Z"),
+      );
+
+      const again = yield* sync(projectsDir);
+      assert.strictEqual(again.counters.skippedOwned, 1, again.lines.join("\n"));
+      assert.deepStrictEqual(again.continuedOutsideT3, []);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("never leaves a dangling activeProviderThreadId when an import write fails", () => {
     const { projectsDir, workspace, layer, control } = fixtureWithFailingWrites();
     return Effect.gen(function* () {

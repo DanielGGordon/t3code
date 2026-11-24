@@ -441,6 +441,19 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    // Fork: Claude Code CLI <-> T3 handoff.
+    claudeTerminalHandoff: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:claude-terminal-handoff",
+      tag: WS_METHODS.threadClaudeTerminalHandoff,
+      scheduler,
+      concurrency,
+    }),
+    claudeTerminalPull: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:claude-terminal-pull",
+      tag: WS_METHODS.threadClaudeTerminalPull,
+      scheduler,
+      concurrency,
+    }),
   };
   const commands = {
     ...sent,

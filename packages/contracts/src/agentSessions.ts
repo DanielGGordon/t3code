@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const AgentSessionSource = Schema.Literals(["claudeAgent", "codex", "pi"]);
@@ -87,5 +93,37 @@ export class AgentSessionScanError extends Schema.TaggedError<AgentSessionScanEr
 ) {
   override get message(): string {
     return `Failed to scan agent sessions during ${this.operation}.`;
+  }
+}
+
+/**
+ * Fork: hand a Claude thread to the Claude Code CLI and back. Both sides resume one native
+ * session, so the transcript is the shared state (docs/user/claude-code-handoff.md).
+ */
+export const ClaudeTerminalHandoffInput = Schema.Struct({ threadId: ThreadId });
+export type ClaudeTerminalHandoffInput = typeof ClaudeTerminalHandoffInput.Type;
+
+export const ClaudeTerminalHandoffResult = Schema.Struct({
+  sessionId: TrimmedNonEmptyString,
+  cwd: TrimmedNonEmptyString,
+  /** POSIX shell line that resumes the session where T3 runs Claude. */
+  command: TrimmedNonEmptyString,
+  /** Cache keep-alive was on; T3 turned it off so it stops writing to the session. */
+  keepAliveStopped: Schema.Boolean,
+});
+export type ClaudeTerminalHandoffResult = typeof ClaudeTerminalHandoffResult.Type;
+
+export const ClaudeTerminalPullResult = Schema.Struct({
+  /** Messages the CLI added that are now on the thread. */
+  appended: NonNegativeInt,
+});
+export type ClaudeTerminalPullResult = typeof ClaudeTerminalPullResult.Type;
+
+export class ClaudeTerminalHandoffError extends Schema.TaggedError<ClaudeTerminalHandoffError>()(
+  "ClaudeTerminalHandoffError",
+  { threadId: ThreadId, detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
   }
 }

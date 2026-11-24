@@ -26,6 +26,7 @@
 - [Guest links](./user/guest-links.md)
 - [T3 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
+- [Claude Code CLI handoff](./user/claude-code-handoff.md)
 - [External notifications API](./user/notifications-api.md) (fork)
 - [Running in the background](./user/background-service.md)
 - [Updating T3 Code](./user/updating.md)

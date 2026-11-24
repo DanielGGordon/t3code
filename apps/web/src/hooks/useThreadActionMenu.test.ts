@@ -107,6 +107,10 @@ vi.mock("../components/Sidebar.snooze", () => ({
 vi.mock("./useCopyToClipboard", () => ({
   useCopyToClipboard: () => ({ copyToClipboard: () => recordEffect("copy") }),
 }));
+vi.mock("./useClaudeTerminalHandoff", () => ({
+  useClaudeTerminalHandoff: () => ({ continueInTerminal: vi.fn(), syncTerminalTurns: vi.fn() }),
+}));
+vi.mock("../lib/claudeTerminalHandoff", () => ({ isClaudeSessionThread: () => false }));
 vi.mock("./useHandleNewThread", () => ({
   useNewThreadHandler: () => async () => recordEffect("draft"),
 }));

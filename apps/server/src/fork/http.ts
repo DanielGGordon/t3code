@@ -17,6 +17,7 @@ import {
 
 import { authenticateRawRouteWithScope } from "../http.ts";
 import * as ClaudeResumeBindings from "../import/ClaudeResumeBindings.ts";
+import * as ClaudeTerminalHandoff from "../import/ClaudeTerminalHandoff.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as Freeze from "./freeze.ts";
@@ -153,10 +154,12 @@ const claudeImportRoute = HttpRouter.add(
       return failure(400, "Invalid import request body.");
     }
     const sync = yield* ClaudeTranscriptSync.ClaudeTranscriptSync;
+    const handoff = yield* ClaudeTerminalHandoff.ClaudeTerminalHandoff;
     const { session, ...options } = body.value;
     return yield* (
       session === undefined ? sync.sync(options) : sync.importSession({ ...options, session })
     ).pipe(
+      Effect.tap((report) => handoff.releaseStaleSessions(report.continuedOutsideT3)),
       Effect.map((report) =>
         HttpServerResponse.jsonUnsafe({
           lines: report.lines,
