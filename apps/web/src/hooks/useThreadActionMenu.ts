@@ -44,10 +44,12 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import { useClaudeTerminalHandoff } from "./useClaudeTerminalHandoff";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
+import { isClaudeSessionThread } from "../lib/claudeTerminalHandoff";
 import { useTouchLayout } from "./useTouchLayout";
 
 function failureToast(title: string, error: unknown) {
@@ -94,6 +96,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const { continueInTerminal, syncTerminalTurns } = useClaudeTerminalHandoff();
   // Touch layout always confirms, matching the sidebar: a stray tap on a car
   // screen must never delete or archive history.
   const touchLayout = useTouchLayout();
@@ -157,6 +160,7 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        isClaudeSession: isClaudeSessionThread(thread),
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -268,6 +272,12 @@ export function useThreadActionMenu(input: {
         }
         case "mark-unread":
           markThreadUnread(threadRef);
+          return;
+        case "claude-code:continue":
+          await continueInTerminal(threadRef);
+          return;
+        case "claude-code:sync":
+          await syncTerminalTurns(threadRef);
           return;
         case "share-guest":
           openGuestShareDialog(threadRef);

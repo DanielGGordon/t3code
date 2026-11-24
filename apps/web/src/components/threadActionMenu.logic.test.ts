@@ -65,13 +65,20 @@ describe("buildThreadActionMenuItems", () => {
     },
   );
 
-  it("disables archive and turning into a project while the thread is running", () => {
+  it("disables archive, turning into a project and the terminal handoff while running", () => {
     const items = buildThreadActionMenuItems({
       ...baseState,
       isRunning: true,
       canTurnIntoProject: true,
+      isClaudeSession: true,
     });
     expect(items.find((item) => item.id === "archive")?.disabled).toBe(true);
     expect(items.find((item) => item.id === "turn-into-project")?.disabled).toBe(true);
+    // Handing off mid-turn would let two processes write one transcript; syncing stays available.
+    const claudeCode = items.find((item) => item.id === "claude-code")?.children;
+    expect(claudeCode?.map((child) => [child.id, child.disabled ?? false])).toEqual([
+      ["claude-code:continue", true],
+      ["claude-code:sync", false],
+    ]);
   });
 });

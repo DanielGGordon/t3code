@@ -1,13 +1,20 @@
 /**
- * `t3 import sync|claude`: mirror Claude Code transcripts into T3 (work in `import/ClaudeTranscriptSync.ts`).
- * A systemd user timer runs it every 15 minutes: keep the output format (`<outcome> sessionId=…`
- * lines plus a final `summary …` line) stable for its journal.
+ * `t3 import sync|claude|hook`: mirror Claude Code transcripts into T3 (work in
+ * `import/ClaudeTranscriptSync.ts`). A systemd user timer runs `sync` every 15 minutes: keep the output
+ * format (`<outcome> sessionId=…` lines plus a final `summary …` line) stable for its journal. `hook`
+ * is what a Claude Code hook runs after each turn (docs/user/claude-code-handoff.md).
  */
+import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import { Argument, Command, Flag } from "effect/cli";
+
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import {
   type ClaudeImportResponse,
@@ -16,6 +23,7 @@ import {
   type ClaudeImportRequest,
 } from "../fork/http.ts";
 import * as ClaudeTranscriptSync from "../import/ClaudeTranscriptSync.ts";
+import { T3_CLAUDE_ENTRYPOINT } from "../import/syncPlan.ts";
 import { projectLocationFlags } from "./config.ts";
 import { ForkCliError, postForkRoute, runLiveOrOffline } from "./forkLive.ts";
 
@@ -106,6 +114,42 @@ const importClaudeCommand = Command.make("claude", {
   ),
 );
 
+/** The fields of Claude Code's hook input this command reads. */
+const ClaudeHookInput = Schema.Struct({ transcript_path: Schema.String });
+const decodeClaudeHookInput = Schema.decodeUnknownOption(Schema.fromJsonString(ClaudeHookInput));
+
+const importHookCommand = Command.make("hook", {
+  ...projectLocationFlags,
+  instance: instanceFlag,
+}).pipe(
+  Command.withDescription(
+    "Run from a Claude Code hook (Stop or SessionEnd): read the hook's JSON on stdin and import that " +
+      "session, or bring its new turns into the T3 thread that continues it. Never fails the hook.",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      // A Claude that T3 itself runs: its turns already reach the thread.
+      const environment = yield* HostProcess.Environment;
+      if (environment.CLAUDE_CODE_ENTRYPOINT === T3_CLAUDE_ENTRYPOINT) return;
+      const stdio = yield* Stdio.Stdio;
+      const input = decodeClaudeHookInput(
+        yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString),
+      );
+      if (Option.isNone(input) || input.value.transcript_path.trim().length === 0) {
+        return yield* Console.error("t3 import hook: expected Claude Code hook JSON on stdin.");
+      }
+      const result = yield* runImport(flags, {
+        session: yield* absolutize(input.value.transcript_path.trim()),
+        ...(Option.isSome(flags.instance) ? { instance: flags.instance.value } : {}),
+      });
+      for (const line of result.lines) yield* Console.log(line);
+    }).pipe(
+      // Claude Code reports a failing hook after every turn; a T3 that is down is not the CLI's problem.
+      Effect.catchCause((cause) => Console.error(`t3 import hook: ${Cause.pretty(cause)}`)),
+    ),
+  ),
+);
+
 const importSyncCommand = Command.make("sync", {
   ...projectLocationFlags,
   instance: instanceFlag,
@@ -132,5 +176,5 @@ const importSyncCommand = Command.make("sync", {
 
 export const importCommand = Command.make("import").pipe(
   Command.withDescription("Import conversations from other coding agents into T3."),
-  Command.withSubcommands([importClaudeCommand, importSyncCommand]),
+  Command.withSubcommands([importClaudeCommand, importSyncCommand, importHookCommand]),
 );

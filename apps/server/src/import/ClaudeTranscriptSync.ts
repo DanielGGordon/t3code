@@ -1,8 +1,7 @@
 /**
- * Fork: mirror Claude Code transcripts into T3 as backdated, resumable v2 threads
- * (`claude-import-<sessionId>`, message id = transcript uuid, so dedupe is an id-set check).
- * Skips deleted, owned, worktree, copy and forked threads (see `syncPlan.ts`). Runs inside the
- * serving process so live clients see events; the CLI only runs it in-process with no server.
+ * Fork: mirror Claude Code transcripts into T3 as resumable v2 threads (`claude-import-<sessionId>`,
+ * message id = transcript uuid), and bring CLI turns into threads T3 already continued. Runs inside
+ * the serving process so live clients see events; the CLI runs it in-process only with no server.
  */
 import {
   CommandId,
@@ -59,11 +58,14 @@ import {
   buildOwnedSessionIdMap,
   detectForkCopy,
   isRalphSession,
+  planExternalAppend,
   planThreadSync,
   type ResumeBindingView,
+  type RunWindowView,
 } from "./syncPlan.ts";
 
 const IMPORT_EVENT_PREFIX = "claude-import:v2";
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const MESSAGE_BATCH_SIZE = 50;
 const IMPORTED_THREAD_FALLBACK_TITLE = "Imported Claude session";
 const DEFAULT_PROJECTS_DIR = "~/.claude/projects";
@@ -120,6 +122,11 @@ export interface ClaudeSyncCounters {
 export interface ClaudeImportReport {
   readonly lines: ReadonlyArray<string>;
   readonly counters: ClaudeSyncCounters;
+  /**
+   * Threads T3 had already continued that gained turns from another Claude client. A live T3
+   * process for them holds the conversation without those turns, so the server releases it.
+   */
+  readonly continuedOutsideT3: ReadonlyArray<ThreadId>;
 }
 
 /** Outcome of a create-or-incremental-update pass for one session. */
@@ -131,7 +138,13 @@ export type ClaudeSessionOutcome =
       readonly imported: number;
       readonly reusedProject: boolean;
     }
-  | { readonly kind: "updated"; readonly threadId: ThreadId; readonly appended: number }
+  | {
+      readonly kind: "updated";
+      readonly threadId: ThreadId;
+      readonly appended: number;
+      /** The thread had T3 turns: the new messages came from another Claude client. */
+      readonly continuedOutsideT3: boolean;
+    }
   | { readonly kind: "unchanged"; readonly threadId: ThreadId; readonly rebound: boolean }
   | { readonly kind: "skipped-deleted"; readonly threadId: ThreadId }
   | { readonly kind: "skipped-forked"; readonly threadId: ThreadId; readonly reason: string }
@@ -186,7 +199,10 @@ export function recordOutcome(
     case "updated":
       counters.updated += 1;
       counters.appended += outcome.appended;
-      return `updated sessionId=${sessionId} appended=${outcome.appended}`;
+      return (
+        `updated sessionId=${sessionId} appended=${outcome.appended}` +
+        (outcome.continuedOutsideT3 ? ` threadId=${outcome.threadId} source=outside-t3` : "")
+      );
     case "unchanged":
       counters.unchanged += 1;
       return `unchanged sessionId=${sessionId}${outcome.rebound ? " resume=rebound" : ""}`;
@@ -241,6 +257,9 @@ function chunks<A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
   return result;
 }
 
+const importTurnItemId = (threadId: ThreadId, uuid: string) =>
+  TurnItemId.make(`${IMPORT_EVENT_PREFIX}:turn-item:${threadId}:${uuid}`);
+
 function messageEvents(input: {
   readonly threadId: ThreadId;
   readonly message: ParsedClaudeMessage;
@@ -248,9 +267,7 @@ function messageEvents(input: {
 }): ReadonlyArray<OrchestrationV2DomainEvent> {
   const { threadId, message } = input;
   const messageId = MessageId.make(message.uuid);
-  const turnItemId = TurnItemId.make(
-    `${IMPORT_EVENT_PREFIX}:turn-item:${threadId}:${message.uuid}`,
-  );
+  const turnItemId = importTurnItemId(threadId, message.uuid);
   const at = utcOr(message.timestamp, input.fallbackAt);
   const conversationMessage: OrchestrationV2ConversationMessage = {
     createdBy: message.role === "user" ? "user" : "agent",
@@ -429,108 +446,127 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const loadState = Effect.gen(function* () {
-    const prefix = `${CLAUDE_IMPORT_THREAD_ID_PREFIX}%`;
-    const threadRows = yield* sql<{
-      readonly thread_id: string;
-      readonly deleted_at: string | null;
-      readonly active_provider_thread_id: string | null;
-      readonly payload_json: string;
-    }>`
+  /**
+   * `session` narrows the message scan, the slow part on a large database, to what syncing that one
+   * transcript reads: who owns its uuids, and its import thread's messages.
+   */
+  const loadState = Effect.fn("ClaudeTranscriptSync.loadState")(
+    function* (
+      session:
+        | { readonly threadId: ThreadId; readonly messageIds: ReadonlyArray<string> }
+        | undefined,
+    ) {
+      const prefix = `${CLAUDE_IMPORT_THREAD_ID_PREFIX}%`;
+      const threadRows = yield* sql<{
+        readonly thread_id: string;
+        readonly deleted_at: string | null;
+        readonly active_provider_thread_id: string | null;
+        readonly payload_json: string;
+      }>`
       SELECT thread_id, deleted_at, active_provider_thread_id, payload_json
       FROM orchestration_v2_projection_threads
       WHERE thread_id LIKE ${prefix}
     `;
-    const runRows = yield* sql<{ readonly thread_id: string }>`
+      const runRows = yield* sql<{ readonly thread_id: string }>`
       SELECT DISTINCT thread_id FROM orchestration_v2_projection_runs WHERE thread_id LIKE ${prefix}
     `;
-    // The event log is append-only: a stream that ever existed is a permanent
-    // tombstone once its live projection row is gone.
-    const streamRows = yield* sql<{ readonly stream_id: string }>`
+      // The event log is append-only: a stream that ever existed is a permanent
+      // tombstone once its live projection row is gone.
+      const streamRows = yield* sql<{ readonly stream_id: string }>`
       SELECT DISTINCT stream_id
       FROM orchestration_events
       WHERE aggregate_kind = 'thread' AND stream_id LIKE ${prefix}
     `;
-    const pendingRows = yield* sql<{ readonly thread_id: string }>`
+      const pendingRows = yield* sql<{ readonly thread_id: string }>`
       SELECT thread_id
       FROM orchestration_v2_legacy_imports
       WHERE transcript_imported_at IS NULL AND thread_id LIKE ${prefix}
     `;
-    const messageRows = yield* sql<{
-      readonly message_id: string;
-      readonly thread_id: string;
-      readonly run_id: string | null;
-    }>`
+      const messageRows = yield* sql<{
+        readonly message_id: string;
+        readonly thread_id: string;
+        readonly run_id: string | null;
+      }>`
       SELECT message_id, thread_id, run_id FROM orchestration_v2_projection_messages
+      ${
+        session === undefined
+          ? sql``
+          : sql`WHERE thread_id = ${session.threadId}
+              OR message_id IN (SELECT value FROM json_each(${encodeJson(session.messageIds)}))`
+      }
     `;
-    const providerThreadRows = yield* sql<{
-      readonly thread_id: string | null;
-      readonly native_id: string | null;
-    }>`
+      const providerThreadRows = yield* sql<{
+        readonly thread_id: string | null;
+        readonly native_id: string | null;
+      }>`
       SELECT thread_id, json_extract(payload_json, '$.nativeThreadRef.nativeId') AS native_id
       FROM orchestration_v2_projection_provider_threads
       WHERE driver = ${CLAUDE_DRIVER_KIND}
     `;
-    const legacyRuntimeRows = yield* sql<{
-      readonly thread_id: string;
-      readonly resume_cursor_json: string | null;
-    }>`
+      const legacyRuntimeRows = yield* sql<{
+        readonly thread_id: string;
+        readonly resume_cursor_json: string | null;
+      }>`
       SELECT thread_id, resume_cursor_json
       FROM provider_session_runtime
       WHERE provider_name = ${CLAUDE_DRIVER_KIND}
     `;
 
-    const messageOwnerIndex = new Map<string, string>();
-    const importThreadMessages = new Map<string, Array<{ id: string; runId: string | null }>>();
-    for (const row of messageRows) {
-      messageOwnerIndex.set(row.message_id, row.thread_id);
-      if (row.thread_id.startsWith(CLAUDE_IMPORT_THREAD_ID_PREFIX)) {
-        const list = importThreadMessages.get(row.thread_id) ?? [];
-        list.push({ id: row.message_id, runId: row.run_id });
-        importThreadMessages.set(row.thread_id, list);
+      const messageOwnerIndex = new Map<string, string>();
+      const importThreadMessages = new Map<string, Array<{ id: string; runId: string | null }>>();
+      for (const row of messageRows) {
+        messageOwnerIndex.set(row.message_id, row.thread_id);
+        if (row.thread_id.startsWith(CLAUDE_IMPORT_THREAD_ID_PREFIX)) {
+          const list = importThreadMessages.get(row.thread_id) ?? [];
+          list.push({ id: row.message_id, runId: row.run_id });
+          importThreadMessages.set(row.thread_id, list);
+        }
       }
-    }
 
-    const bindings: Array<ResumeBindingView> = [
-      ...legacyRuntimeRows.map((row) => ({
-        threadId: row.thread_id,
-        resumeSessionId: readLegacyCursorSessionId(row.resume_cursor_json) ?? null,
-      })),
-      // v2 provider threads last: they are the live truth when both exist.
-      ...providerThreadRows.flatMap((row) =>
-        row.thread_id === null ? [] : [{ threadId: row.thread_id, resumeSessionId: row.native_id }],
-      ),
-    ];
+      const bindings: Array<ResumeBindingView> = [
+        ...legacyRuntimeRows.map((row) => ({
+          threadId: row.thread_id,
+          resumeSessionId: readLegacyCursorSessionId(row.resume_cursor_json) ?? null,
+        })),
+        // v2 provider threads last: they are the live truth when both exist.
+        ...providerThreadRows.flatMap((row) =>
+          row.thread_id === null
+            ? []
+            : [{ threadId: row.thread_id, resumeSessionId: row.native_id }],
+        ),
+      ];
 
-    const snapshot = yield* projects.snapshot;
-    const projectsByRoot = new Map<string, ProjectId>();
-    for (const project of snapshot.projects) {
-      if (project.deletedAt === null) projectsByRoot.set(project.workspaceRoot, project.id);
-    }
+      const snapshot = yield* projects.snapshot;
+      const projectsByRoot = new Map<string, ProjectId>();
+      for (const project of snapshot.projects) {
+        if (project.deletedAt === null) projectsByRoot.set(project.workspaceRoot, project.id);
+      }
 
-    return {
-      threads: new Map(
-        threadRows.map((row) => [
-          row.thread_id,
-          {
-            payloadJson: row.payload_json,
-            deletedAt: row.deleted_at,
-            activeProviderThreadId: row.active_provider_thread_id,
-          },
-        ]),
-      ),
-      threadsWithRuns: new Set(runRows.map((row) => row.thread_id)),
-      threadsWithProviderThreads: new Set(
-        providerThreadRows.flatMap((row) => (row.thread_id === null ? [] : [row.thread_id])),
-      ),
-      tombstones: new Set(streamRows.map((row) => row.stream_id)),
-      pendingLegacyTranscripts: new Set(pendingRows.map((row) => row.thread_id)),
-      messageOwnerIndex,
-      importThreadMessages,
-      ownedSessionIds: buildOwnedSessionIdMap(bindings),
-      projectsByRoot,
-    } satisfies SyncState;
-  }).pipe(mapFailure("Failed to read the T3 state for the import"));
+      return {
+        threads: new Map(
+          threadRows.map((row) => [
+            row.thread_id,
+            {
+              payloadJson: row.payload_json,
+              deletedAt: row.deleted_at,
+              activeProviderThreadId: row.active_provider_thread_id,
+            },
+          ]),
+        ),
+        threadsWithRuns: new Set(runRows.map((row) => row.thread_id)),
+        threadsWithProviderThreads: new Set(
+          providerThreadRows.flatMap((row) => (row.thread_id === null ? [] : [row.thread_id])),
+        ),
+        tombstones: new Set(streamRows.map((row) => row.stream_id)),
+        pendingLegacyTranscripts: new Set(pendingRows.map((row) => row.thread_id)),
+        messageOwnerIndex,
+        importThreadMessages,
+        ownedSessionIds: buildOwnedSessionIdMap(bindings),
+        projectsByRoot,
+      } satisfies SyncState;
+    },
+    (effect, _session) => mapFailure("Failed to read the T3 state for the import")(effect),
+  );
 
   const writeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
     eventSink.write({ events }).pipe(mapFailure("Failed to write import events"), Effect.asVoid);
@@ -589,6 +625,167 @@ export const make = Effect.gen(function* () {
     return true;
   });
 
+  const loadRunWindows = Effect.fn("ClaudeTranscriptSync.loadRunWindows")(function* (
+    threadId: ThreadId,
+  ) {
+    const rows = yield* sql<{
+      readonly requested_at: string;
+      readonly completed_at: string | null;
+    }>`
+      SELECT requested_at, completed_at FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId}
+    `.pipe(mapFailure("Failed to read the thread's runs"));
+    return rows.map((row): RunWindowView => {
+      const requestedAtMs = Date.parse(row.requested_at);
+      const completedAtMs = row.completed_at === null ? Number.NaN : Date.parse(row.completed_at);
+      // An unreadable bound widens the window: T3's own lines must never come back as new.
+      return {
+        requestedAtMs: Number.isNaN(requestedAtMs) ? 0 : requestedAtMs,
+        completedAtMs: Number.isNaN(completedAtMs) ? null : completedAtMs,
+      };
+    });
+  });
+
+  const runInProgress = Effect.fn("ClaudeTranscriptSync.runInProgress")(function* (
+    threadId: ThreadId,
+  ) {
+    const rows = yield* sql<{ readonly found: number }>`
+      SELECT 1 AS found FROM orchestration_v2_projection_runs
+      WHERE thread_id = ${threadId} AND completed_at IS NULL LIMIT 1
+    `.pipe(mapFailure("Failed to read the thread's runs"));
+    return rows.length > 0;
+  });
+
+  /**
+   * Append turns another Claude client added to a session T3 had already continued. Each batch
+   * re-checks for a T3 run, whose own lines would otherwise interleave with these.
+   */
+  const appendOutsideT3 = Effect.fn("ClaudeTranscriptSync.appendOutsideT3")(function* (input: {
+    readonly state: SyncState;
+    readonly threadId: ThreadId;
+    readonly messages: ReadonlyArray<ParsedClaudeMessage>;
+    readonly updatedAt: DateTime.Utc;
+  }) {
+    const { state, threadId } = input;
+    // Message ids are global: never move a message another thread owns.
+    const toImport = input.messages.filter((message) => {
+      const owner = state.messageOwnerIndex.get(message.uuid);
+      return owner === undefined || owner === threadId;
+    });
+    if (toImport.length === 0) return undefined;
+    for (const batch of chunks(toImport, MESSAGE_BATCH_SIZE)) {
+      if (yield* runInProgress(threadId)) {
+        return {
+          kind: "skipped-forked",
+          threadId,
+          reason: "a T3 turn started during this sweep",
+        } satisfies ClaudeSessionOutcome;
+      }
+      // Run-less items otherwise sort ahead of every run; the allocator keeps a reserved position.
+      const placements = encodeJson(
+        batch.map((message, index) => ({
+          id: importTurnItemId(threadId, message.uuid),
+          offset: index + 1,
+        })),
+      );
+      yield* sql`
+        INSERT INTO orchestration_v2_turn_item_positions (thread_id, turn_item_id, ordinal)
+        SELECT
+          ${threadId},
+          json_extract(placement.value, '$.id'),
+          base.ordinal + json_extract(placement.value, '$.offset')
+        FROM json_each(${placements}) AS placement,
+          (SELECT COALESCE(MAX(ordinal), 0) AS ordinal
+           FROM orchestration_v2_turn_item_positions WHERE thread_id = ${threadId}) AS base
+        WHERE true
+        ON CONFLICT(thread_id, turn_item_id) DO NOTHING
+      `.pipe(mapFailure("Failed to place the messages after T3's turns"));
+      yield* writeEvents(
+        batch.flatMap((message) =>
+          messageEvents({ threadId, message, fallbackAt: input.updatedAt }),
+        ),
+      );
+      for (const message of batch) state.messageOwnerIndex.set(message.uuid, threadId);
+      yield* Effect.yieldNow;
+    }
+    const rows = yield* sql<{ readonly payload_json: string }>`
+      SELECT payload_json FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
+    `.pipe(mapFailure("Failed to read the thread"));
+    const current = rows[0] === undefined ? undefined : decodeStoredAppThread(rows[0].payload_json);
+    if (current !== undefined && DateTime.isGreaterThan(input.updatedAt, current.updatedAt)) {
+      const suffix = yield* randomUuidV4;
+      yield* writeEvents([
+        {
+          id: EventId.make(`${IMPORT_EVENT_PREFIX}:thread:${threadId}:outside-t3:${suffix}`),
+          type: "thread.metadata-updated",
+          threadId,
+          providerInstanceId: current.providerInstanceId,
+          occurredAt: input.updatedAt,
+          payload: { ...current, updatedAt: input.updatedAt },
+        },
+      ]);
+    }
+    return {
+      kind: "updated",
+      threadId,
+      appended: toImport.length,
+      continuedOutsideT3: true,
+    } satisfies ClaudeSessionOutcome;
+  });
+
+  /**
+   * A session T3 started (or forked) and the Claude Code CLI then resumed: pull the CLI's turns into
+   * the thread that resumes it. Undefined keeps the plain `skipped-owned` outcome.
+   */
+  const pullIntoOwnedThread = Effect.fn("ClaudeTranscriptSync.pullIntoOwnedThread")(function* (
+    state: SyncState,
+    session: ParsedClaudeSession,
+    threadId: ThreadId,
+  ) {
+    const rows = yield* sql<{
+      readonly deleted_at: string | null;
+      readonly driver: string;
+      readonly native_id: string | null;
+    }>`
+      SELECT
+        thread.deleted_at,
+        provider.driver,
+        json_extract(provider.payload_json, '$.nativeThreadRef.nativeId') AS native_id
+      FROM orchestration_v2_projection_threads AS thread
+      JOIN orchestration_v2_projection_provider_threads AS provider
+        ON provider.provider_thread_id = thread.active_provider_thread_id
+      WHERE thread.thread_id = ${threadId}
+      LIMIT 1
+    `.pipe(mapFailure("Failed to read the owning thread"));
+    const row = rows[0];
+    // Only the session the thread resumes next: an older binding's later turns are not this thread's.
+    if (
+      row === undefined ||
+      row.deleted_at !== null ||
+      row.driver !== CLAUDE_DRIVER_KIND ||
+      row.native_id !== session.sessionId.trim()
+    ) {
+      return undefined;
+    }
+    const runs = yield* loadRunWindows(threadId);
+    if (runs.length === 0) return undefined;
+    const messageRows = yield* sql<{ readonly message_id: string }>`
+      SELECT message_id FROM orchestration_v2_projection_messages WHERE thread_id = ${threadId}
+    `.pipe(mapFailure("Failed to read the owning thread's messages"));
+    const plan = planExternalAppend({
+      session,
+      existingMessageIds: new Set(messageRows.map((message) => message.message_id)),
+      runs,
+    });
+    if (plan.kind !== "append") return undefined;
+    const now = yield* DateTime.now;
+    return yield* appendOutsideT3({
+      state,
+      threadId,
+      messages: plan.newMessages,
+      updatedAt: utcOr(session.endedAt, now),
+    });
+  });
+
   /** Bind an existing import thread that never got its provider thread. */
   const ensureResumable = Effect.fn("ClaudeTranscriptSync.ensureResumable")(function* (
     state: SyncState,
@@ -644,7 +841,8 @@ export const make = Effect.gen(function* () {
     // or the forkSession target of an import continued under v1).
     const ownerThreadId = state.ownedSessionIds.get(sessionId);
     if (ownerThreadId !== undefined) {
-      return { kind: "skipped-owned", ownerThreadId } satisfies ClaudeSessionOutcome;
+      const pulled = yield* pullIntoOwnedThread(state, session, ThreadId.make(ownerThreadId));
+      return pulled ?? ({ kind: "skipped-owned", ownerThreadId } satisfies ClaudeSessionOutcome);
     }
 
     const threadId = ThreadId.make(`${CLAUDE_IMPORT_THREAD_ID_PREFIX}${sessionId}`);
@@ -658,6 +856,10 @@ export const make = Effect.gen(function* () {
       // background; planning against a partial message set would duplicate.
       return { kind: "skipped-pending-migration", threadId } satisfies ClaudeSessionOutcome;
     }
+    const runs =
+      existing !== undefined && state.threadsWithRuns.has(threadId)
+        ? yield* loadRunWindows(threadId)
+        : [];
     const plan = planThreadSync({
       session,
       existingThread:
@@ -665,7 +867,7 @@ export const make = Effect.gen(function* () {
           ? null
           : {
               deletedAt: existing.deletedAt,
-              hasTurns: state.threadsWithRuns.has(threadId),
+              runs,
               messages: (state.importThreadMessages.get(threadId) ?? []).map((message) => ({
                 id: message.id,
                 turnId: message.runId,
@@ -684,12 +886,37 @@ export const make = Effect.gen(function* () {
           reason: plan.reason,
         } satisfies ClaudeSessionOutcome;
       case "unchanged": {
+        if (runs.length > 0) {
+          return {
+            kind: "skipped-forked",
+            threadId,
+            reason: "continued in T3 and nothing new outside it",
+          } satisfies ClaudeSessionOutcome;
+        }
         const rebound = yield* ensureResumable(state, threadId, sessionId);
         return { kind: "unchanged", threadId, rebound } satisfies ClaudeSessionOutcome;
       }
       case "create":
       case "append":
         break;
+    }
+
+    if (plan.kind === "append" && runs.length > 0) {
+      const now = yield* DateTime.now;
+      const appended = yield* appendOutsideT3({
+        state,
+        threadId,
+        messages: plan.newMessages,
+        updatedAt: utcOr(session.endedAt, now),
+      });
+      return (
+        appended ??
+        ({
+          kind: "skipped-forked",
+          threadId,
+          reason: "continued in T3 and nothing new outside it",
+        } satisfies ClaudeSessionOutcome)
+      );
     }
 
     if (plan.kind === "create") {
@@ -760,6 +987,7 @@ export const make = Effect.gen(function* () {
         kind: "updated",
         threadId,
         appended: toImport.length,
+        continuedOutsideT3: false,
       } satisfies ClaudeSessionOutcome;
     }
 
@@ -917,9 +1145,10 @@ export const make = Effect.gen(function* () {
         }
         transcriptPaths.sort();
 
-        const state = yield* loadState;
+        const state = yield* loadState(undefined);
         const counters = emptyCounters();
         const lines: Array<string> = [];
+        const continuedOutsideT3: Array<ThreadId> = [];
         const seenSessionIds = new Set<string>();
 
         for (const transcriptPath of transcriptPaths) {
@@ -974,7 +1203,10 @@ export const make = Effect.gen(function* () {
           // Sessions inside a T3-managed worktree can only have been spawned by
           // T3 itself (also covers T3 sessions the owned guard cannot see).
           const cwd = session.cwd.trim();
-          if (cwd === worktreesDir || cwd.startsWith(worktreesPrefix)) {
+          if (
+            !state.ownedSessionIds.has(sessionId) &&
+            (cwd === worktreesDir || cwd.startsWith(worktreesPrefix))
+          ) {
             counters.skippedWorktree += 1;
             lines.push(`skipped-worktree sessionId=${sessionId} cwd=${cwd}`);
             continue;
@@ -992,6 +1224,9 @@ export const make = Effect.gen(function* () {
             continue;
           }
           lines.push(recordOutcome(counters, sessionId, outcome.success));
+          if (outcome.success.kind === "updated" && outcome.success.continuedOutsideT3) {
+            continuedOutsideT3.push(outcome.success.threadId);
+          }
           if (fingerprint !== undefined) {
             const settled =
               outcome.success.kind === "created" || outcome.success.kind === "updated"
@@ -1009,7 +1244,7 @@ export const make = Effect.gen(function* () {
           }
         }
 
-        return { lines, counters } satisfies ClaudeImportReport;
+        return { lines, counters, continuedOutsideT3 } satisfies ClaudeImportReport;
       }),
     );
 
@@ -1043,13 +1278,21 @@ export const make = Effect.gen(function* () {
         const session = parseClaudeTranscript(yield* readTranscript(transcriptPath), {
           sessionIdFromFilename: sessionIdFromFilename(transcriptPath),
         });
-        const state = yield* loadState;
+        const state = yield* loadState({
+          threadId: ThreadId.make(`${CLAUDE_IMPORT_THREAD_ID_PREFIX}${session.sessionId.trim()}`),
+          messageIds: session.messages.map((message) => message.uuid),
+        });
         const counters = emptyCounters();
         counters.total = 1;
         const outcome = yield* syncSession({ state, session, instanceId });
         fileOutcomeCache.delete(transcriptPath);
         const line = recordOutcome(counters, session.sessionId.trim(), outcome);
-        return { lines: [line], counters } satisfies ClaudeImportReport;
+        return {
+          lines: [line],
+          counters,
+          continuedOutsideT3:
+            outcome.kind === "updated" && outcome.continuedOutsideT3 ? [outcome.threadId] : [],
+        } satisfies ClaudeImportReport;
       }),
     );
 

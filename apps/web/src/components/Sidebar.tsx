@@ -123,6 +123,8 @@ import {
   useAcknowledgeThreadWoke,
   useThreadActions,
 } from "../hooks/useThreadActions";
+import { useClaudeTerminalHandoff } from "../hooks/useClaudeTerminalHandoff";
+import { isClaudeSessionThread } from "../lib/claudeTerminalHandoff";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
@@ -950,6 +952,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     archiveThread,
     deleteThread,
   } = useThreadActions();
+  const { continueInTerminal, syncTerminalTurns } = useClaudeTerminalHandoff();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -2703,6 +2706,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           isRunning: !threadRuntimeCanArchive(thread.runtime),
           canShareWithGuest: appAtomRegistry.get(canShareWithGuestAtom(threadRef.environmentId)),
           canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+          isClaudeSession: isClaudeSessionThread(thread),
           supports: {
             settlement: configLoaded,
             autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2864,6 +2868,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           }
           case "mark-unread":
             markThreadUnread(threadRef);
+            return;
+          case "claude-code:continue":
+            await continueInTerminal(threadRef);
+            return;
+          case "claude-code:sync":
+            await syncTerminalTurns(threadRef);
             return;
           case "copy-path":
             if (!threadWorkspacePath) {

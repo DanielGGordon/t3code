@@ -6,6 +6,9 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "turn-into-project"
+  | "claude-code"
+  | "claude-code:continue"
+  | "claude-code:sync"
   | "project-settings"
   | "pin"
   | "unpin"
@@ -95,6 +98,8 @@ export interface ThreadActionMenuState {
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
   readonly canTurnIntoProject?: boolean;
+  /** Fork: the conversation is a Claude session the Claude Code CLI can resume. */
+  readonly isClaudeSession?: boolean;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -200,6 +205,23 @@ export function buildThreadActionMenuItems(
             label: "Turn into project",
             icon: "folder-plus",
             disabled: state.isRunning,
+          },
+        ]
+      : []),
+    ...(state.isClaudeSession
+      ? [
+          {
+            id: "claude-code" as const,
+            label: "Claude Code",
+            icon: "terminal",
+            children: [
+              {
+                id: "claude-code:continue" as const,
+                label: "Continue in terminal",
+                disabled: state.isRunning,
+              },
+              { id: "claude-code:sync" as const, label: "Sync terminal turns" },
+            ],
           },
         ]
       : []),

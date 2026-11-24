@@ -1,8 +1,7 @@
 /**
- * Pure planning logic for incremental Claude transcript sync: `create`, `append`, `unchanged`,
- * `skip-forked` (continued inside T3; appending would corrupt it) or `skip-deleted` (never resurrect,
- * including a stream that existed but lost its projection row). Dedup is an exact id-set check on
- * transcript uuids. Dependency-free (no Effect/T3 imports) so it can be extracted.
+ * Pure planning for the Claude transcript sync. Once T3 has run turns on a session, Claude appends
+ * them to the same transcript, so only lines outside every T3 run window are another client's (the
+ * Claude Code CLI). Dependency-free (no Effect/T3 imports) so it can be extracted.
  */
 
 import type { ParsedClaudeMessage, ParsedClaudeSession } from "./claudeTranscript.ts";
@@ -13,11 +12,20 @@ export interface ExistingThreadMessageView {
   readonly turnId: string | null;
 }
 
+/** When one T3 run could have written to the transcript; `completedAtMs` is null while it runs. */
+export interface RunWindowView {
+  readonly requestedAtMs: number;
+  readonly completedAtMs: number | null;
+}
+
+/** Claude can stamp a run's last lines just after T3 records the run's completion. */
+export const RUN_WINDOW_TRAILING_SLACK_MS = 5_000;
+
 /** Minimal view of the existing T3 thread the session maps to. */
 export interface ExistingThreadView {
   readonly deletedAt: string | null;
-  /** True when the thread has any provider turn (read model `latestTurn`). */
-  readonly hasTurns: boolean;
+  /** Every T3 run on the thread; empty when T3 never continued it. */
+  readonly runs: ReadonlyArray<RunWindowView>;
   readonly messages: ReadonlyArray<ExistingThreadMessageView>;
 }
 
@@ -27,6 +35,58 @@ export type ThreadSyncPlan =
   | { readonly kind: "unchanged" }
   | { readonly kind: "skip-deleted" }
   | { readonly kind: "skip-forked"; readonly reason: string };
+
+/** Unparseable timestamps count as inside: a line T3 may have written is never imported. */
+function writtenDuringRun(timestamp: string, runs: ReadonlyArray<RunWindowView>): boolean {
+  const at = Date.parse(timestamp);
+  if (Number.isNaN(at)) return true;
+  return runs.some(
+    (run) =>
+      at >= run.requestedAtMs &&
+      (run.completedAtMs === null || at <= run.completedAtMs + RUN_WINDOW_TRAILING_SLACK_MS),
+  );
+}
+
+/** The entrypoint T3 Code gives the Claude processes it runs (`ClaudeHome.ts`). */
+export const T3_CLAUDE_ENTRYPOINT = "t3-code";
+const TASK_NOTIFICATION_PREFIX = "<task-notification>";
+
+const isTaskNotification = (message: ParsedClaudeMessage) =>
+  message.role === "user" && message.text.trimStart().startsWith(TASK_NOTIFICATION_PREFIX);
+
+/**
+ * Messages a session's transcript gained outside T3: not on the thread yet, written while no T3 run
+ * was in flight, and not by T3's own process, which also writes between runs (background-task
+ * notifications and the replies to them; older builds stamped those `sdk-ts`). Nothing is planned
+ * while a run is in flight, because its lines are still landing.
+ */
+export function planExternalAppend(input: {
+  readonly session: ParsedClaudeSession;
+  readonly existingMessageIds: ReadonlySet<string>;
+  readonly runs: ReadonlyArray<RunWindowView>;
+}): ThreadSyncPlan {
+  if (input.runs.some((run) => run.completedAtMs === null)) {
+    return { kind: "skip-forked", reason: "a T3 turn is in progress" };
+  }
+  // Older lines belong to the history T3 took over (an import, or the copy a fork starts from).
+  const firstRunAtMs = Math.min(...input.runs.map((run) => run.requestedAtMs));
+  const newMessages: Array<ParsedClaudeMessage> = [];
+  let answeringNotification = false;
+  for (const message of input.session.messages) {
+    if (message.role === "user") answeringNotification = isTaskNotification(message);
+    if (
+      input.existingMessageIds.has(message.uuid) ||
+      !(Date.parse(message.timestamp) >= firstRunAtMs) ||
+      writtenDuringRun(message.timestamp, input.runs) ||
+      message.entrypoint === T3_CLAUDE_ENTRYPOINT ||
+      answeringNotification
+    ) {
+      continue;
+    }
+    newMessages.push(message);
+  }
+  return newMessages.length === 0 ? { kind: "unchanged" } : { kind: "append", newMessages };
+}
 
 export function planThreadSync(input: {
   readonly session: ParsedClaudeSession;
@@ -52,14 +112,13 @@ export function planThreadSync(input: {
     return { kind: "skip-deleted" };
   }
 
-  // Fork-safety guard: any evidence of the normal T3 pipeline means the
-  // thread has diverged from the source transcript.
-  if (existingThread.hasTurns) {
-    return {
-      kind: "skip-forked",
-      reason: "thread has provider turns (it was continued in T3)",
-    };
+  const existingMessageIds = new Set(existingThread.messages.map((message) => message.id));
+  // Continued in T3: its own turns are in the transcript too, so only lines written between runs
+  // are new.
+  if (existingThread.runs.length > 0) {
+    return planExternalAppend({ session, existingMessageIds, runs: existingThread.runs });
   }
+  // Without run rows nothing tells T3's lines apart from anyone else's.
   const turnBound = existingThread.messages.find((message) => message.turnId !== null);
   if (turnBound !== undefined) {
     return {
@@ -76,8 +135,7 @@ export function planThreadSync(input: {
     };
   }
 
-  const existingIds = new Set(existingThread.messages.map((message) => message.id));
-  const newMessages = session.messages.filter((message) => !existingIds.has(message.uuid));
+  const newMessages = session.messages.filter((message) => !existingMessageIds.has(message.uuid));
   if (newMessages.length === 0) {
     return { kind: "unchanged" };
   }

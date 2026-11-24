@@ -195,6 +195,7 @@ import { forkRouteLayer } from "./fork/http.ts";
 import * as NotificationService from "./notifications/NotificationService.ts";
 import { notificationRouteLayer } from "./notifications/http.ts";
 import * as ClaudeResumeBindings from "./import/ClaudeResumeBindings.ts";
+import * as ClaudeTerminalHandoff from "./import/ClaudeTerminalHandoff.ts";
 import * as ClaudeTranscriptSync from "./import/ClaudeTranscriptSync.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -713,8 +714,13 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Fork: Claude transcript mirror (`t3 import sync`) and resume-binding repair
   // (`t3 session reset`, startup restore for migrated v1 Claude threads). Shares
   // the runtime's EventSink instance (layers memoize by reference).
-  Layer.mergeAll(ClaudeTranscriptSync.layer, ClaudeResumeBindings.layer).pipe(
-    Layer.provide(RuntimeLayer.layerEventSink),
+  // The terminal handoff shares the same sync instance (one sweep lock and file cache).
+  ClaudeTerminalHandoff.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(ClaudeTranscriptSync.layer, ClaudeResumeBindings.layer).pipe(
+        Layer.provide(RuntimeLayer.layerEventSink),
+      ),
+    ),
   ),
   // Fork: external notifications. One instance serves the inbound HTTP routes and the
   // WebSocket RPCs, so a push reaches every subscriber.

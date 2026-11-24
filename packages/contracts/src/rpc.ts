@@ -100,6 +100,10 @@ import {
   AgentSessionScanInput,
   AgentSessionScanResult,
   AgentSessionScanError,
+  ClaudeTerminalHandoffError,
+  ClaudeTerminalHandoffInput,
+  ClaudeTerminalHandoffResult,
+  ClaudeTerminalPullResult,
 } from "./agentSessions.ts";
 import {
   AssetAccessError,
@@ -441,6 +445,9 @@ export const WS_METHODS = {
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  // Fork: Claude Code CLI <-> T3 handoff.
+  threadClaudeTerminalHandoff: "thread.claudeTerminalHandoff",
+  threadClaudeTerminalPull: "thread.claudeTerminalPull",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -1469,6 +1476,18 @@ const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   ]),
 });
 
+const WsThreadClaudeTerminalHandoffRpc = Rpc.make(WS_METHODS.threadClaudeTerminalHandoff, {
+  payload: ClaudeTerminalHandoffInput,
+  success: ClaudeTerminalHandoffResult,
+  error: Schema.Union([ClaudeTerminalHandoffError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadClaudeTerminalPullRpc = Rpc.make(WS_METHODS.threadClaudeTerminalPull, {
+  payload: ClaudeTerminalHandoffInput,
+  success: ClaudeTerminalPullResult,
+  error: Schema.Union([ClaudeTerminalHandoffError, EnvironmentAuthorizationError]),
+});
+
 const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   payload: AssetCreateUrlInput,
   success: AssetCreateUrlResult,
@@ -2274,6 +2293,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsThreadClaudeTerminalHandoffRpc,
+  WsThreadClaudeTerminalPullRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,
